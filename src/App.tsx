@@ -5,6 +5,8 @@ import SyncTasksView from './views/SyncTasksView';
 import ActivityLogView from './views/ActivityLogView';
 import SettingsView from './views/SettingsView';
 import { useSettings } from './hooks/useSettings';
+import { PageTransition } from './components/ui/Animations';
+import { ToastProvider } from './components/ui/Toast';
 
 /**
  * SyncWatcher App - Main application component
@@ -32,9 +34,13 @@ function App() {
   };
 
   return (
-    <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
-      {renderContent()}
-    </AppShell>
+    <ToastProvider>
+      <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
+        <PageTransition pageKey={activeTab}>
+          {renderContent()}
+        </PageTransition>
+      </AppShell>
+    </ToastProvider>
   );
 }
 

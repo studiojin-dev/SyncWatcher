@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import VolumeCard from '../components/VolumeCard';
+import { CardAnimation, FadeIn } from '../components/ui/Animations';
 
 interface VolumeInfo {
     name: string;
@@ -13,7 +14,7 @@ interface VolumeInfo {
 
 /**
  * Dashboard View - Main view showing connected volumes
- * Bento Grid layout for volume cards
+ * Bento Grid layout for volume cards with staggered animation
  */
 function DashboardView() {
     const { t } = useTranslation();
@@ -39,18 +40,20 @@ function DashboardView() {
     }, [loadVolumes]);
 
     return (
-        <div className="fade-in">
-            <header style={{ marginBottom: 'var(--space-8)' }}>
-                <h1 className="text-xl" style={{ fontWeight: 'var(--weight-normal)', marginBottom: 'var(--space-2)' }}>
-                    {t('dashboard.title')}
-                </h1>
-                <p className="text-secondary text-sm">
-                    {volumes.length > 0
-                        ? `${volumes.length} ${t('dashboard.connected')}`
-                        : t('dashboard.noDevices')
-                    }
-                </p>
-            </header>
+        <div>
+            <FadeIn>
+                <header style={{ marginBottom: 'var(--space-8)' }}>
+                    <h1 className="text-xl" style={{ fontWeight: 'var(--weight-normal)', marginBottom: 'var(--space-2)' }}>
+                        {t('dashboard.title')}
+                    </h1>
+                    <p className="text-secondary text-sm">
+                        {volumes.length > 0
+                            ? `${volumes.length} ${t('dashboard.connected')}`
+                            : t('dashboard.noDevices')
+                        }
+                    </p>
+                </header>
+            </FadeIn>
 
             {error && (
                 <div className="card status-error" style={{ marginBottom: 'var(--space-6)' }}>
@@ -67,8 +70,10 @@ function DashboardView() {
                 </div>
             ) : (
                 <div className="bento-grid">
-                    {volumes.map((volume) => (
-                        <VolumeCard key={volume.mount_point} volume={volume} />
+                    {volumes.map((volume, index) => (
+                        <CardAnimation key={volume.mount_point} index={index}>
+                            <VolumeCard volume={volume} />
+                        </CardAnimation>
                     ))}
                 </div>
             )}
