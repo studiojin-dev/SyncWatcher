@@ -158,7 +158,7 @@ impl SyncEngine {
         self.compare_dirs(options).await
     }
 
-    pub async fn sync_files(&self, options: &SyncOptions, progress: impl Fn(u64, u64)) -> Result<SyncResult> {
+    pub async fn sync_files(&self, options: &SyncOptions, progress_callback: impl Fn(crate::sync_engine::types::SyncProgress)) -> Result<SyncResult> {
         let dry_run = self.compare_dirs(options).await?;
 
         let mut result = SyncResult {
@@ -169,6 +169,7 @@ impl SyncEngine {
         };
 
         let mut total_bytes = 0u64;
+        let mut total_files_to_copy = 0u64;
 
         for diff in &dry_run.diffs {
             match diff.kind {
@@ -176,10 +177,24 @@ impl SyncEngine {
                     if let Some(size) = diff.source_size {
                         total_bytes += size;
                     }
+                    total_files_to_copy += 1;
                 }
                 _ => {}
             }
         }
+
+        let mut current_progress = crate::sync_engine::types::SyncProgress {
+            phase: crate::sync_engine::types::SyncPhase::Copying,
+            current_file: None,
+            total_files: total_files_to_copy,
+            processed_files: 0,
+            total_bytes,
+            processed_bytes: 0,
+            bytes_copied_current_file: 0,
+        };
+
+        // Initial progress report
+        progress_callback(current_progress.clone());
 
         for diff in &dry_run.diffs {
             let source_path = self.source.join(&diff.path);
@@ -187,8 +202,18 @@ impl SyncEngine {
 
             match diff.kind {
                 FileDiffKind::New | FileDiffKind::Modified => {
-                    if let Err(e) = self.copy_file(&source_path, &target_path, options).await {
-                        let kind = if e.to_string().contains("Verification failed") {
+                    current_progress.current_file = Some(diff.path.to_string_lossy().to_string());
+                    current_progress.bytes_copied_current_file = 0;
+                    progress_callback(current_progress.clone());
+
+                    let file_size = diff.source_size.unwrap_or(0);
+
+                    if let Err(e) = self.copy_file_chunked(&source_path, &target_path, options, |written_chunk| {
+                        current_progress.processed_bytes += written_chunk;
+                        current_progress.bytes_copied_current_file += written_chunk;
+                        progress_callback(current_progress.clone());
+                    }).await {
+                         let kind = if e.to_string().contains("Verification failed") {
                             crate::sync_engine::types::SyncErrorKind::VerificationFailed
                         } else {
                             crate::sync_engine::types::SyncErrorKind::CopyFailed
@@ -198,15 +223,21 @@ impl SyncEngine {
                             message: e.to_string(),
                             kind,
                         });
+                        // If failed, we might need to adjust processed bytes back if we want strictly accurate 'successful' bytes,
+                        // but typically progress just moves forward.
                     } else {
                         result.files_copied += 1;
-                        if let Some(size) = diff.source_size {
-                            result.bytes_copied += size;
-                            progress(result.bytes_copied, total_bytes);
-                        }
+                        result.bytes_copied += file_size;
                     }
+                    
+                    current_progress.processed_files += 1;
+                    progress_callback(current_progress.clone());
                 }
                 FileDiffKind::Deleted => {
+                    current_progress.phase = crate::sync_engine::types::SyncPhase::Deleting;
+                    current_progress.current_file = Some(diff.path.to_string_lossy().to_string());
+                    progress_callback(current_progress.clone());
+
                     if let Err(e) = fs::remove_file(&target_path).await {
                         result.errors.push(crate::sync_engine::types::SyncError {
                             path: diff.path.clone(),
@@ -216,6 +247,7 @@ impl SyncEngine {
                     } else {
                         result.files_deleted += 1;
                     }
+                    current_progress.phase = crate::sync_engine::types::SyncPhase::Copying; // Revert phase
                 }
             }
         }
@@ -223,12 +255,25 @@ impl SyncEngine {
         Ok(result)
     }
 
-    async fn copy_file(&self, source: &Path, target: &Path, options: &SyncOptions) -> Result<()> {
+    async fn copy_file_chunked(&self, source: &Path, target: &Path, options: &SyncOptions, mut on_progress: impl FnMut(u64)) -> Result<()> {
+        use tokio::io::AsyncWriteExt; // Import for write_all
+
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).await?;
         }
 
-        fs::copy(source, target).await?;
+        let mut source_file = fs::File::open(source).await?;
+        let mut target_file = fs::File::create(target).await?;
+        let mut buffer = [0u8; 64 * 1024]; // 64KB chunks
+
+        loop {
+            let n = source_file.read(&mut buffer).await?;
+            if n == 0 {
+                break;
+            }
+            target_file.write_all(&buffer[..n]).await?;
+            on_progress(n as u64);
+        }
 
         if options.preserve_permissions {
             let meta = fs::metadata(source).await?;
@@ -247,7 +292,6 @@ impl SyncEngine {
             let target_hash = self.calculate_checksum(target).await?;
 
             if source_hash != target_hash {
-                // Delete the corrupted target file to avoid leaving bad data
                 let _ = fs::remove_file(target).await;
                 anyhow::bail!("Verification failed: Checksum mismatch for {:?}", target);
             }
@@ -276,7 +320,7 @@ mod tests {
         let dry_run = engine.dry_run(&options).await?;
         assert_eq!(dry_run.files_to_copy, 1);
 
-        let result = engine.sync_files(&options, |_, _| {}).await?;
+        let result = engine.sync_files(&options, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
 
         Ok(())

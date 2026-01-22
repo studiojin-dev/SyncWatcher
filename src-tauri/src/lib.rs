@@ -32,11 +32,38 @@ async fn sync_dry_run(
         .map_err(|e| e.to_string())
 }
 
+use tauri::{Emitter, Window}; // Add Window and Emitter traits
+
 #[tauri::command]
 fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
     let monitor = DiskMonitor::new();
     monitor.list_volumes()
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn start_sync(
+    window: Window,
+    source: PathBuf,
+    target: PathBuf,
+    delete_missing: bool,
+    checksum_mode: bool,
+    verify_after_copy: bool,
+) -> Result<sync_engine::types::SyncResult, String> {
+    let engine = SyncEngine::new(source, target);
+    let options = SyncOptions {
+        delete_missing,
+        checksum_mode,
+        preserve_permissions: true,
+        preserve_times: true,
+        verify_after_copy,
+    };
+
+    engine.sync_files(&options, move |progress| {
+        let _ = window.emit("sync-progress", progress);
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -46,7 +73,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             sync_dry_run,
+            sync_dry_run,
             list_volumes,
+            start_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

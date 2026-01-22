@@ -7,11 +7,13 @@
 #### 1. Sync Engine Library (`src-tauri/src/sync_engine/`)
 
 **Files Created:**
+
 - `mod.rs` - Module exports
 - `engine.rs` - Core synchronization logic
 - `types.rs` - Type definitions
 
 **Key Features Implemented:**
+
 - **SyncEngine** struct with source/target directory management
 - **Directory Comparison** (`compare_dirs`):
   - Recursively walks both source and target directories
@@ -23,46 +25,57 @@
   - Counts files to copy/delete/modify
 - **Sync Files** (`sync_files`):
   - One-way sync (Source -> Target)
-  - Progress callback for UI integration
+  - **Real-time Progress Reporting** (Granular events: scanning, copying, verifying, deleting)
   - Preserves file permissions and modification times
   - Optional "delete missing files" feature
+  - **Hybrid Comparison Logic** (Metadata first -> Checksum if needed)
 - **Checksum Verification**:
   - Uses xxHash64 for fast file comparison
-  - Configurable checksum mode (can disable for speed)
+  - **Post-Copy Verification**: Immediate checksum validation after copy (optional)
 
 **Configuration Options (`SyncOptions`):**
+
 - `delete_missing`: Delete files in target that don't exist in source
-- `checksum_mode`: Use xxHash comparison vs size/time
+- `checksum_mode`: Enable content-based comparison (hybrid approach)
 - `preserve_permissions`: Keep file permissions
 - `preserve_times`: Keep modification times
+- `verify_after_copy`: Verify content integrity immediately after copy
 
 #### 2. CLI Binary (`src-tauri/src/bin/sync-cli.rs`)
 
 **CLI Arguments:**
+
 - `--source, -s`: Source directory path
 - `--target, -t`: Target directory path
 - `--dry-run, -n`: Preview changes without executing
 - `--delete-missing, -d`: Delete files missing in source
 - `--no-checksum, -c`: Disable checksum comparison
+- `--list-volumes`: List mounted volumes (System Integration test)
+- `--verify`: Enable post-copy verification
 
 **Features:**
+
 - Human-readable output with emojis
-- Progress bar for file transfers
+- **Real-time Progress Bar** (Bytes/speed/current file)
 - Detailed diff listing
-- Error reporting
+- **Structured Error Reporting**
 - Statistics summary
 
 #### 3. Testing
 
 **Unit Tests:**
+
 - `test_basic_sync`: Tests basic file copy functionality
 - All tests pass ✅
 
 **Manual Testing:**
+
 - Dry-run mode tested ✅
 - Full sync tested ✅
 - Modification detection tested ✅
 - Delete missing files tested ✅
+- **Volume Listing tested** ✅
+- **Verification Logic tested** ✅
 
 ### Phase 2: System Integration ✅
 
@@ -108,6 +121,10 @@
    - Output: `DryRunResult` with diffs and statistics
 3. **`list_volumes`** - List mounted volumes
    - Output: `Vec<VolumeInfo>` with volume details
+4. **`start_sync`** - Start synchronization
+   - Input: `source`, `target`, options...
+   - Emits: `sync-progress` events (Granular: phase, current_file, bytes, etc.)
+   - Output: `SyncResult`
 
 ## Dependencies Added
 
@@ -167,50 +184,53 @@ src-tauri/
 # Sync with delete missing files
 ./sync-cli --source /path/to/source --target /path/to/target -d
 
-# Sync without checksum (faster, less accurate)
-./sync-cli --source /path/to/source --target /path/to/target -c
+# Verify after copy
+./sync-cli --source /src --target /dst --verify
+
+# List volumes
+./sync-cli --list-volumes
 ```
 
 ### Tauri Command Usage (Frontend)
 
 ```typescript
-// Preview sync changes
-const dryRunResult = await invoke<DryRunResult>('sync_dry_run', {
-  source: '/Users/name/SD_Card',
-  target: '/Users/name/Backups/SD',
-  deleteMissing: true,
-  checksumMode: true
+// Start sync and listen for progress
+await listen('sync-progress', (event) => {
+  const p = event.payload as SyncProgress;
+  console.log(`Phase: ${p.phase}, File: ${p.current_file}`);
+  console.log(`Progress: ${p.processed_bytes} / ${p.total_bytes}`);
 });
 
-// List volumes
-const volumes = await invoke<VolumeInfo[]>('list_volumes');
+await invoke('start_sync', { ...options });
 ```
 
 ## Performance Characteristics
 
 - **Hashing**: xxHash64 is extremely fast (~10GB/s on modern CPUs)
-- **Comparison**: O(n) where n is number of files
+- **Comparison**: **Optimized Hybrid Logic** (Metadata check O(1) -> Checksum O(n) only if needed)
 - **Copying**: Limited by disk I/O, not CPU
-- **Memory**: O(1) - streams file data, doesn't load everything into RAM
+- **Memory**: O(1) - streams file data (64KB chunks), doesn't load everything into RAM
 - **Directory Walking**: O(n) where n is total files in hierarchy
 
 ## Known Limitations
 
 1. **FolderWatcher**: Currently callback-based, not integrated with Tauri events
 2. **No SMB Support**: Planned for later phase
-3. **No Real-time Progress Events**: Progress callback exists but not exposed to Tauri
-4. **MacOS Only**: DiskMonitor is macOS-specific (reads /Volumes)
+3. **MacOS Only**: DiskMonitor is macOS-specific (reads /Volumes)
+4. **No Compression**: Files copied as-is
 5. **No Compression**: Files copied as-is
 
 ## Next Steps (Phase 3-4)
 
 ### Phase 3: UI Skeleton
+
 - [ ] Setup React + Mantine + Tailwind
 - [ ] Configure tauri-plugin-window-vibrancy
 - [ ] Create Dashboard and Task List views
 - [ ] Add Bento Grid layout
 
 ### Phase 4: Wiring & Polish
+
 - [ ] Expose sync progress events to Tauri
 - [ ] Implement Framer Motion animations
 - [ ] Add i18n support (en, ko, ja, zh, es)

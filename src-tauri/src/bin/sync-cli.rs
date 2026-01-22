@@ -144,9 +144,15 @@ async fn main() -> anyhow::Result<()> {
         );
         pb.set_message("Synchronizing...");
 
-        match engine.sync_files(&options, |current, total| {
-            pb.set_length(total);
-            pb.set_position(current);
+        match engine.sync_files(&options, |progress| {
+             pb.set_length(progress.total_bytes);
+             pb.set_position(progress.processed_bytes);
+             
+             if let Some(file) = progress.current_file {
+                pb.set_message(format!("{:?} - {}", progress.phase, file));
+             } else {
+                 pb.set_message(format!("{:?}", progress.phase));
+             }
         }).await {
             Ok(result) => {
                 pb.finish_with_message("✅ Synchronization complete!");

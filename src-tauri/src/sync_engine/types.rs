@@ -72,6 +72,25 @@ pub struct DryRunResult {
     pub bytes_to_copy: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SyncPhase {
+    Scanning,
+    Copying,
+    Deleting,
+    Verifying,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncProgress {
+    pub phase: SyncPhase,
+    pub current_file: Option<String>,
+    pub total_files: u64,
+    pub processed_files: u64,
+    pub total_bytes: u64,
+    pub processed_bytes: u64,
+    pub bytes_copied_current_file: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
     pub path: PathBuf,
