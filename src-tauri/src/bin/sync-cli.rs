@@ -25,6 +25,9 @@ struct Cli {
 
     #[arg(long)]
     list_volumes: bool,
+
+    #[arg(long)]
+    verify: bool,
 }
 
 #[tokio::main]
@@ -74,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
         checksum_mode: !cli.no_checksum,
         preserve_permissions: true,
         preserve_times: true,
+        verify_after_copy: cli.verify,
     };
 
     if cli.dry_run {
@@ -154,7 +158,13 @@ async fn main() -> anyhow::Result<()> {
                 if !result.errors.is_empty() {
                     println!("   Errors: {}", result.errors.len());
                     for error in &result.errors {
-                        eprintln!("   ⚠️  {}", error);
+                        let kind_str = match error.kind {
+                            syncwatcher_lib::sync_engine::types::SyncErrorKind::CopyFailed => "Copy Failed",
+                            syncwatcher_lib::sync_engine::types::SyncErrorKind::DeleteFailed => "Delete Failed",
+                            syncwatcher_lib::sync_engine::types::SyncErrorKind::VerificationFailed => "Verification Failed",
+                            syncwatcher_lib::sync_engine::types::SyncErrorKind::Other => "Error",
+                        };
+                        eprintln!("   ⚠️  [{}] {:?}: {}", kind_str, error.path, error.message);
                     }
                 }
             }

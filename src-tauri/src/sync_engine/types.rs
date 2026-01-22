@@ -24,6 +24,7 @@ pub struct SyncOptions {
     pub checksum_mode: bool,
     pub preserve_permissions: bool,
     pub preserve_times: bool,
+    pub verify_after_copy: bool,
 }
 
 impl Default for SyncOptions {
@@ -33,8 +34,24 @@ impl Default for SyncOptions {
             checksum_mode: true,
             preserve_permissions: true,
             preserve_times: true,
+            verify_after_copy: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SyncErrorKind {
+    CopyFailed,
+    DeleteFailed,
+    VerificationFailed,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncError {
+    pub path: PathBuf,
+    pub message: String,
+    pub kind: SyncErrorKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,7 +59,7 @@ pub struct SyncResult {
     pub files_copied: u64,
     pub files_deleted: u64,
     pub bytes_copied: u64,
-    pub errors: Vec<String>,
+    pub errors: Vec<SyncError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

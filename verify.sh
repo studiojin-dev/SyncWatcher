@@ -11,6 +11,7 @@ cargo test
 cd ..
 
 echo "1. Creating test directories..."
+rm -rf /tmp/sync-test # Clean up previous run
 mkdir -p /tmp/sync-test/source/subdir
 mkdir -p /tmp/sync-test/target
 
@@ -27,10 +28,11 @@ echo "3. Running dry-run..."
   --dry-run
 
 echo
-echo "4. Running full sync..."
+echo "4. Running full sync with verification..."
 ./src-tauri/target/release/sync-cli \
   --source /tmp/sync-test/source \
-  --target /tmp/sync-test/target
+  --target /tmp/sync-test/target \
+  --verify
 
 echo
 echo "5. Verifying synced files..."

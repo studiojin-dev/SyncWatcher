@@ -24,6 +24,7 @@ async fn sync_dry_run(
         checksum_mode,
         preserve_permissions: true,
         preserve_times: true,
+        verify_after_copy: false, // Dry run doesn't copy, so this doesn't matter, but required for struct
     };
 
     engine.dry_run(&options)

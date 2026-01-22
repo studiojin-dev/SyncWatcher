@@ -188,7 +188,16 @@ impl SyncEngine {
             match diff.kind {
                 FileDiffKind::New | FileDiffKind::Modified => {
                     if let Err(e) = self.copy_file(&source_path, &target_path, options).await {
-                        result.errors.push(format!("Failed to copy {:?}: {}", diff.path, e));
+                        let kind = if e.to_string().contains("Verification failed") {
+                            crate::sync_engine::types::SyncErrorKind::VerificationFailed
+                        } else {
+                            crate::sync_engine::types::SyncErrorKind::CopyFailed
+                        };
+                        result.errors.push(crate::sync_engine::types::SyncError {
+                            path: diff.path.clone(),
+                            message: e.to_string(),
+                            kind,
+                        });
                     } else {
                         result.files_copied += 1;
                         if let Some(size) = diff.source_size {
@@ -199,7 +208,11 @@ impl SyncEngine {
                 }
                 FileDiffKind::Deleted => {
                     if let Err(e) = fs::remove_file(&target_path).await {
-                        result.errors.push(format!("Failed to delete {:?}: {}", diff.path, e));
+                        result.errors.push(crate::sync_engine::types::SyncError {
+                            path: diff.path.clone(),
+                            message: e.to_string(),
+                            kind: crate::sync_engine::types::SyncErrorKind::DeleteFailed,
+                        });
                     } else {
                         result.files_deleted += 1;
                     }
@@ -227,6 +240,17 @@ impl SyncEngine {
             let meta = fs::metadata(source).await?;
             let modified = meta.modified()?;
             filetime::set_file_mtime(target, filetime::FileTime::from_system_time(modified))?;
+        }
+
+        if options.verify_after_copy {
+            let source_hash = self.calculate_checksum(source).await?;
+            let target_hash = self.calculate_checksum(target).await?;
+
+            if source_hash != target_hash {
+                // Delete the corrupted target file to avoid leaving bad data
+                let _ = fs::remove_file(target).await;
+                anyhow::bail!("Verification failed: Checksum mismatch for {:?}", target);
+            }
         }
 
         Ok(())
