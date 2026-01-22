@@ -20,6 +20,56 @@ body {
   font-size: var(--text-sm);
 }
 
+.mantine-Select-input {
+  background-color: var(--bg-secondary);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+.mantine-Select-dropdown {
+  background-color: var(--bg-tertiary);
+  border-color: var(--accent-border);
+}
+
+.mantine-Select-option {
+  color: var(--text-primary);
+}
+
+.mantine-Select-option[data-checked] {
+  background-color: var(--accent-blue);
+  color: var(--text-primary);
+}
+
+.mantine-Select-option[data-hovered] {
+  background-color: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.mantine-Select-input {
+  background-color: var(--bg-secondary);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+.mantine-Select-dropdown {
+  background-color: var(--bg-tertiary);
+  border-color: var(--accent-border);
+}
+
+.mantine-Select-option {
+  color: var(--text-primary);
+}
+
+.mantine-Select-option[data-checked] {
+  background-color: var(--accent-blue);
+  color: var(--text-primary);
+}
+
+.mantine-Select-option[data-hovered] {
+  background-color: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
