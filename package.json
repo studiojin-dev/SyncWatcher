@@ -12,6 +12,8 @@
   "dependencies": {
     "@tabler/icons-react": "^3.22.0",
     "@tauri-apps/api": "^2.1.0",
+    "@tauri-apps/plugin-dialog": "~2.6.0",
+    "@tauri-apps/plugin-fs": "~2.4.5",
     "@tauri-apps/plugin-opener": "^2",
     "framer-motion": "^11.11.17",
     "i18next": "^24.0.2",

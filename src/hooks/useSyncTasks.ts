@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
+import { useYamlStore } from './useYamlStore';
 
 export interface SyncTask {
     id: string;
@@ -8,39 +9,15 @@ export interface SyncTask {
     enabled: boolean;
     deleteMissing: boolean;
     checksumMode: boolean;
+    watching?: boolean;
+    verifyAfterCopy?: boolean;
 }
 
-const STORAGE_KEY = 'syncwatcher_tasks';
-
-/**
- * Hook for managing sync tasks with localStorage persistence
- */
 export function useSyncTasks() {
-    const [tasks, setTasks] = useState<SyncTask[]>([]);
-    const [loaded, setLoaded] = useState(false);
-
-    // Load tasks from localStorage on mount
-    useEffect(() => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                setTasks(JSON.parse(stored));
-            }
-        } catch (err) {
-            console.error('Failed to load tasks:', err);
-        }
-        setLoaded(true);
-    }, []);
-
-    // Save to localStorage whenever tasks change
-    const saveTasks = useCallback((newTasks: SyncTask[]) => {
-        setTasks(newTasks);
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(newTasks));
-        } catch (err) {
-            console.error('Failed to save tasks:', err);
-        }
-    }, []);
+    const { data: tasks, saveData: saveTasks, loaded } = useYamlStore<SyncTask[]>({
+        fileName: 'tasks.yaml',
+        defaultData: [],
+    });
 
     const addTask = useCallback((task: Omit<SyncTask, 'id'>) => {
         const newTask: SyncTask = {
@@ -63,7 +40,10 @@ export function useSyncTasks() {
     }, [tasks, saveTasks]);
 
     const toggleTask = useCallback((id: string) => {
-        updateTask(id, { enabled: !tasks.find((t) => t.id === id)?.enabled });
+        const task = tasks.find((t) => t.id === id);
+        if (task) {
+            updateTask(id, { enabled: !task.enabled });
+        }
     }, [tasks, updateTask]);
 
     return {

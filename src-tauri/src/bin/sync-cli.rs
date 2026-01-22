@@ -2,7 +2,7 @@ use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
-use syncwatcher_lib::sync_engine::{SyncEngine, SyncOptions, FileDiffKind};
+use syncwatcher_lib::sync_engine::{FileDiffKind, SyncEngine, SyncOptions};
 
 #[derive(Parser)]
 #[command(name = "sync-cli")]
@@ -36,24 +36,32 @@ async fn main() -> anyhow::Result<()> {
 
     if cli.list_volumes {
         use syncwatcher_lib::system_integration::DiskMonitor;
-        
+
         println!("💾 Scanning for volumes...");
         let monitor = DiskMonitor::new();
         match monitor.list_volumes() {
             Ok(volumes) => {
                 println!("Found {} volume(s):", volumes.len());
-                println!("{:<20} {:<15} {:<15} {:<15}", "NAME", "TOTAL", "AVAILABLE", "TYPE");
+                println!(
+                    "{:<20} {:<15} {:<15} {:<15}",
+                    "NAME", "TOTAL", "AVAILABLE", "TYPE"
+                );
                 println!("{}", "-".repeat(65));
-                
+
                 for vol in volumes {
-                    let type_str = if vol.is_removable { "Removable" } else { "Fixed" };
+                    let type_str = if vol.is_removable {
+                        "Removable"
+                    } else {
+                        "Fixed"
+                    };
                     let total_gb = vol.total_bytes as f64 / 1_073_741_824.0;
                     let avail_gb = vol.available_bytes as f64 / 1_073_741_824.0;
-                    
-                    println!("{:<20} {:<15.2} {:<15.2} {:<15}", 
-                        vol.name, 
-                        format!("{:.2} GB", total_gb), 
-                        format!("{:.2} GB", avail_gb), 
+
+                    println!(
+                        "{:<20} {:<15.2} {:<15.2} {:<15}",
+                        vol.name,
+                        format!("{:.2} GB", total_gb),
+                        format!("{:.2} GB", avail_gb),
                         type_str
                     );
                 }
@@ -63,8 +71,12 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let source = cli.source.ok_or_else(|| anyhow::anyhow!("Missing required argument: --source"))?;
-    let target = cli.target.ok_or_else(|| anyhow::anyhow!("Missing required argument: --target"))?;
+    let source = cli
+        .source
+        .ok_or_else(|| anyhow::anyhow!("Missing required argument: --source"))?;
+    let target = cli
+        .target
+        .ok_or_else(|| anyhow::anyhow!("Missing required argument: --target"))?;
 
     if !source.exists() {
         anyhow::bail!("Source directory does not exist: {source:?}");
@@ -109,7 +121,13 @@ async fn main() -> anyhow::Result<()> {
                             FileDiffKind::Modified => "MODIFIED",
                             FileDiffKind::Deleted => "DELETE",
                         };
-                        println!("   {} {:?} - {} ({} bytes)", icon, diff.path, action, diff.source_size.unwrap_or(0));
+                        println!(
+                            "   {} {:?} - {} ({} bytes)",
+                            icon,
+                            diff.path,
+                            action,
+                            diff.source_size.unwrap_or(0)
+                        );
                     }
                 } else {
                     println!("✅ Directories are in sync!");
@@ -144,16 +162,19 @@ async fn main() -> anyhow::Result<()> {
         );
         pb.set_message("Synchronizing...");
 
-        match engine.sync_files(&options, |progress| {
-             pb.set_length(progress.total_bytes);
-             pb.set_position(progress.processed_bytes);
-             
-             if let Some(file) = progress.current_file {
-                pb.set_message(format!("{:?} - {}", progress.phase, file));
-             } else {
-                 pb.set_message(format!("{:?}", progress.phase));
-             }
-        }).await {
+        match engine
+            .sync_files(&options, |progress| {
+                pb.set_length(progress.total_bytes);
+                pb.set_position(progress.processed_bytes);
+
+                if let Some(file) = progress.current_file {
+                    pb.set_message(format!("{:?} - {}", progress.phase, file));
+                } else {
+                    pb.set_message(format!("{:?}", progress.phase));
+                }
+            })
+            .await
+        {
             Ok(result) => {
                 pb.finish_with_message("✅ Synchronization complete!");
                 println!();

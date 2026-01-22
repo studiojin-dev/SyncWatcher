@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Switch, Select } from '@mantine/core';
 import { useSettings } from '../hooks/useSettings';
+import { open } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const languages = [
     { value: 'en', label: 'English' },
@@ -31,6 +33,26 @@ function SettingsView() {
             </div>
         );
     }
+
+    const handleBrowseFolder = async (settingKey: 'stateLocation') => {
+        try {
+            const selected = await open({ directory: true });
+            if (selected) {
+                updateSettings({ [settingKey]: selected as string });
+            }
+        } catch (err) {
+            console.error('Failed to open folder dialog:', err);
+        }
+    };
+
+    const handleHideToTray = async () => {
+        try {
+            const window = getCurrentWindow();
+            await window.hide();
+        } catch (err) {
+            console.error('Failed to hide window:', err);
+        }
+    };
 
     return (
         <div className="fade-in">
@@ -79,6 +101,62 @@ function SettingsView() {
                     />
                 </div>
 
+                {/* State Location */}
+                <div className="card">
+                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
+                        State Location
+                    </label>
+                    <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                        <input
+                            value={settings.stateLocation}
+                            onChange={(e) => updateSettings({ stateLocation: e.target.value })}
+                            className="btn-ghost"
+                            style={{ flex: 1 }}
+                            placeholder="Default: Tauri AppData"
+                        />
+                        <button
+                            onClick={() => handleBrowseFolder('stateLocation')}
+                            className="btn-ghost"
+                        >
+                            Browse
+                        </button>
+                    </div>
+                </div>
+
+                {/* Max Log Lines */}
+                <div className="card">
+                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
+                        Max Log Lines (per log file)
+                    </label>
+                    <input
+                        type="number"
+                        min="100"
+                        max="100000"
+                        value={settings.maxLogLines}
+                        onChange={(e) => updateSettings({ maxLogLines: parseInt(e.target.value) || 10000 })}
+                        className="btn-ghost"
+                        style={{ width: '100%' }}
+                    />
+                </div>
+
+                {/* Hide to Tray */}
+                <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <div className="text-sm">Hide to Tray</div>
+                            <div className="text-xs text-tertiary">
+                                Run in background without dock icon
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleHideToTray}
+                            className="btn-ghost"
+                        >
+                            Hide
+                        </button>
+                    </div>
+                </div>
+
                 {/* Toggles */}
                 <div className="card">
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -87,13 +165,6 @@ function SettingsView() {
                             <Switch
                                 checked={settings.notifications}
                                 onChange={(e) => updateSettings({ notifications: e.currentTarget.checked })}
-                            />
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="text-sm">{t('settings.autoSync')}</span>
-                            <Switch
-                                checked={settings.autoSync}
-                                onChange={(e) => updateSettings({ autoSync: e.currentTarget.checked })}
                             />
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

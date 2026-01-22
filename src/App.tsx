@@ -4,6 +4,8 @@ import DashboardView from './views/DashboardView';
 import SyncTasksView from './views/SyncTasksView';
 import ActivityLogView from './views/ActivityLogView';
 import SettingsView from './views/SettingsView';
+import HelpView from './views/HelpView';
+import AboutView from './views/AboutView';
 import { useSettings } from './hooks/useSettings';
 import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
@@ -28,6 +30,10 @@ function App() {
         return <ActivityLogView />;
       case 'settings':
         return <SettingsView />;
+      case 'help':
+        return <HelpView />;
+      case 'about':
+        return <AboutView />;
       default:
         return <DashboardView />;
     }

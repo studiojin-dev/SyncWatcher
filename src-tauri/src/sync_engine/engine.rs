@@ -1,4 +1,6 @@
-use crate::sync_engine::types::{FileDiff, FileDiffKind, DryRunResult, FileMetadata, SyncOptions, SyncResult};
+use crate::sync_engine::types::{
+    DryRunResult, FileDiff, FileDiffKind, FileMetadata, SyncOptions, SyncResult,
+};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::hash::Hasher;
@@ -137,8 +139,14 @@ impl SyncEngine {
             .iter()
             .filter(|d| d.kind == FileDiffKind::New || d.kind == FileDiffKind::Modified)
             .count();
-        let files_to_delete = diffs.iter().filter(|d| d.kind == FileDiffKind::Deleted).count();
-        let files_modified = diffs.iter().filter(|d| d.kind == FileDiffKind::Modified).count();
+        let files_to_delete = diffs
+            .iter()
+            .filter(|d| d.kind == FileDiffKind::Deleted)
+            .count();
+        let files_modified = diffs
+            .iter()
+            .filter(|d| d.kind == FileDiffKind::Modified)
+            .count();
 
         let total_files = source_files.iter().filter(|f| f.is_file).count();
 
@@ -156,7 +164,11 @@ impl SyncEngine {
         self.compare_dirs(options).await
     }
 
-    pub async fn sync_files(&self, options: &SyncOptions, progress_callback: impl Fn(crate::sync_engine::types::SyncProgress)) -> Result<SyncResult> {
+    pub async fn sync_files(
+        &self,
+        options: &SyncOptions,
+        progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
+    ) -> Result<SyncResult> {
         let dry_run = self.compare_dirs(options).await?;
 
         let mut result = SyncResult {
@@ -206,12 +218,15 @@ impl SyncEngine {
 
                     let file_size = diff.source_size.unwrap_or(0);
 
-                    if let Err(e) = self.copy_file_chunked(&source_path, &target_path, options, |written_chunk| {
-                        current_progress.processed_bytes += written_chunk;
-                        current_progress.bytes_copied_current_file += written_chunk;
-                        progress_callback(current_progress.clone());
-                    }).await {
-                         let kind = if e.to_string().contains("Verification failed") {
+                    if let Err(e) = self
+                        .copy_file_chunked(&source_path, &target_path, options, |written_chunk| {
+                            current_progress.processed_bytes += written_chunk;
+                            current_progress.bytes_copied_current_file += written_chunk;
+                            progress_callback(current_progress.clone());
+                        })
+                        .await
+                    {
+                        let kind = if e.to_string().contains("Verification failed") {
                             crate::sync_engine::types::SyncErrorKind::VerificationFailed
                         } else {
                             crate::sync_engine::types::SyncErrorKind::CopyFailed
@@ -227,7 +242,7 @@ impl SyncEngine {
                         result.files_copied += 1;
                         result.bytes_copied += file_size;
                     }
-                    
+
                     current_progress.processed_files += 1;
                     progress_callback(current_progress.clone());
                 }
@@ -245,7 +260,8 @@ impl SyncEngine {
                     } else {
                         result.files_deleted += 1;
                     }
-                    current_progress.phase = crate::sync_engine::types::SyncPhase::Copying; // Revert phase
+                    current_progress.phase = crate::sync_engine::types::SyncPhase::Copying;
+                    // Revert phase
                 }
             }
         }
@@ -253,7 +269,13 @@ impl SyncEngine {
         Ok(result)
     }
 
-    async fn copy_file_chunked(&self, source: &Path, target: &Path, options: &SyncOptions, mut on_progress: impl FnMut(u64)) -> Result<()> {
+    async fn copy_file_chunked(
+        &self,
+        source: &Path,
+        target: &Path,
+        options: &SyncOptions,
+        mut on_progress: impl FnMut(u64),
+    ) -> Result<()> {
         use tokio::io::AsyncWriteExt; // Import for write_all
 
         if let Some(parent) = target.parent() {
@@ -312,7 +334,10 @@ mod tests {
         let source = source_dir.path().join("test.txt");
         fs::write(&source, b"hello world").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let options = SyncOptions::default();
 
         let dry_run = engine.dry_run(&options).await?;

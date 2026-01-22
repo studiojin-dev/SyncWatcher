@@ -5,7 +5,9 @@
       "dashboard": "Dashboard",
       "syncTasks": "Sync Tasks",
       "activityLog": "Activity Log",
-      "settings": "Settings"
+      "settings": "Settings",
+      "help": "Help",
+      "about": "About"
     },
     "dashboard": {
       "title": "Dashboard",
@@ -54,7 +56,6 @@
       "darkMode": "Dark Mode",
       "systemTheme": "System Theme",
       "notifications": "Notifications",
-      "autoSync": "Auto Sync",
       "deleteConfirmation": "Delete Confirmation",
       "verifyAfterCopy": "Verify After Copy",
       "saveSettings": "Save Settings",
@@ -76,6 +77,42 @@
       "filesCopied": "{{count}} files copied",
       "filesDeleted": "{{count}} files deleted",
       "bytesCopied": "{{bytes}} MB copied"
+    },
+    "help": {
+      "title": "Help & Documentation",
+      "syncEngine": {
+        "title": "Sync Engine",
+        "description": "Powerful one-way file synchronization with checksum verification",
+        "oneWaySync": "One-way sync from Source to Target directory",
+        "dryRun": "Preview changes before executing with Dry Run mode",
+        "checksum": "Fast xxHash64 checksum comparison for accuracy"
+      },
+      "watchMode": {
+        "title": "Watch Mode",
+        "description": "Real-time directory monitoring for instant backups",
+        "autoDetection": "Automatically detects file changes in source directory",
+        "realTime": "Initiates sync immediately when files are modified"
+      },
+      "security": {
+        "title": "Data Integrity",
+        "description": "Ensure your data remains safe and consistent",
+        "verifyAfterCopy": "Verify files after copying with re-checksum (for critical data only)",
+        "deleteMissing": "Optionally delete files in target that don't exist in source"
+      },
+      "preview": {
+        "title": "Preview Mode",
+        "description": "See what would happen without making changes",
+        "whatIf": "Shows a detailed diff of files to be copied/updated/deleted",
+        "noChanges": "No actual file operations are performed in preview mode"
+      }
+    },
+    "about": {
+      "title": "About",
+      "developer": "Developer",
+      "license": "License",
+      "openSourceLibraries": "Open Source Libraries",
+      "generateReport": "Generate Report",
+      "viewOnGithub": "View on GitHub"
     },
     "common": {
       "confirm": "Confirm",

@@ -1,15 +1,77 @@
 pub mod sync_engine;
 pub mod system_integration;
+pub mod logging;
+pub mod license;
 
 use std::path::PathBuf;
-use tauri::Emitter;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
 
-use sync_engine::{SyncEngine, SyncOptions, DryRunResult, types::SyncResult};
+use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
 use system_integration::{DiskMonitor};
+
+use logging::LogManager;
+use logging::{add_log, get_system_logs, get_task_logs};
+use license::generate_licenses_report;
+
+pub struct AppState {
+    pub log_manager: Arc<LogManager>,
+}
+
+#[tauri::command]
+async fn get_app_config_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let app_data = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let config_dir = app_data.join("config");
+    tokio::fs::create_dir_all(&config_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(config_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn join_paths(path1: String, path2: String) -> Result<String, String> {
+    use std::path::Path;
+    let p1 = Path::new(&path1);
+    let p2 = Path::new(&path2);
+    p1.join(p2)
+        .to_str()
+        .ok_or_else(|| "Invalid path".to_string())
+        .map(|s| s.to_string())
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+async fn get_app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
+    app.path().app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn read_yaml_file(path: String) -> Result<String, String> {
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn write_yaml_file(path: String, content: String) -> Result<(), String> {
+    tokio::fs::write(&path, content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn ensure_directory_exists(path: String) -> Result<(), String> {
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -28,16 +90,13 @@ async fn sync_dry_run(
         verify_after_copy: false,
     };
 
-    engine.dry_run(&options)
-        .await
-        .map_err(|e| e.to_string())
+    engine.dry_run(&options).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
     let monitor = DiskMonitor::new();
-    monitor.list_volumes()
-        .map_err(|e| e.to_string())
+    monitor.list_volumes().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -58,11 +117,12 @@ async fn start_sync(
         verify_after_copy,
     };
 
-    engine.sync_files(&options, |progress| {
-        let _ = app.emit("sync-progress", &progress);
-    })
-    .await
-    .map_err(|e| e.to_string())
+    engine
+        .sync_files(&options, |progress| {
+            let _ = app.emit("sync-progress", &progress);
+        })
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -82,13 +142,27 @@ pub struct SyncTask {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(AppState {
+            log_manager: Arc::new(LogManager::new(10000)),
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             sync_dry_run,
             list_volumes,
             start_sync,
             list_sync_tasks,
+            get_app_config_dir,
+            join_paths,
+            read_yaml_file,
+            write_yaml_file,
+            ensure_directory_exists,
+            add_log,
+            get_system_logs,
+            get_task_logs,
+            generate_licenses_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

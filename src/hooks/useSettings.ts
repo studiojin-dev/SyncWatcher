@@ -1,22 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
-import i18n from '../i18n';
+import { useState, useCallback, useEffect } from 'react';
 
 interface Settings {
     language: string;
     theme: 'light' | 'dark' | 'system';
     notifications: boolean;
-    autoSync: boolean;
     deleteConfirmation: boolean;
     verifyAfterCopy: boolean;
+    stateLocation: string;
+    maxLogLines: number;
 }
 
 const defaultSettings: Settings = {
     language: 'en',
     theme: 'system',
     notifications: true,
-    autoSync: false,
     deleteConfirmation: true,
     verifyAfterCopy: true,
+    stateLocation: '',
+    maxLogLines: 10000,
 };
 
 const STORAGE_KEY = 'syncwatcher_settings';
@@ -42,31 +43,6 @@ export function useSettings() {
         setLoaded(true);
     }, []);
 
-    // Apply theme when settings change
-    useEffect(() => {
-        if (!loaded) return;
-
-        const applyTheme = (theme: string) => {
-            if (theme === 'system') {
-                document.documentElement.removeAttribute('data-theme');
-                document.documentElement.classList.remove('dark');
-            } else if (theme === 'dark') {
-                document.documentElement.setAttribute('data-theme', 'dark');
-                document.documentElement.classList.add('dark');
-            } else {
-                document.documentElement.setAttribute('data-theme', 'light');
-                document.documentElement.classList.remove('dark');
-            }
-        };
-
-        applyTheme(settings.theme);
-
-        // Apply language
-        if (i18n.language !== settings.language) {
-            i18n.changeLanguage(settings.language);
-        }
-    }, [settings.theme, settings.language, loaded]);
-
     const updateSettings = useCallback((updates: Partial<Settings>) => {
         setSettings((prev) => {
             const newSettings = { ...prev, ...updates };
@@ -87,6 +63,25 @@ export function useSettings() {
             console.error('Failed to reset settings:', err);
         }
     }, []);
+
+    const applyTheme = useCallback((theme: string) => {
+        if (theme === 'system') {
+            document.documentElement.removeAttribute('data-theme');
+            document.documentElement.classList.remove('dark');
+        } else if (theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.classList.remove('dark');
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!loaded) return;
+
+        applyTheme(settings.theme);
+    }, [settings.theme, loaded, applyTheme]);
 
     return {
         settings,

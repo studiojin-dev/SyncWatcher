@@ -2,13 +2,15 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "Tablero",
+      "dashboard": "Panel de Control",
       "syncTasks": "Tareas de Sincronización",
       "activityLog": "Registro de Actividad",
-      "settings": "Configuración"
+      "settings": "Configuración",
+      "help": "Help",
+      "about": "About"
     },
     "dashboard": {
-      "title": "Tablero",
+      "title": "Panel de Control",
       "noDevices": "No dispositivos conectados",
       "currentSpeed": "Velocidad Actual",
       "freeSpace": "Espacio Libre",
@@ -54,7 +56,6 @@
       "darkMode": "Modo Oscuro",
       "systemTheme": "Tema del Sistema",
       "notifications": "Notificaciones",
-      "autoSync": "Sincronización Automática",
       "deleteConfirmation": "Confirmación de Eliminación",
       "verifyAfterCopy": "Verificar Después de Copiar",
       "saveSettings": "Guardar Configuración",
@@ -76,6 +77,42 @@
       "filesCopied": "{{count}} archivos copiados",
       "filesDeleted": "{{count}} archivos eliminados",
       "bytesCopied": "{{bytes}} MB copiados"
+    },
+    "help": {
+      "title": "Ayuda y Documentación",
+      "syncEngine": {
+        "title": "Motor de Sincronización",
+        "description": "Sincronización unidireccional de archivos potente con verificación de suma de comprobación",
+        "oneWaySync": "Sincronización unidireccional del Directorio de Origen al Directorio de Destino",
+        "dryRun": "Vista previa de los cambios antes de ejecutar en modo de prueba",
+        "checksum": "Comparación de precisión xxHash64"
+      },
+      "watchMode": {
+        "title": "Modo de Observación",
+        "description": "Supervisión en tiempo real de directorios para copias de seguridad instantáneas",
+        "autoDetection": "Detecta automáticamente los cambios en el directorio de origen",
+        "realTime": "Iniciar sincronización inmediatamente cuando se modifican archivos"
+      },
+      "security": {
+        "title": "Integridad de Datos",
+        "description": "Garantiza la seguridad y consistencia de tus datos",
+        "verifyAfterCopy": "Verificar de nuevo con checksum después de copiar (solo para datos críticos)",
+        "deleteMissing": "Eliminar archivos que no existen en el directorio de origen"
+      },
+      "preview": {
+        "title": "Modo de Vista Previa",
+        "description": "Ver qué ocurrirá sin realizar operaciones reales de archivos",
+        "whatIf": "Muestra una lista detallada de los archivos que serán copiados/actualizados/eliminados",
+        "noChanges": "No se realizan operaciones reales de archivos"
+      }
+    },
+    "about": {
+      "title": "Acerca de",
+      "developer": "Desarrollador",
+      "license": "Licencia",
+      "openSourceLibraries": "Bibliotecas de Código Abierto",
+      "generateReport": "Generar Informe",
+      "viewOnGithub": "Ver en GitHub"
     },
     "common": {
       "confirm": "Confirmar",

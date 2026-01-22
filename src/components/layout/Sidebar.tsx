@@ -4,6 +4,8 @@ import {
     IconRefresh,
     IconHistory,
     IconSettings,
+    IconHelp,
+    IconInfoCircle,
 } from '@tabler/icons-react';
 
 interface SidebarProps {
@@ -12,16 +14,18 @@ interface SidebarProps {
 }
 
 interface NavItem {
-    id: string;
-    labelKey: string;
-    icon: typeof IconDashboard;
+  id: string;
+  labelKey: string;
+  icon: typeof IconDashboard;
 }
 
 const navItems: NavItem[] = [
-    { id: 'dashboard', labelKey: 'nav.dashboard', icon: IconDashboard },
-    { id: 'sync-tasks', labelKey: 'nav.syncTasks', icon: IconRefresh },
-    { id: 'activity-log', labelKey: 'nav.activityLog', icon: IconHistory },
-    { id: 'settings', labelKey: 'nav.settings', icon: IconSettings },
+  { id: 'dashboard', labelKey: 'nav.dashboard', icon: IconDashboard },
+  { id: 'sync-tasks', labelKey: 'nav.syncTasks', icon: IconRefresh },
+  { id: 'activity-log', labelKey: 'nav.activityLog', icon: IconHistory },
+  { id: 'settings', labelKey: 'nav.settings', icon: IconSettings },
+  { id: 'help', labelKey: 'nav.help', icon: IconHelp },
+  { id: 'about', labelKey: 'nav.about', icon: IconInfoCircle },
 ];
 
 /**
