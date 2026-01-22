@@ -79,15 +79,19 @@ impl SyncEngine {
         for (path, source_meta) in &source_map {
             if let Some(target_meta) = target_map.get(path) {
                 if source_meta.is_file {
-                    let needs_copy = if options.checksum_mode {
+                    // 1. First check metadata (fastest)
+                    let mut needs_copy = source_meta.size != target_meta.size
+                        || source_meta.modified > target_meta.modified;
+
+                    // 2. If metadata matches but checksum mode is on, check content (slower but accurate)
+                    if !needs_copy && options.checksum_mode {
                         let source_hash = self.calculate_checksum(&self.source.join(path)).await?;
                         let target_hash = self.calculate_checksum(&self.target.join(path)).await?;
 
-                        source_hash != target_hash
-                    } else {
-                        source_meta.size != target_meta.size
-                            || source_meta.modified > target_meta.modified
-                    };
+                        if source_hash != target_hash {
+                            needs_copy = true;
+                        }
+                    }
 
                     if needs_copy {
                         bytes_to_copy += source_meta.size;
