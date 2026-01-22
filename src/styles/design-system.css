@@ -1,0 +1,409 @@
+/**
+ * SyncWatcher Design System
+ * "Invisible but Powerful" - Airy Postmodern Minimalism
+ * Based on DESIGN_SYSTEM.md
+ */
+
+/* =====================================================
+   CSS Custom Properties
+   ===================================================== */
+
+:root {
+  /* ===== Base Font Size ===== */
+  font-size: 87.5%; /* 14px → 11px base */
+
+  /* ===== Typography ===== */
+  --font-primary: 'Pretendard Variable', 'Pretendard', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+
+  /* Weights */
+  --weight-thin: 200;
+  --weight-light: 300;
+  --weight-normal: 400;
+  --weight-medium: 500;
+
+  /* Type Scale */
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 24px;
+
+  /* Line Heights */
+  --leading-tight: 1.4;
+  --leading-normal: 1.7;
+  --leading-relaxed: 2.0;
+
+  /* Letter Spacing */
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.02em;
+
+  /* ===== Spacing System (4px base) ===== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* ===== Animation Presets ===== */
+  --transition-fast: 80ms ease-out;
+  --transition-base: 120ms ease-in-out;
+  --transition-slow: 200ms ease-in-out;
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ===== Light Mode (Default) ===== */
+  /* Base Canvas */
+  --bg-primary: #FAFBFC;
+  --bg-secondary: #F5F6F8;
+  --bg-tertiary: #ECEEF1;
+
+  /* Content */
+  --text-primary: #2A2E35;
+  --text-secondary: #6B7280;
+  --text-tertiary: #9CA3AF;
+
+  /* Accents */
+  --accent-blue: #E8EEFF;
+  --accent-blue-subtle: #F5F7FF;
+  --accent-border: #E5E7EB;
+
+  /* Status Tints */
+  --status-success-bg: #F0FDF4;
+  --status-success-text: #10B981;
+  --status-error-bg: #FEF2F2;
+  --status-error-text: #EF4444;
+  --status-warning-bg: #FFFBEB;
+  --status-warning-text: #F59E0B;
+
+  /* Interactive */
+  --hover-overlay: rgba(0, 0, 0, 0.02);
+  --active-overlay: rgba(0, 0, 0, 0.04);
+  --focus-ring: rgba(99, 102, 241, 0.1);
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --content-padding: var(--space-16);
+}
+
+/* ===== Dark Mode ===== */
+[data-theme="dark"],
+.dark {
+  /* Base Canvas */
+  --bg-primary: #0F1115;
+  --bg-secondary: #1A1D24;
+  --bg-tertiary: #24272F;
+
+  /* Content */
+  --text-primary: #E5E7EB;
+  --text-secondary: #9CA3AF;
+  --text-tertiary: #6B7280;
+
+  /* Accents */
+  --accent-blue: #1E293B;
+  --accent-blue-subtle: #171E2A;
+  --accent-border: #2D3139;
+
+  /* Status Tints - Dark */
+  --status-success-bg: #022C22;
+  --status-success-text: #34D399;
+  --status-error-bg: #2C0A0A;
+  --status-error-text: #F87171;
+  --status-warning-bg: #2C1810;
+  --status-warning-text: #FBBF24;
+
+  /* Interactive - Dark */
+  --hover-overlay: rgba(255, 255, 255, 0.03);
+  --active-overlay: rgba(255, 255, 255, 0.06);
+  --focus-ring: rgba(139, 92, 246, 0.15);
+}
+
+/* Auto-detect user preference */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    /* Base Canvas */
+    --bg-primary: #0F1115;
+    --bg-secondary: #1A1D24;
+    --bg-tertiary: #24272F;
+
+    /* Content */
+    --text-primary: #E5E7EB;
+    --text-secondary: #9CA3AF;
+    --text-tertiary: #6B7280;
+
+    /* Accents */
+    --accent-blue: #1E293B;
+    --accent-blue-subtle: #171E2A;
+    --accent-border: #2D3139;
+
+    /* Status Tints - Dark */
+    --status-success-bg: #022C22;
+    --status-success-text: #34D399;
+    --status-error-bg: #2C0A0A;
+    --status-error-text: #F87171;
+    --status-warning-bg: #2C1810;
+    --status-warning-text: #FBBF24;
+
+    /* Interactive - Dark */
+    --hover-overlay: rgba(255, 255, 255, 0.03);
+    --active-overlay: rgba(255, 255, 255, 0.06);
+    --focus-ring: rgba(139, 92, 246, 0.15);
+  }
+}
+
+/* =====================================================
+   Base Styles
+   ===================================================== */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-light);
+  line-height: var(--leading-normal);
+  transition: background-color 150ms ease-in-out,
+              color 150ms ease-in-out;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* =====================================================
+   Component Styles
+   ===================================================== */
+
+/* Cards - Ghost Glass */
+.card {
+  background: var(--bg-tertiary);
+  border: 1px solid color-mix(in srgb, var(--accent-border) 50%, transparent);
+  border-radius: 8px;
+  padding: var(--space-4) var(--space-5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02),
+              0 1px 2px rgba(0, 0, 0, 0.01);
+  transition: all var(--transition-base);
+}
+
+.card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03),
+              0 1px 4px rgba(0, 0, 0, 0.02);
+  transform: translateY(-1px);
+}
+
+/* Buttons - Ghost Style */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--accent-border);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-light);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-ghost:hover {
+  background: var(--hover-overlay);
+  border-color: var(--text-tertiary);
+}
+
+.btn-ghost:active {
+  background: var(--active-overlay);
+}
+
+/* Primary Button */
+.btn-primary {
+  background: color-mix(in srgb, var(--accent-blue) 80%, transparent);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-border);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-primary:hover {
+  background: var(--accent-blue);
+}
+
+/* Progress Bar - Hair-thin */
+.progress-bar {
+  height: 2px;
+  background: var(--bg-tertiary);
+  border-radius: 1px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent-blue) 40%, var(--bg-tertiary)),
+    color-mix(in srgb, var(--accent-blue) 70%, var(--bg-tertiary))
+  );
+  transition: width var(--transition-slow);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-blue) 30%, transparent);
+}
+
+/* Navigation Tabs */
+.nav-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-light);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: none;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+}
+
+.nav-tab.active {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.nav-tab:hover:not(.active) {
+  color: var(--text-primary);
+  background: var(--hover-overlay);
+}
+
+/* Status Badges */
+.status-success {
+  background: var(--status-success-bg);
+  color: var(--status-success-text);
+}
+
+.status-error {
+  background: var(--status-error-bg);
+  color: var(--status-error-text);
+}
+
+.status-warning {
+  background: var(--status-warning-bg);
+  color: var(--status-warning-text);
+}
+
+/* =====================================================
+   Layout Components
+   ===================================================== */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg-primary);
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--accent-border);
+  padding: var(--space-6) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  height: 100vh;
+  left: 0;
+  top: 0;
+}
+
+.sidebar-header {
+  margin-bottom: var(--space-8);
+  padding: 0 var(--space-2);
+}
+
+.sidebar-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-normal);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.main-content {
+  flex: 1;
+  margin-left: var(--sidebar-width);
+  padding: var(--space-10) var(--content-padding);
+  min-height: 100vh;
+}
+
+/* =====================================================
+   Bento Grid
+   ===================================================== */
+
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-6);
+}
+
+/* =====================================================
+   Utility Classes
+   ===================================================== */
+
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+
+.font-mono { font-family: var(--font-mono); }
+
+.text-xs { font-size: var(--text-xs); }
+.text-sm { font-size: var(--text-sm); }
+.text-base { font-size: var(--text-base); }
+.text-lg { font-size: var(--text-lg); }
+.text-xl { font-size: var(--text-xl); }
+.text-2xl { font-size: var(--text-2xl); }
+
+/* =====================================================
+   Animations
+   ===================================================== */
+
+.fade-in {
+  animation: fadeIn var(--transition-slow) var(--ease-in-out);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hover-lift {
+  transition: transform var(--transition-fast);
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
