@@ -14,8 +14,16 @@ function FolderInput({ value, onChange, name, label }: FolderInputProps) {
   const handleBrowse = async () => {
     try {
       const selected = await open({ directory: true });
-      if (selected) {
-        onChange(selected as string);
+
+      // Type-safe handling of dialog result
+      if (typeof selected === 'string') {
+        onChange(selected);
+      } else if (selected === null) {
+        // User cancelled the dialog - do nothing
+        return;
+      } else {
+        // Unexpected type - log warning
+        console.warn('Unexpected dialog result type:', typeof selected);
       }
     } catch (err) {
       console.error('Failed to open folder dialog:', err);

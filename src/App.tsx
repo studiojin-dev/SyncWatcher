@@ -9,6 +9,7 @@ import AboutView from './views/AboutView';
 import { useSettings } from './hooks/useSettings';
 import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 
 /**
  * SyncWatcher App - Main application component
@@ -40,13 +41,15 @@ function App() {
   };
 
   return (
-    <ToastProvider>
-      <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
-        <PageTransition pageKey={activeTab}>
-          {renderContent()}
-        </PageTransition>
-      </AppShell>
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
+          <PageTransition pageKey={activeTab}>
+            {renderContent()}
+          </PageTransition>
+        </AppShell>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

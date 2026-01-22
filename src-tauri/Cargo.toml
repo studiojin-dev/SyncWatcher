@@ -35,6 +35,9 @@ tauri-plugin-dialog = "2"
 serde_yaml = "0.9.34"
 chrono = "0.4"
 
+[dev-dependencies]
+tempfile = "3.10"
+
 [[bin]]
 name = "sync-cli"
 path = "src/bin/sync-cli.rs"

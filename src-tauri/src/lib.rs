@@ -2,6 +2,7 @@ pub mod sync_engine;
 pub mod system_integration;
 pub mod logging;
 pub mod license;
+pub mod path_validation;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
 use system_integration::{DiskMonitor};
 
 use logging::LogManager;
-use logging::{add_log, get_system_logs, get_task_logs};
+use logging::{add_log, get_system_logs, get_task_logs, DEFAULT_MAX_LOG_LINES};
 use license::generate_licenses_report;
 
 pub struct AppState {
@@ -43,6 +44,11 @@ async fn join_paths(path1: String, path2: String) -> Result<String, String> {
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 #[tauri::command]
@@ -146,10 +152,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
-            log_manager: Arc::new(LogManager::new(10000)),
+            log_manager: Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES)),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_app_version,
             sync_dry_run,
             list_volumes,
             start_sync,

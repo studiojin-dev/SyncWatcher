@@ -2,6 +2,9 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use crate::AppState;
 
+/// Default maximum number of log lines to keep in memory
+pub const DEFAULT_MAX_LOG_LINES: usize = 10000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub id: String,
@@ -25,9 +28,10 @@ impl LogManager {
     }
 
     pub fn log(&self, level: &str, message: &str, task_id: Option<String>) {
+        let now = chrono::Utc::now().to_rfc3339();
         let entry = LogEntry {
-            id: chrono::Utc::now().to_rfc3339().to_string(),
-            timestamp: chrono::Utc::now().to_rfc3339().to_string(),
+            id: now.clone(),
+            timestamp: now,
             level: level.to_string(),
             message: message.to_string(),
             task_id,
@@ -48,6 +52,104 @@ impl LogManager {
             Some(id) => logs.iter().filter(|l| l.task_id.as_ref() == Some(&id)).cloned().collect(),
             None => logs.clone(),
         }
+    }
+
+    /// Get logs with pagination for better performance with large log sets
+    pub fn get_logs_paginated(&self, task_id: Option<String>, offset: usize, limit: usize) -> Vec<LogEntry> {
+        let logs = self.system_logs.lock().unwrap();
+        let filtered: Vec<_> = match task_id {
+            Some(id) => logs.iter().filter(|l| l.task_id.as_ref() == Some(&id)).collect(),
+            None => logs.iter().collect(),
+        };
+
+        let start = offset.min(filtered.len());
+        let end = (offset + limit).min(filtered.len());
+
+        filtered[start..end].iter().map(|&entry| entry.clone()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_manager_new() {
+        let manager = LogManager::new(100);
+        // Just verify it doesn't panic
+        assert_eq!(manager.system_logs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_log_manager_log() {
+        let manager = LogManager::new(10);
+
+        manager.log("info", "test message", None);
+        assert_eq!(manager.system_logs.lock().unwrap().len(), 1);
+
+        manager.log("warning", "another message", Some("task1".to_string()));
+        assert_eq!(manager.system_logs.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_log_manager_rotation() {
+        let manager = LogManager::new(3);
+
+        // Add more logs than max_lines
+        for i in 0..5 {
+            manager.log("info", &format!("message {}", i), None);
+        }
+
+        let logs = manager.system_logs.lock().unwrap();
+        assert_eq!(logs.len(), 3); // Should rotate to max_lines
+    }
+
+    #[test]
+    fn test_log_manager_get_logs() {
+        let manager = LogManager::new(10);
+
+        manager.log("info", "message1", None);
+        manager.log("info", "message2", Some("task1".to_string()));
+        manager.log("warning", "message3", Some("task1".to_string()));
+
+        // Get all logs
+        let all_logs = manager.get_logs(None);
+        assert_eq!(all_logs.len(), 3);
+
+        // Get logs by task
+        let task_logs = manager.get_logs(Some("task1".to_string()));
+        assert_eq!(task_logs.len(), 2);
+
+        // Get logs for non-existent task
+        let empty_logs = manager.get_logs(Some("nonexistent".to_string()));
+        assert_eq!(empty_logs.len(), 0);
+    }
+
+    #[test]
+    fn test_log_manager_pagination() {
+        let manager = LogManager::new(100);
+
+        // Add 20 logs
+        for i in 0..20 {
+            manager.log("info", &format!("message {}", i), None);
+        }
+
+        // Get first 10
+        let page1 = manager.get_logs_paginated(None, 0, 10);
+        assert_eq!(page1.len(), 10);
+
+        // Get next 10
+        let page2 = manager.get_logs_paginated(None, 10, 10);
+        assert_eq!(page2.len(), 10);
+
+        // Offset beyond available
+        let page3 = manager.get_logs_paginated(None, 20, 10);
+        assert_eq!(page3.len(), 0);
+    }
+
+    #[test]
+    fn test_default_max_log_lines() {
+        assert_eq!(DEFAULT_MAX_LOG_LINES, 10000);
     }
 }
 
