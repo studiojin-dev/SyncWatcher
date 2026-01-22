@@ -1,0 +1,104 @@
+{
+  "translation": {
+    "appName": "SyncWatcher",
+    "nav": {
+      "dashboard": "Dashboard",
+      "syncTasks": "Sync Tasks",
+      "activityLog": "Activity Log",
+      "settings": "Settings"
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "noDevices": "No devices connected",
+      "currentSpeed": "Current Speed",
+      "freeSpace": "Free Space",
+      "deviceStatus": "Device Status",
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "bytesPerSecond": "bytes/s"
+    },
+    "syncTasks": {
+      "title": "Sync Tasks",
+      "addTask": "Add Task",
+      "editTask": "Edit Task",
+      "deleteTask": "Delete Task",
+      "taskName": "Task Name",
+      "source": "Source",
+      "target": "Target",
+      "enabled": "Enabled",
+      "deleteMissing": "Delete Missing",
+      "checksumMode": "Checksum Mode",
+      "save": "Save",
+      "cancel": "Cancel",
+      "startSync": "Start Sync",
+      "dryRun": "Dry Run",
+      "noTasks": "No sync tasks configured"
+    },
+    "activityLog": {
+      "title": "Activity Log",
+      "date": "Date",
+      "source": "Source",
+      "target": "Target",
+      "status": "Status",
+      "filesCopied": "Files Copied",
+      "bytesCopied": "Bytes Copied",
+      "errors": "Errors",
+      "noLogs": "No activity logs",
+      "success": "Success",
+      "failed": "Failed",
+      "inProgress": "In Progress"
+    },
+    "settings": {
+      "title": "Settings",
+      "language": "Language",
+      "darkMode": "Dark Mode",
+      "systemTheme": "System Theme",
+      "notifications": "Notifications",
+      "autoSync": "Auto Sync",
+      "deleteConfirmation": "Delete Confirmation",
+      "verifyAfterCopy": "Verify After Copy",
+      "saveSettings": "Save Settings",
+      "resetDefaults": "Reset to Defaults"
+    },
+    "sync": {
+      "phase": {
+        "scanning": "Scanning",
+        "copying": "Copying",
+        "deleting": "Deleting",
+        "verifying": "Verifying"
+      },
+      "file": "File",
+      "progress": "Progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "error": "Error",
+      "syncComplete": "Sync Complete",
+      "filesCopied": "{{count}} files copied",
+      "filesDeleted": "{{count}} files deleted",
+      "bytesCopied": "{{bytes}} MB copied"
+    },
+    "common": {
+      "confirm": "Confirm",
+      "yes": "Yes",
+      "no": "No",
+      "cancel": "Cancel",
+      "save": "Save",
+      "delete": "Delete",
+      "edit": "Edit",
+      "add": "Add",
+      "close": "Close",
+      "ok": "OK",
+      "loading": "Loading...",
+      "error": "Error",
+      "success": "Success",
+      "warning": "Warning"
+    },
+    "errors": {
+      "diskFull": "Disk Full",
+      "smbDisconnected": "SMB Disconnected",
+      "permissionDenied": "Permission Denied",
+      "fileNotFound": "File Not Found",
+      "networkError": "Network Error"
+    }
+  }
+}

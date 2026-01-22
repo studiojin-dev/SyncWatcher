@@ -2,13 +2,14 @@ pub mod sync_engine;
 pub mod system_integration;
 
 use std::path::PathBuf;
+use tauri::Emitter;
 
-use sync_engine::{SyncEngine, SyncOptions, DryRunResult};
+use sync_engine::{SyncEngine, SyncOptions, DryRunResult, types::SyncResult};
 use system_integration::{DiskMonitor};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+    format!("Hello, {name}! You've been greeted from Rust!")
 }
 
 #[tauri::command]
@@ -24,15 +25,13 @@ async fn sync_dry_run(
         checksum_mode,
         preserve_permissions: true,
         preserve_times: true,
-        verify_after_copy: false, // Dry run doesn't copy, so this doesn't matter, but required for struct
+        verify_after_copy: false,
     };
 
     engine.dry_run(&options)
         .await
         .map_err(|e| e.to_string())
 }
-
-use tauri::{Emitter, Window}; // Add Window and Emitter traits
 
 #[tauri::command]
 fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
@@ -43,13 +42,13 @@ fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
 
 #[tauri::command]
 async fn start_sync(
-    window: Window,
     source: PathBuf,
     target: PathBuf,
     delete_missing: bool,
     checksum_mode: bool,
     verify_after_copy: bool,
-) -> Result<sync_engine::types::SyncResult, String> {
+    app: tauri::AppHandle,
+) -> Result<SyncResult, String> {
     let engine = SyncEngine::new(source, target);
     let options = SyncOptions {
         delete_missing,
@@ -59,11 +58,25 @@ async fn start_sync(
         verify_after_copy,
     };
 
-    engine.sync_files(&options, move |progress| {
-        let _ = window.emit("sync-progress", progress);
+    engine.sync_files(&options, |progress| {
+        let _ = app.emit("sync-progress", &progress);
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_sync_tasks() -> Result<Vec<SyncTask>, String> {
+    Ok(vec![])
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SyncTask {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+    pub target: String,
+    pub enabled: bool,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -73,9 +86,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             sync_dry_run,
-            sync_dry_run,
             list_volumes,
             start_sync,
+            list_sync_tasks,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

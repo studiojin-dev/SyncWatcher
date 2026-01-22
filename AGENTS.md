@@ -16,9 +16,14 @@ npm run preview         # Preview production build
 npm run tauri <command> # e.g., npm run tauri dev, npm run tauri build
 ```
 
+## Documents
+
+place documents in "doc" directory.
+
 ## Testing
 
 **No testing framework is currently configured.** When adding tests:
+
 - Consider Vitest for unit/integration tests (Vite-native)
 - Consider React Testing Library for component tests
 - Run single test: `npm test -- <test-file>` (once configured)
@@ -35,6 +40,7 @@ npm run tauri <command> # e.g., npm run tauri dev, npm run tauri build
 ## Code Style Guidelines
 
 ### Imports
+
 ```typescript
 // Order: External packages → Local imports
 import React, { useState } from "react";
@@ -44,6 +50,7 @@ import "./App.css";
 ```
 
 ### Component Patterns
+
 ```typescript
 // Functional components with hooks (preferred)
 function ComponentName() {
@@ -61,18 +68,21 @@ export default ComponentName;
 ```
 
 ### Naming Conventions
+
 - **Components**: PascalCase (`MyComponent`)
 - **Functions/variables**: camelCase (`myFunction`, `myVariable`)
 - **Constants**: UPPER_SNAKE_CASE (`MAX_ITEMS`)
 - **Tauri commands**: snake_case in Rust (`greet_name`), invoked with same name in TypeScript
 
 ### Type Usage
+
 - Prefer inferred types when obvious
 - Explicit types for function parameters and returns
 - Type assertions only when absolutely necessary (use sparingly)
 - Interface for object shapes, Type for unions/primitives
 
 ### Tauri Integration
+
 ```typescript
 // Frontend (TypeScript)
 import { invoke } from "@tauri-apps/api/core";
@@ -92,11 +102,13 @@ fn command_name(param: &str) -> String {
 ```
 
 ### Error Handling
+
 - Rust: `.expect()` for panics, `Result` types for recoverable errors
 - TypeScript: try/catch blocks, proper error logging (to be added)
 - Always handle async errors with try/catch or .catch()
 
 ### React Patterns
+
 - Use functional components with hooks
 - Prefer `useState` over class components
 - Use `React.StrictMode` wrapper in root
@@ -104,6 +116,7 @@ fn command_name(param: &str) -> String {
 - Event handlers: `onChange={(e) => handleChange(e)}`
 
 ### CSS & Styling
+
 - Tailwind CSS v4.1.18 available but not actively used (using CSS modules via App.css)
 - Dark mode support via `@media (prefers-color-scheme: dark)`
 - CSS in `App.css` or component-specific `.css` files
@@ -172,7 +185,7 @@ src-tauri/
 
 ## Additional Resources
 
-- Tauri docs: https://tauri.app/develop/
-- React docs: https://react.dev/
-- Vite docs: https://vitejs.dev/
-- Tailwind CSS v4: https://tailwindcss.com/blog/tailwindcss-v4-alpha
+- Tauri docs: <https://tauri.app/develop/>
+- React docs: <https://react.dev/>
+- Vite docs: <https://vitejs.dev/>
+- Tailwind CSS v4: <https://tailwindcss.com/blog/tailwindcss-v4-alpha>

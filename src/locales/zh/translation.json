@@ -1,0 +1,104 @@
+{
+  "translation": {
+    "appName": "SyncWatcher",
+    "nav": {
+      "dashboard": "仪表板",
+      "syncTasks": "同步任务",
+      "activityLog": "活动日志",
+      "settings": "设置"
+    },
+    "dashboard": {
+      "title": "仪表板",
+      "noDevices": "没有连接的设备",
+      "currentSpeed": "当前速度",
+      "freeSpace": "可用空间",
+      "deviceStatus": "设备状态",
+      "connected": "已连接",
+      "disconnected": "已断开",
+      "bytesPerSecond": "字节/秒"
+    },
+    "syncTasks": {
+      "title": "同步任务",
+      "addTask": "添加任务",
+      "editTask": "编辑任务",
+      "deleteTask": "删除任务",
+      "taskName": "任务名称",
+      "source": "源目录",
+      "target": "目标目录",
+      "enabled": "已启用",
+      "deleteMissing": "删除缺失文件",
+      "checksumMode": "校验和模式",
+      "save": "保存",
+      "cancel": "取消",
+      "startSync": "开始同步",
+      "dryRun": "预演运行",
+      "noTasks": "没有同步任务"
+    },
+    "activityLog": {
+      "title": "活动日志",
+      "date": "日期",
+      "source": "源",
+      "target": "目标",
+      "status": "状态",
+      "filesCopied": "已复制文件",
+      "bytesCopied": "已复制字节",
+      "errors": "错误",
+      "noLogs": "没有活动日志",
+      "success": "成功",
+      "failed": "失败",
+      "inProgress": "进行中"
+    },
+    "settings": {
+      "title": "设置",
+      "language": "语言",
+      "darkMode": "暗黑模式",
+      "systemTheme": "系统主题",
+      "notifications": "通知",
+      "autoSync": "自动同步",
+      "deleteConfirmation": "删除确认",
+      "verifyAfterCopy": "复制后验证",
+      "saveSettings": "保存设置",
+      "resetDefaults": "重置为默认"
+    },
+    "sync": {
+      "phase": {
+        "scanning": "扫描中",
+        "copying": "复制中",
+        "deleting": "删除中",
+        "verifying": "验证中"
+      },
+      "file": "文件",
+      "progress": "进度",
+      "completed": "已完成",
+      "cancelled": "已取消",
+      "error": "错误",
+      "syncComplete": "同步完成",
+      "filesCopied": "已复制 {{count}} 个文件",
+      "filesDeleted": "已删除 {{count}} 个文件",
+      "bytesCopied": "已复制 {{bytes}} MB"
+    },
+    "common": {
+      "confirm": "确认",
+      "yes": "是",
+      "no": "否",
+      "cancel": "取消",
+      "save": "保存",
+      "delete": "删除",
+      "edit": "编辑",
+      "add": "添加",
+      "close": "关闭",
+      "ok": "确定",
+      "loading": "加载中...",
+      "error": "错误",
+      "success": "成功",
+      "warning": "警告"
+    },
+    "errors": {
+      "diskFull": "磁盘已满",
+      "smbDisconnected": "SMB已断开",
+      "permissionDenied": "权限被拒绝",
+      "fileNotFound": "文件未找到",
+      "networkError": "网络错误"
+    }
+  }
+}

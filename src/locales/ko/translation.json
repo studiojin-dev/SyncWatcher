@@ -1,0 +1,104 @@
+{
+  "translation": {
+    "appName": "SyncWatcher",
+    "nav": {
+      "dashboard": "대시보드",
+      "syncTasks": "동기화 작업",
+      "activityLog": "활동 로그",
+      "settings": "설정"
+    },
+    "dashboard": {
+      "title": "대시보드",
+      "noDevices": "연결된 장치 없음",
+      "currentSpeed": "현재 속도",
+      "freeSpace": "여유 공간",
+      "deviceStatus": "장치 상태",
+      "connected": "연결됨",
+      "disconnected": "연결 해제",
+      "bytesPerSecond": "바이트/초"
+    },
+    "syncTasks": {
+      "title": "동기화 작업",
+      "addTask": "작업 추가",
+      "editTask": "작업 편집",
+      "deleteTask": "작업 삭제",
+      "taskName": "작업 이름",
+      "source": "원본",
+      "target": "대상",
+      "enabled": "활성화",
+      "deleteMissing": "누락 항목 삭제",
+      "checksumMode": "체크섬 모드",
+      "save": "저장",
+      "cancel": "취소",
+      "startSync": "동기화 시작",
+      "dryRun": "미리보기",
+      "noTasks": "구성된 동기화 작업 없음"
+    },
+    "activityLog": {
+      "title": "활동 로그",
+      "date": "날짜",
+      "source": "원본",
+      "target": "대상",
+      "status": "상태",
+      "filesCopied": "복사된 파일",
+      "bytesCopied": "복사된 바이트",
+      "errors": "오류",
+      "noLogs": "활동 로그 없음",
+      "success": "성공",
+      "failed": "실패",
+      "inProgress": "진행 중"
+    },
+    "settings": {
+      "title": "설정",
+      "language": "언어",
+      "darkMode": "다크 모드",
+      "systemTheme": "시스템 테마",
+      "notifications": "알림",
+      "autoSync": "자동 동기화",
+      "deleteConfirmation": "삭제 확인",
+      "verifyAfterCopy": "복사 후 검증",
+      "saveSettings": "설정 저장",
+      "resetDefaults": "기본값으로 재설정"
+    },
+    "sync": {
+      "phase": {
+        "scanning": "스캔 중",
+        "copying": "복사 중",
+        "deleting": "삭제 중",
+        "verifying": "검증 중"
+      },
+      "file": "파일",
+      "progress": "진행률",
+      "completed": "완료됨",
+      "cancelled": "취소됨",
+      "error": "오류",
+      "syncComplete": "동기화 완료",
+      "filesCopied": "{{count}}개 파일 복사됨",
+      "filesDeleted": "{{count}}개 파일 삭제됨",
+      "bytesCopied": "{{bytes}} MB 복사됨"
+    },
+    "common": {
+      "confirm": "확인",
+      "yes": "예",
+      "no": "아니오",
+      "cancel": "취소",
+      "save": "저장",
+      "delete": "삭제",
+      "edit": "편집",
+      "add": "추가",
+      "close": "닫기",
+      "ok": "확인",
+      "loading": "로딩 중...",
+      "error": "오류",
+      "success": "성공",
+      "warning": "경고"
+    },
+    "errors": {
+      "diskFull": "디스크 꽉 참",
+      "smbDisconnected": "SMB 연결 해제",
+      "permissionDenied": "권한 거부됨",
+      "fileNotFound": "파일을 찾을 수 없음",
+      "networkError": "네트워크 오류"
+    }
+  }
+}

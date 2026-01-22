@@ -1,0 +1,104 @@
+{
+  "translation": {
+    "appName": "SyncWatcher",
+    "nav": {
+      "dashboard": "ダッシュボード",
+      "syncTasks": "同期タスク",
+      "activityLog": "アクティビティログ",
+      "settings": "設定"
+    },
+    "dashboard": {
+      "title": "ダッシュボード",
+      "noDevices": "接続されたデバイスはありません",
+      "currentSpeed": "現在速度",
+      "freeSpace": "空き容量",
+      "deviceStatus": "デバイス状態",
+      "connected": "接続済み",
+      "disconnected": "未接続",
+      "bytesPerSecond": "バイト/秒"
+    },
+    "syncTasks": {
+      "title": "同期タスク",
+      "addTask": "タスク追加",
+      "editTask": "タスク編集",
+      "deleteTask": "タスク削除",
+      "taskName": "タスク名",
+      "source": "ソース",
+      "target": "ターゲット",
+      "enabled": "有効",
+      "deleteMissing": "欠落ファイルを削除",
+      "checksumMode": "チェックサムモード",
+      "save": "保存",
+      "cancel": "キャンセル",
+      "startSync": "同期開始",
+      "dryRun": "ドライラン",
+      "noTasks": "同期タスクはありません"
+    },
+    "activityLog": {
+      "title": "アクティビティログ",
+      "date": "日付",
+      "source": "ソース",
+      "target": "ターゲット",
+      "status": "ステータス",
+      "filesCopied": "コピーされたファイル",
+      "bytesCopied": "コピーされたバイト",
+      "errors": "エラー",
+      "noLogs": "アクティビティログはありません",
+      "success": "成功",
+      "failed": "失敗",
+      "inProgress": "進行中"
+    },
+    "settings": {
+      "title": "設定",
+      "language": "言語",
+      "darkMode": "ダークモード",
+      "systemTheme": "システムテーマ",
+      "notifications": "通知",
+      "autoSync": "自動同期",
+      "deleteConfirmation": "削除確認",
+      "verifyAfterCopy": "コピー後検証",
+      "saveSettings": "設定保存",
+      "resetDefaults": "デフォルトに戻す"
+    },
+    "sync": {
+      "phase": {
+        "scanning": "スキャン中",
+        "copying": "コピー中",
+        "deleting": "削除中",
+        "verifying": "検証中"
+      },
+      "file": "ファイル",
+      "progress": "進行状況",
+      "completed": "完了",
+      "cancelled": "キャンセル",
+      "error": "エラー",
+      "syncComplete": "同期完了",
+      "filesCopied": "{{count}}ファイルをコピー",
+      "filesDeleted": "{{count}}ファイルを削除",
+      "bytesCopied": "{{bytes}} MBをコピー"
+    },
+    "common": {
+      "confirm": "確認",
+      "yes": "はい",
+      "no": "いいえ",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "delete": "削除",
+      "edit": "編集",
+      "add": "追加",
+      "close": "閉じる",
+      "ok": "OK",
+      "loading": "読み込み中...",
+      "error": "エラー",
+      "success": "成功",
+      "warning": "警告"
+    },
+    "errors": {
+      "diskFull": "ディスクがいっぱい",
+      "smbDisconnected": "SMB接続切断",
+      "permissionDenied": "許可拒否",
+      "fileNotFound": "ファイルが見つかりません",
+      "networkError": "ネットワークエラー"
+    }
+  }
+}

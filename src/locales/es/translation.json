@@ -1,0 +1,104 @@
+{
+  "translation": {
+    "appName": "SyncWatcher",
+    "nav": {
+      "dashboard": "Tablero",
+      "syncTasks": "Tareas de Sincronización",
+      "activityLog": "Registro de Actividad",
+      "settings": "Configuración"
+    },
+    "dashboard": {
+      "title": "Tablero",
+      "noDevices": "No dispositivos conectados",
+      "currentSpeed": "Velocidad Actual",
+      "freeSpace": "Espacio Libre",
+      "deviceStatus": "Estado del Dispositivo",
+      "connected": "Conectado",
+      "disconnected": "Desconectado",
+      "bytesPerSecond": "bytes/s"
+    },
+    "syncTasks": {
+      "title": "Tareas de Sincronización",
+      "addTask": "Agregar Tarea",
+      "editTask": "Editar Tarea",
+      "deleteTask": "Eliminar Tarea",
+      "taskName": "Nombre de Tarea",
+      "source": "Origen",
+      "target": "Destino",
+      "enabled": "Habilitado",
+      "deleteMissing": "Eliminar Ausentes",
+      "checksumMode": "Modo de Checksum",
+      "save": "Guardar",
+      "cancel": "Cancelar",
+      "startSync": "Iniciar Sincronización",
+      "dryRun": "Ejecución en Prueba",
+      "noTasks": "No hay tareas de sincronización configuradas"
+    },
+    "activityLog": {
+      "title": "Registro de Actividad",
+      "date": "Fecha",
+      "source": "Origen",
+      "target": "Destino",
+      "status": "Estado",
+      "filesCopied": "Archivos Copiados",
+      "bytesCopied": "Bytes Copiados",
+      "errors": "Errores",
+      "noLogs": "No hay registros de actividad",
+      "success": "Éxito",
+      "failed": "Falló",
+      "inProgress": "En Progreso"
+    },
+    "settings": {
+      "title": "Configuración",
+      "language": "Idioma",
+      "darkMode": "Modo Oscuro",
+      "systemTheme": "Tema del Sistema",
+      "notifications": "Notificaciones",
+      "autoSync": "Sincronización Automática",
+      "deleteConfirmation": "Confirmación de Eliminación",
+      "verifyAfterCopy": "Verificar Después de Copiar",
+      "saveSettings": "Guardar Configuración",
+      "resetDefaults": "Restablecer Valores Predeterminados"
+    },
+    "sync": {
+      "phase": {
+        "scanning": "Escaneando",
+        "copying": "Copiando",
+        "deleting": "Eliminando",
+        "verifying": "Verificando"
+      },
+      "file": "Archivo",
+      "progress": "Progreso",
+      "completed": "Completado",
+      "cancelled": "Cancelado",
+      "error": "Error",
+      "syncComplete": "Sincronización Completada",
+      "filesCopied": "{{count}} archivos copiados",
+      "filesDeleted": "{{count}} archivos eliminados",
+      "bytesCopied": "{{bytes}} MB copiados"
+    },
+    "common": {
+      "confirm": "Confirmar",
+      "yes": "Sí",
+      "no": "No",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "delete": "Eliminar",
+      "edit": "Editar",
+      "add": "Agregar",
+      "close": "Cerrar",
+      "ok": "OK",
+      "loading": "Cargando...",
+      "error": "Error",
+      "success": "Éxito",
+      "warning": "Advertencia"
+    },
+    "errors": {
+      "diskFull": "Disco Lleno",
+      "smbDisconnected": "SMB Desconectado",
+      "permissionDenied": "Permiso Denegado",
+      "fileNotFound": "Archivo No Encontrado",
+      "networkError": "Error de Red"
+    }
+  }
+}

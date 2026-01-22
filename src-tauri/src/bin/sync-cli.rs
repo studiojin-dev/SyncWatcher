@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
-            Err(e) => anyhow::bail!("Failed to list volumes: {}", e),
+            Err(e) => anyhow::bail!("Failed to list volumes: {e}"),
         }
         return Ok(());
     }
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     let target = cli.target.ok_or_else(|| anyhow::anyhow!("Missing required argument: --target"))?;
 
     if !source.exists() {
-        anyhow::bail!("Source directory does not exist: {:?}", source);
+        anyhow::bail!("Source directory does not exist: {source:?}");
     }
 
     let engine = SyncEngine::new(source.clone(), target.clone());
@@ -82,8 +82,8 @@ async fn main() -> anyhow::Result<()> {
 
     if cli.dry_run {
         println!("🔍 Dry-run mode - comparing directories...");
-        println!("   Source: {:?}", source);
-        println!("   Target: {:?}", target);
+        println!("   Source: {source:?}");
+        println!("   Target: {target:?}");
         println!();
 
         match engine.dry_run(&options).await {
@@ -116,14 +116,14 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
-                eprintln!("❌ Error during dry-run: {}", e);
+                eprintln!("❌ Error during dry-run: {e}");
                 std::process::exit(1);
             }
         }
     } else {
         println!("🚀 Starting synchronization...");
-        println!("   Source: {:?}", source);
-        println!("   Target: {:?}", target);
+        println!("   Source: {source:?}");
+        println!("   Target: {target:?}");
         println!("   Delete missing: {}", cli.delete_missing);
         println!("   Checksum mode: {}", options.checksum_mode);
         println!();
@@ -176,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(e) => {
                 pb.abandon_with_message("❌ Synchronization failed!");
-                eprintln!("❌ Error: {}", e);
+                eprintln!("❌ Error: {e}");
                 std::process::exit(1);
             }
         }

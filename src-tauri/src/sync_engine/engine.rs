@@ -105,18 +105,16 @@ impl SyncEngine {
                         });
                     }
                 }
-            } else {
-                if source_meta.is_file {
-                    bytes_to_copy += source_meta.size;
-                    diffs.push(FileDiff {
-                        path: path.clone(),
-                        kind: FileDiffKind::New,
-                        source_size: Some(source_meta.size),
-                        target_size: None,
-                        checksum_source: None,
-                        checksum_target: None,
-                    });
-                }
+            } else if source_meta.is_file {
+                bytes_to_copy += source_meta.size;
+                diffs.push(FileDiff {
+                    path: path.clone(),
+                    kind: FileDiffKind::New,
+                    source_size: Some(source_meta.size),
+                    target_size: None,
+                    checksum_source: None,
+                    checksum_target: None,
+                });
             }
         }
 
@@ -293,7 +291,7 @@ impl SyncEngine {
 
             if source_hash != target_hash {
                 let _ = fs::remove_file(target).await;
-                anyhow::bail!("Verification failed: Checksum mismatch for {:?}", target);
+                anyhow::bail!("Verification failed: Checksum mismatch for {target:?}");
             }
         }
 

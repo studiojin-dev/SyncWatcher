@@ -1,6 +1,6 @@
 use anyhow::Result;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct FolderWatcher {
     _watcher: RecommendedWatcher,
@@ -31,6 +31,12 @@ pub struct VolumeInfo {
 }
 
 pub struct DiskMonitor;
+
+impl Default for DiskMonitor {
+    fn default() -> Self {
+        Self
+    }
+}
 
 impl DiskMonitor {
     pub fn new() -> Self {
@@ -74,7 +80,7 @@ impl DiskMonitor {
         Ok(volumes)
     }
 
-    fn is_removable_volume(path: &PathBuf) -> bool {
+    fn is_removable_volume(path: &Path) -> bool {
         let volume_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         let non_removable = [
@@ -90,13 +96,13 @@ impl DiskMonitor {
     }
 }
 
-fn get_disk_space(path: &PathBuf) -> Result<u64> {
-    let stat = nix::sys::statvfs::statvfs(path.as_path())?;
+fn get_disk_space(path: &Path) -> Result<u64> {
+    let stat = nix::sys::statvfs::statvfs(path)?;
     Ok(stat.blocks() as u64 * stat.block_size() as u64)
 }
 
-fn get_available_space(path: &PathBuf) -> Result<u64> {
-    let stat = nix::sys::statvfs::statvfs(path.as_path())?;
+fn get_available_space(path: &Path) -> Result<u64> {
+    let stat = nix::sys::statvfs::statvfs(path)?;
     Ok(stat.blocks_available() as u64 * stat.block_size() as u64)
 }
 
