@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSyncTasks, SyncTask } from '../hooks/useSyncTasks';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
 import { useToast } from '../components/ui/Toast';
+import YamlEditorModal from '../components/ui/YamlEditorModal';
 
 /**
  * Sync Tasks View - Manage sync tasks
@@ -12,7 +13,7 @@ import { useToast } from '../components/ui/Toast';
  */
 function SyncTasksView() {
     const { t } = useTranslation();
-    const { tasks, addTask, updateTask, deleteTask, toggleTask } = useSyncTasks();
+    const { tasks, addTask, updateTask, deleteTask, toggleTask, error, reload } = useSyncTasks();
     const { showToast } = useToast();
     const [showForm, setShowForm] = useState(false);
     const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
@@ -84,8 +85,22 @@ function SyncTasksView() {
         showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
     };
 
+    const handleEditorClose = async () => {
+        // Reload data after fixing errors
+        await reload();
+    };
+
     return (
         <div>
+            {/* YAML Error Editor Modal */}
+            {error && (
+                <YamlEditorModal
+                    opened={!!error}
+                    onClose={handleEditorClose}
+                    error={error}
+                />
+            )}
+
             <FadeIn>
                 <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-8)' }}>
                     <div>

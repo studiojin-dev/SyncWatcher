@@ -13,12 +13,25 @@ const MAX_YAML_SIZE = 1024 * 1024;
 // Timeout for YAML parsing (5 seconds)
 const YAML_PARSE_TIMEOUT = 5000;
 
+// Error types for better error handling
+export interface YamlParseError {
+  type: 'PARSE_ERROR';
+  message: string;
+  line?: number;
+  column?: number;
+  filePath: string;
+  rawContent: string;
+}
+
+export type YamlStoreError = YamlParseError;
+
 export function useYamlStore<T extends Record<string, any>>({
   fileName,
   defaultData,
 }: YamlStoreOptions<T>) {
   const [data, setData] = useState<T>(defaultData);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<YamlStoreError | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -28,6 +41,22 @@ export function useYamlStore<T extends Record<string, any>>({
         path2: fileName
       });
 
+      // Check if file exists
+      const exists = await invoke<boolean>('file_exists', { path: filePath });
+
+      if (!exists) {
+        // File doesn't exist - create it with default data
+        console.info(`${fileName} does not exist, creating with defaults`);
+        await invoke('ensure_directory_exists', { path: appDataDir });
+        const yamlContent = yaml.dump(defaultData, { indent: 2, lineWidth: -1 });
+        await invoke('write_yaml_file', { path: filePath, content: yamlContent });
+        setData(defaultData);
+        setError(null);
+        setLoaded(true);
+        return;
+      }
+
+      // File exists - try to read and parse
       try {
         const content = await invoke<string>('read_yaml_file', { path: filePath });
 
@@ -36,6 +65,7 @@ export function useYamlStore<T extends Record<string, any>>({
           console.error(`YAML file ${fileName} too large (${content.length} bytes, max ${MAX_YAML_SIZE})`);
           alert(`Error: Configuration file is too large. Using default settings.`);
           setData(defaultData);
+          setError(null);
           setLoaded(true);
           return;
         }
@@ -44,6 +74,7 @@ export function useYamlStore<T extends Record<string, any>>({
         if (!content || content.trim().length === 0) {
           console.warn(`YAML file ${fileName} is empty, using defaults`);
           setData(defaultData);
+          setError(null);
           setLoaded(true);
           return;
         }
@@ -61,22 +92,42 @@ export function useYamlStore<T extends Record<string, any>>({
         // Validate parsed data structure
         if (parsed && typeof parsed === 'object') {
           setData(parsed);
+          setError(null);
         } else {
           console.warn(`Invalid YAML structure in ${fileName}, using defaults`);
           setData(defaultData);
+          setError(null);
         }
-      } catch (parseError) {
-        // File doesn't exist or is corrupted - create it with default data
-        console.warn(`Could not read ${fileName}, creating with defaults`);
-        await invoke('ensure_directory_exists', { path: appDataDir });
-        const yamlContent = yaml.dump(defaultData, { indent: 2, lineWidth: -1 });
-        await invoke('write_yaml_file', { path: filePath, content: yamlContent });
+      } catch (parseError: any) {
+        // YAML parsing error - extract detailed error info
+        console.error(`Failed to parse ${fileName}:`, parseError);
+
+        // Check if it's a YAMLException with line/column info
+        if (parseError.name === 'YAMLException' && parseError.mark) {
+          setError({
+            type: 'PARSE_ERROR',
+            message: parseError.message || 'Unknown YAML parsing error',
+            line: parseError.mark.line + 1, // Convert from 0-indexed to 1-indexed
+            column: parseError.mark.column + 1,
+            filePath,
+            rawContent: await invoke<string>('read_yaml_file', { path: filePath })
+          });
+        } else {
+          // Generic error - still show editor
+          setError({
+            type: 'PARSE_ERROR',
+            message: parseError.message || 'Unknown error',
+            filePath,
+            rawContent: await invoke<string>('read_yaml_file', { path: filePath })
+          });
+        }
         setData(defaultData);
       }
       setLoaded(true);
     } catch (err) {
       console.error(`Failed to load ${fileName}:`, err);
       setData(defaultData);
+      setError(null);
       setLoaded(true);
     }
   }, [fileName, defaultData]);
@@ -101,15 +152,22 @@ export function useYamlStore<T extends Record<string, any>>({
       await invoke('write_yaml_file', { path: filePath, content: yamlContent });
 
       setData(newData);
+      setError(null); // Clear error on successful save
     } catch (err) {
       console.error(`Failed to save ${fileName}:`, err);
       throw err;
     }
   }, [fileName]);
 
+  // Reload data (used after fixing errors in editor)
+  const reload = useCallback(() => {
+    setError(null);
+    return loadData();
+  }, [loadData]);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  return { data, saveData, loaded, setData };
+  return { data, saveData, loaded, setData, error, reload };
 }

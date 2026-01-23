@@ -14,7 +14,7 @@ export interface SyncTask {
 }
 
 export function useSyncTasks() {
-    const { data: tasks, saveData: saveTasks, loaded } = useYamlStore<SyncTask[]>({
+    const { data: tasks, saveData: saveTasks, loaded, error, reload } = useYamlStore<SyncTask[]>({
         fileName: 'tasks.yaml',
         defaultData: [],
     });
@@ -53,6 +53,8 @@ export function useSyncTasks() {
         updateTask,
         deleteTask,
         toggleTask,
+        error,
+        reload,
     };
 }
 

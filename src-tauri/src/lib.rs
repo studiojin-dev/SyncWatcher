@@ -84,6 +84,56 @@ async fn ensure_directory_exists(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn file_exists(path: String) -> Result<bool, String> {
+    Ok(std::path::Path::new(&path).exists())
+}
+
+#[tauri::command]
+async fn open_in_editor(path: String) -> Result<(), String> {
+    // Try to open with default system editor
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-t")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try xdg-open first, fall back to common editors
+        let editors = vec!["xdg-open", "gedit", "kate", "code", "vim"];
+        let mut opened = false;
+
+        for editor in editors {
+            if std::process::Command::new(editor)
+                .arg(&path)
+                .spawn()
+                .is_ok()
+            {
+                opened = true;
+                break;
+            }
+        }
+
+        if !opened {
+            return Err("No suitable editor found".to_string());
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("notepad.exe")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn sync_dry_run(
     source: PathBuf,
     target: PathBuf,
@@ -169,6 +219,8 @@ pub fn run() {
             read_yaml_file,
             write_yaml_file,
             ensure_directory_exists,
+            file_exists,
+            open_in_editor,
             add_log,
             get_system_logs,
             get_task_logs,

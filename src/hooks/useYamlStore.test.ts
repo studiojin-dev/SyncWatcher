@@ -27,7 +27,7 @@ describe('useYamlStore', () => {
   it('should load default data when file does not exist', async () => {
     mockInvoke.mockResolvedValueOnce('/config/dir') // get_app_config_dir
       .mockResolvedValueOnce('/config/dir/test.yaml') // join_paths
-      .mockRejectedValueOnce(new Error('File not found')) // read_yaml_file fails
+      .mockResolvedValueOnce(false) // file_exists returns false
       .mockResolvedValueOnce('') // ensure_directory_exists
       .mockResolvedValue(''); // write_yaml_file
 
@@ -68,6 +68,7 @@ describe('useYamlStore', () => {
     // Mock the invoke chain
     mockInvoke.mockResolvedValueOnce('/config/dir') // get_app_config_dir
       .mockResolvedValueOnce('/config/dir/test.yaml') // join_paths
+      .mockResolvedValueOnce(true) // file_exists returns true
       .mockResolvedValueOnce(largeContent); // read_yaml_file
 
     // Mock alert
@@ -106,9 +107,9 @@ describe('useYamlStore', () => {
     const invalidYaml = ': : :\ninvalid: [[[[';
     mockInvoke.mockResolvedValueOnce('/config/dir')
       .mockResolvedValueOnce('/config/dir/test.yaml')
+      .mockResolvedValueOnce(true) // file_exists returns true
       .mockResolvedValueOnce(invalidYaml)
-      .mockResolvedValueOnce('') // ensure_directory_exists
-      .mockResolvedValue(''); // write_yaml_file
+      .mockResolvedValueOnce(invalidYaml); // read_yaml_file again for error.rawContent
 
     const { result } = renderHook(() => useYamlStore({
       fileName: 'test.yaml',
@@ -117,12 +118,9 @@ describe('useYamlStore', () => {
 
     await waitFor(() => {
       expect(result.current.data).toEqual(defaultData);
-      // Should create file with defaults instead of showing alert
-      expect(mockInvoke).toHaveBeenCalledWith('ensure_directory_exists', { path: '/config/dir' });
-      expect(mockInvoke).toHaveBeenCalledWith('write_yaml_file', {
-        path: '/config/dir/test.yaml',
-        content: expect.any(String)
-      });
+      // Should set error state
+      expect(result.current.error).not.toBeNull();
+      expect(result.current.error?.type).toBe('PARSE_ERROR');
     });
   });
 
