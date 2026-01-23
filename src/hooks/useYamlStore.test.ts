@@ -25,7 +25,11 @@ describe('useYamlStore', () => {
   });
 
   it('should load default data when file does not exist', async () => {
-    mockInvoke.mockRejectedValueOnce(new Error('File not found')); // read_yaml_file fails
+    mockInvoke.mockResolvedValueOnce('/config/dir') // get_app_config_dir
+      .mockResolvedValueOnce('/config/dir/test.yaml') // join_paths
+      .mockRejectedValueOnce(new Error('File not found')) // read_yaml_file fails
+      .mockResolvedValueOnce('') // ensure_directory_exists
+      .mockResolvedValue(''); // write_yaml_file
 
     const { result } = renderHook(() => useYamlStore({
       fileName: 'test.yaml',
@@ -35,6 +39,11 @@ describe('useYamlStore', () => {
     await waitFor(() => {
       expect(result.current.data).toEqual(defaultData);
       expect(result.current.loaded).toBe(true);
+      // Should automatically create file with defaults
+      expect(mockInvoke).toHaveBeenCalledWith('write_yaml_file', {
+        path: '/config/dir/test.yaml',
+        content: expect.any(String)
+      });
     });
   });
 
@@ -97,9 +106,9 @@ describe('useYamlStore', () => {
     const invalidYaml = ': : :\ninvalid: [[[[';
     mockInvoke.mockResolvedValueOnce('/config/dir')
       .mockResolvedValueOnce('/config/dir/test.yaml')
-      .mockResolvedValueOnce(invalidYaml);
-
-    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {});
+      .mockResolvedValueOnce(invalidYaml)
+      .mockResolvedValueOnce('') // ensure_directory_exists
+      .mockResolvedValue(''); // write_yaml_file
 
     const { result } = renderHook(() => useYamlStore({
       fileName: 'test.yaml',
@@ -108,10 +117,13 @@ describe('useYamlStore', () => {
 
     await waitFor(() => {
       expect(result.current.data).toEqual(defaultData);
-      expect(alertMock).toHaveBeenCalled();
+      // Should create file with defaults instead of showing alert
+      expect(mockInvoke).toHaveBeenCalledWith('ensure_directory_exists', { path: '/config/dir' });
+      expect(mockInvoke).toHaveBeenCalledWith('write_yaml_file', {
+        path: '/config/dir/test.yaml',
+        content: expect.any(String)
+      });
     });
-
-    alertMock.mockRestore();
   });
 
   it('should validate parsed data structure', async () => {

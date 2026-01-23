@@ -66,9 +66,11 @@ export function useYamlStore<T extends Record<string, any>>({
           setData(defaultData);
         }
       } catch (parseError) {
-        console.error(`Failed to parse ${fileName}:`, parseError);
-        // User-facing error notification
-        alert(`Warning: Could not load ${fileName}. Using default settings.\nError: ${parseError}`);
+        // File doesn't exist or is corrupted - create it with default data
+        console.warn(`Could not read ${fileName}, creating with defaults`);
+        await invoke('ensure_directory_exists', { path: appDataDir });
+        const yamlContent = yaml.dump(defaultData, { indent: 2, lineWidth: -1 });
+        await invoke('write_yaml_file', { path: filePath, content: yamlContent });
         setData(defaultData);
       }
       setLoaded(true);
