@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Switch, Select } from '@mantine/core';
+import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
 import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -173,6 +174,8 @@ function SettingsView() {
                         </div>
                     </div>
                 </section>
+
+                <ExclusionSetsManager />
 
                 {/* Behavior Section */}
                 <section>

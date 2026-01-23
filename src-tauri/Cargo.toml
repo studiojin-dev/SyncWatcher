@@ -23,6 +23,7 @@ tokio-stream = "0.1"
 notify = "6.1"
 walkdir = "2.5"
 twox-hash = "1.6"
+globset = "0.4"
 anyhow = "1.0"
 thiserror = "1.0"
 clap = { version = "4.5", features = ["derive"] }

@@ -172,6 +172,7 @@ async fn sync_dry_run(
     target: PathBuf,
     delete_missing: bool,
     checksum_mode: bool,
+    exclude_patterns: Vec<String>,
 ) -> Result<DryRunResult, String> {
     let engine = SyncEngine::new(source, target);
     let options = SyncOptions {
@@ -180,6 +181,7 @@ async fn sync_dry_run(
         preserve_permissions: true,
         preserve_times: true,
         verify_after_copy: false,
+        exclude_patterns,
     };
 
     engine.dry_run(&options).await.map_err(|e| e.to_string())
@@ -198,6 +200,7 @@ async fn start_sync(
     delete_missing: bool,
     checksum_mode: bool,
     verify_after_copy: bool,
+    exclude_patterns: Vec<String>,
     app: tauri::AppHandle,
 ) -> Result<SyncResult, String> {
     let engine = SyncEngine::new(source, target);
@@ -207,6 +210,7 @@ async fn start_sync(
         preserve_permissions: true,
         preserve_times: true,
         verify_after_copy,
+        exclude_patterns,
     };
 
     engine

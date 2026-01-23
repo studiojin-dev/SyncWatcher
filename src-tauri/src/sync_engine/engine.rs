@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 
 pub struct SyncEngine {
     source: PathBuf,
@@ -37,11 +38,60 @@ impl SyncEngine {
         Ok(format!("{:x}", hasher.finish()))
     }
 
-    async fn read_directory(&self, dir: &Path) -> Result<Vec<FileMetadata>> {
+    async fn read_directory(&self, dir: &Path, exclude_patterns: &[String]) -> Result<Vec<FileMetadata>> {
         let mut files = Vec::new();
+
+        // Pattern validation constants
+        const MAX_PATTERN_LENGTH: usize = 255;
+        const MAX_PATTERN_COUNT: usize = 100;
+
+        // Validate pattern count
+        if exclude_patterns.len() > MAX_PATTERN_COUNT {
+            anyhow::bail!(
+                "Too many exclusion patterns: {} (max: {})",
+                exclude_patterns.len(),
+                MAX_PATTERN_COUNT
+            );
+        }
+
+        // Build GlobSet with validation
+        let mut builder = GlobSetBuilder::new();
+        for pattern in exclude_patterns {
+            // Skip empty patterns
+            let trimmed = pattern.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // Validate pattern length
+            if trimmed.len() > MAX_PATTERN_LENGTH {
+                anyhow::bail!(
+                    "Exclusion pattern too long: '{}...' ({} chars, max: {})",
+                    &trimmed[..50.min(trimmed.len())],
+                    trimmed.len(),
+                    MAX_PATTERN_LENGTH
+                );
+            }
+
+            // Add pattern with better error context
+            match Glob::new(trimmed) {
+                Ok(glob) => builder.add(glob),
+                Err(e) => anyhow::bail!("Invalid exclusion pattern '{}': {}", trimmed, e),
+            };
+        }
+        let globs = builder.build()?;
 
         for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
             let path = entry.path();
+            
+            // Check exclusions
+            // We need to check the relative path against the glob patterns
+            if let Ok(relative_path) = path.strip_prefix(dir) {
+                if globs.is_match(relative_path) {
+                    continue;
+                }
+            }
+
             let metadata = fs::metadata(path).await?;
             let relative_path = path.strip_prefix(dir)?.to_path_buf();
 
@@ -57,9 +107,9 @@ impl SyncEngine {
     }
 
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
-        let source_files = self.read_directory(&self.source).await?;
+        let source_files = self.read_directory(&self.source, &options.exclude_patterns).await?;
         let target_files = if self.target.exists() {
-            self.read_directory(&self.target).await?
+            self.read_directory(&self.target, &options.exclude_patterns).await?
         } else {
             Vec::new()
         };
@@ -345,6 +395,137 @@ mod tests {
 
         let result = engine.sync_files(&options, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
+
+        Ok(())
+    }
+
+
+    #[tokio::test]
+    async fn test_exclusion() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let file1 = source_dir.path().join("file1.txt");
+        let file2 = source_dir.path().join("file2.txt");
+        let ignored_file = source_dir.path().join("ignore_me.txt");
+        let ignored_dir = source_dir.path().join("node_modules");
+        fs::create_dir(&ignored_dir).await?;
+        let ignored_nested = ignored_dir.join("dep.js");
+
+        fs::write(&file1, b"content").await?;
+        fs::write(&file2, b"content").await?;
+        fs::write(&ignored_file, b"content").await?;
+        fs::write(&ignored_nested, b"content").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = vec![
+            "ignore_me.txt".to_string(), 
+            "node_modules/**".to_string()
+        ];
+
+        let dry_run = engine.dry_run(&options).await?;
+        // Should only copy file1.txt and file2.txt
+        assert_eq!(dry_run.files_to_copy, 2);
+
+        let result = engine.sync_files(&options, |_| {}).await?;
+        assert_eq!(result.files_copied, 2);
+
+        assert!(target_dir.path().join("file1.txt").exists());
+        assert!(target_dir.path().join("file2.txt").exists());
+        assert!(!target_dir.path().join("ignore_me.txt").exists());
+        assert!(!target_dir.path().join("node_modules").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exclusion_empty_patterns() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        let file1 = source_dir.path().join("file1.txt");
+        fs::write(&file1, b"content").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = vec![];
+
+        let dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exclusion_special_characters() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        
+        let file_normal = source_dir.path().join("normal.txt");
+        let file_special = source_dir.path().join("special[1].txt");
+        let file_space = source_dir.path().join("file with spaces.txt");
+        
+        fs::write(&file_normal, b"content").await?;
+        fs::write(&file_special, b"content").await?;
+        fs::write(&file_space, b"content").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = vec![
+            "file with spaces.txt".to_string(),
+            "special*".to_string() 
+        ];
+
+        let dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 1); 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exclusion_nested_wildcards() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        
+        let dir1 = source_dir.path().join("dir1");
+        fs::create_dir(&dir1).await?;
+        let file1 = dir1.join("ignore.log");
+        let file2 = dir1.join("keep.txt");
+        
+        fs::write(&file1, b"log").await?;
+        fs::write(&file2, b"txt").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = vec!["**/*.log".to_string()];
+
+        let dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_exclusion_validation_limits() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        
+        // Test count limit
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = (0..101).map(|i| format!("pattern_{}", i)).collect();
+        let result = engine.dry_run(&options).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Too many"));
+
+        // Test length limit
+        let mut options2 = SyncOptions::default();
+        let long_pattern = "a".repeat(300);
+        options2.exclude_patterns = vec![long_pattern];
+        let result2 = engine.dry_run(&options2).await;
+        assert!(result2.is_err());
+        assert!(result2.unwrap_err().to_string().contains("too long"));
 
         Ok(())
     }

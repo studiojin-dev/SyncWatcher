@@ -25,6 +25,7 @@ pub struct SyncOptions {
     pub preserve_permissions: bool,
     pub preserve_times: bool,
     pub verify_after_copy: bool,
+    pub exclude_patterns: Vec<String>,
 }
 
 impl Default for SyncOptions {
@@ -35,6 +36,7 @@ impl Default for SyncOptions {
             preserve_permissions: true,
             preserve_times: true,
             verify_after_copy: false,
+            exclude_patterns: Vec::new(),
         }
     }
 }

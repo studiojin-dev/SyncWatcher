@@ -11,6 +11,7 @@ export interface SyncTask {
     checksumMode: boolean;
     watching?: boolean;
     verifyAfterCopy?: boolean;
+    exclusionSets?: string[];
 }
 
 export function useSyncTasks() {
