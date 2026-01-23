@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AboutView from './AboutView';
-import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
 // Mock Tauri invoke

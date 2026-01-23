@@ -154,11 +154,9 @@ describe('useYamlStore', () => {
 
     // Create data larger than 1MB when dumped
     const largeData = {
-      data: 'x'.repeat(1024 * 1024),
-    };
-
-    const yamlContent = yaml.dump(largeData);
-    const size = new Blob([yamlContent]).size;
+      key: 'x'.repeat(1024 * 1024),
+      nested: { item: true },
+    } as typeof defaultData;
 
     const { result } = renderHook(() => useYamlStore({
       fileName: 'test.yaml',
@@ -212,7 +210,7 @@ describe('useYamlStore', () => {
       defaultData,
     }));
 
-    const newData = { key: 'direct update' };
+    const newData = { key: 'direct update', nested: { item: false } };
 
     act(() => {
       result.current.setData(newData);
