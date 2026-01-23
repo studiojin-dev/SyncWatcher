@@ -142,9 +142,9 @@ function SyncTasksView() {
 
             {/* Task Form Modal */}
             {showForm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
                     <CardAnimation>
-                        <div className="neo-box p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
+                        <div className="neo-box p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] my-auto">
                             <h3 className="text-xl font-heading font-bold mb-6 border-b-3 border-[var(--border-main)] pb-2 uppercase">
                                 {editingTask ? t('syncTasks.editTask') : t('syncTasks.addTask')}
                             </h3>
@@ -214,6 +214,7 @@ function SyncTasksView() {
                                         onChange={setSelectedSets}
                                         searchable
                                         clearable
+                                        comboboxProps={{ position: 'bottom', middlewares: { flip: false, shift: true } }}
                                         styles={{
                                             input: {
                                                 border: '3px solid var(--border-main)',

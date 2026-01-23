@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobSetBuilder};
 
 pub struct SyncEngine {
     source: PathBuf,
