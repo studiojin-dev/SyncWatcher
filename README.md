@@ -15,6 +15,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 ## Tech Stack
 
 ### Core (Rust)
+
 - **Tauri v2** - macOS app bundle
 - **Tokio** - Async runtime for high-performance I/O
 - **notify** - File system event monitoring
@@ -23,6 +24,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 - **nix** - System calls for disk space detection
 
 ### Frontend (Planned for Phase 3-4)
+
 - **React + TypeScript** - Functional components
 - **Mantine** - UI component library
 - **Tailwind CSS** - Styling & layout
@@ -35,6 +37,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 ### ✅ Completed (Phase 1-2)
 
 #### Core Sync Engine
+
 - **One-way sync** (Source → Target)
 - **Dry-run mode** - Preview changes before executing
 - **Delete missing files** - Optional toggle
@@ -43,6 +46,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 - **File metadata preservation** - Permissions and modification times
 
 #### CLI Tool
+
 - `--source/-s` - Source directory
 - `--target/-t` - Target directory
 - `--dry-run/-n` - Preview mode
@@ -52,6 +56,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 - **Detailed output** - Statistics and diff listing
 
 #### System Integration
+
 - **Disk monitoring** - Detects mounted volumes on macOS
 - **Volume detection** - Identifies removable media (USB, SD cards)
 - **Space calculation** - Total and available disk space
@@ -60,6 +65,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 ### 🚧 Planned (Phase 3-4)
 
 #### UI/UX
+
 - **Dashboard** - Bento grid layout with stats
 - **Task management** - Sync task configuration
 - **Activity log** - History of sync operations
@@ -68,6 +74,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 - **Dark mode** - Sync with system theme
 
 #### Advanced Features
+
 - **SMB protocol support** - Network share integration
 - **Real-time progress** - Live file transfer visualization
 - **Error handling** - Graceful failure recovery
@@ -246,6 +253,7 @@ Filter Removable Media for User
 ## Roadmap
 
 ### Phase 1 ✅ - Rust Core & CLI
+
 - [x] SyncEngine implementation
 - [x] Dry-run functionality
 - [x] CLI binary with clap
@@ -253,12 +261,14 @@ Filter Removable Media for User
 - [x] Testing & verification
 
 ### Phase 2 ✅ - System Integration
+
 - [x] DiskMonitor for volume detection
 - [x] FolderWatcher with notify
 - [x] Tauri commands exposure
 - [x] macOS-specific optimizations
 
 ### Phase 3 🚧 - UI Skeleton
+
 - [ ] React + Mantine + Tailwind setup
 - [ ] Window vibrancy (Mica effect)
 - [ ] Dashboard layout
@@ -266,6 +276,7 @@ Filter Removable Media for User
 - [ ] Settings page
 
 ### Phase 4 🚧 - Wiring & Polish
+
 - [ ] Real-time progress events
 - [ ] Framer Motion animations
 - [ ] i18n support (en, ko, ja, zh, es)
@@ -279,7 +290,25 @@ This project is in active development. See `AGENTS.md` for development guideline
 
 ## License
 
-[To be determined]
+This project uses **dual licensing**:
+
+| License | Use Case |
+|---------|----------|
+| [AGPL-3.0](./LICENSE-AGPL-3.0.txt) | Open source, personal, research, non-commercial |
+| [Commercial](./LICENSE-COMMERCIAL.md) | Commercial/proprietary use |
+
+### 💼 Commercial Use
+
+SyncWatcher is available as a commercial product at [studiojin.dev](https://studiojin.dev).
+
+If you'd like to use SyncWatcher commercially without AGPL-3.0 obligations (source disclosure, copyleft), please contact [support@studiojin.dev](mailto:support@studiojin.dev) for licensing options.
+
+### Open Source Use
+
+Under AGPL-3.0, you may freely use, modify, and distribute this software as long as:
+
+- All modifications are also released under AGPL-3.0
+- Source code is made available to users (including network users)
 
 ## Acknowledgments
 
