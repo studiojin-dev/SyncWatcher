@@ -194,6 +194,12 @@ fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
 }
 
 #[tauri::command]
+fn get_removable_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
+    let monitor = DiskMonitor::new();
+    monitor.get_removable_volumes().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn start_sync(
     source: PathBuf,
     target: PathBuf,
@@ -249,6 +255,7 @@ pub fn run() {
             get_app_version,
             sync_dry_run,
             list_volumes,
+            get_removable_volumes,
             start_sync,
             list_sync_tasks,
             get_app_config_dir,

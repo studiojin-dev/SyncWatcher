@@ -83,6 +83,7 @@ impl DiskMonitor {
     fn is_removable_volume(path: &Path) -> bool {
         let volume_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
+        // Non-removable system volumes
         let non_removable = [
             "Macintosh HD",
             "Preboot",
@@ -92,7 +93,65 @@ impl DiskMonitor {
             "VM",
         ];
 
-        !non_removable.contains(&volume_name)
+        // Check if it's a known system volume
+        if non_removable.contains(&volume_name) {
+            return false;
+        }
+
+        // Check if it's a Time Machine volume
+        if Self::is_time_machine_volume(path) {
+            return false;
+        }
+
+        // Check if it's a system path
+        if Self::is_system_volume(path) {
+            return false;
+        }
+
+        true
+    }
+
+    fn is_time_machine_volume(path: &Path) -> bool {
+        // Check for .timemachine file
+        if path.join(".timemachine").exists() {
+            return true;
+        }
+
+        // Check for com.apple.TimeMachine.MachineID.plist
+        if path.join(".com.apple.TimeMachine.MachineID.plist").exists() {
+            return true;
+        }
+
+        // Check volume name patterns
+        let volume_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        volume_name.contains("time machine") 
+            || volume_name.contains("timemachine")
+            || volume_name.contains("backup")
+    }
+
+    fn is_system_volume(path: &Path) -> bool {
+        // Check if mounted under /System/Volumes
+        if let Some(path_str) = path.to_str() {
+            if path_str.starts_with("/System/Volumes/") {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Get only removable volumes (USB, SD cards, external drives)
+    /// Filters out Time Machine and system volumes
+    pub fn get_removable_volumes(&self) -> Result<Vec<VolumeInfo>> {
+        let all_volumes = self.list_volumes()?;
+        Ok(all_volumes
+            .into_iter()
+            .filter(|v| v.is_removable)
+            .collect())
     }
 }
 

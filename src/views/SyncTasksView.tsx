@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlus, IconPlayerPlay, IconEye } from '@tabler/icons-react';
+import { IconPlus, IconPlayerPlay, IconEye, IconFolder } from '@tabler/icons-react';
 import { MultiSelect } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useSyncTasks, SyncTask } from '../hooks/useSyncTasks';
 import { useExclusionSets } from '../hooks/useExclusionSets';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
@@ -25,13 +26,44 @@ function SyncTasksView() {
     // Changing the logic: adding state for selected sets in form
     const [selectedSets, setSelectedSets] = useState<string[]>([]);
 
+    // Directory paths state
+    const [sourcePath, setSourcePath] = useState('');
+    const [targetPath, setTargetPath] = useState('');
+
     useEffect(() => {
         if (editingTask) {
             setSelectedSets(editingTask.exclusionSets || []);
+            setSourcePath(editingTask.source || '');
+            setTargetPath(editingTask.target || '');
         } else {
             setSelectedSets([]);
+            setSourcePath('');
+            setTargetPath('');
         }
     }, [editingTask, showForm]);
+
+    const browseDirectory = async (type: 'source' | 'target') => {
+        try {
+            const selected = await open({
+                directory: true,
+                multiple: false,
+                title: type === 'source' ? 'Select Source Directory' : 'Select Target Directory',
+            });
+
+            if (selected && typeof selected === 'string') {
+                if (type === 'source') {
+                    setSourcePath(selected);
+                } else {
+                    setTargetPath(selected);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to open directory picker:', err);
+            showToast('Failed to open directory picker', 'error');
+        }
+    };
+
+
 
 
 
@@ -40,8 +72,8 @@ function SyncTasksView() {
         const formData = new FormData(e.currentTarget);
         const taskData = {
             name: formData.get('name') as string,
-            source: formData.get('source') as string,
-            target: formData.get('target') as string,
+            source: sourcePath || formData.get('source') as string,
+            target: targetPath || formData.get('target') as string,
             enabled: true,
             deleteMissing: formData.get('deleteMissing') === 'on',
             checksumMode: formData.get('checksumMode') === 'on',
@@ -165,25 +197,47 @@ function SyncTasksView() {
                                     <label className="block text-sm font-bold mb-1 uppercase font-mono">
                                         {t('syncTasks.source')}
                                     </label>
-                                    <input
-                                        name="source"
-                                        defaultValue={editingTask?.source || ''}
-                                        required
-                                        className="neo-input font-mono text-sm"
-                                        placeholder="/path/to/source"
-                                    />
+                                    <div className="flex gap-2">
+                                        <input
+                                            name="source"
+                                            value={sourcePath}
+                                            onChange={(e) => setSourcePath(e.target.value)}
+                                            required
+                                            className="neo-input font-mono text-sm flex-1"
+                                            placeholder="/path/to/source"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => browseDirectory('source')}
+                                            className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
+                                            title="Browse..."
+                                        >
+                                            <IconFolder size={18} />
+                                        </button>
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-1 uppercase font-mono">
                                         {t('syncTasks.target')}
                                     </label>
-                                    <input
-                                        name="target"
-                                        defaultValue={editingTask?.target || ''}
-                                        required
-                                        className="neo-input font-mono text-sm"
-                                        placeholder="/path/to/target"
-                                    />
+                                    <div className="flex gap-2">
+                                        <input
+                                            name="target"
+                                            value={targetPath}
+                                            onChange={(e) => setTargetPath(e.target.value)}
+                                            required
+                                            className="neo-input font-mono text-sm flex-1"
+                                            placeholder="/path/to/target"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => browseDirectory('target')}
+                                            className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
+                                            title="Browse..."
+                                        >
+                                            <IconFolder size={18} />
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="flex gap-6 py-2">
                                     <label className="flex items-center gap-2 cursor-pointer select-none">
