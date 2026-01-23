@@ -246,80 +246,78 @@ function SyncTasksView() {
                             </form>
                         </div>
                     </CardAnimation>
-                </CardAnimation>
                 </div>
-    )
-}
+            )}
 
-{/* Task List */ }
-<div className="grid gap-6">
-    {tasks.map((task, index) => (
-        <CardAnimation key={task.id} index={index}>
-            <div className={`neo-box p-5 relative transition-opacity ${task.enabled ? 'opacity-100' : 'opacity-60 bg-[var(--bg-secondary)]'}`}>
-                <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-                    <div className="min-w-0 flex-1 w-full"> {/* min-w-0 ensures truncation works */}
-                        <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-lg font-heading font-black uppercase tracking-tight truncate">
-                                {task.name}
-                            </h3>
-                            <div className="flex gap-2">
-                                {task.deleteMissing && (
-                                    <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-error)] text-white">
+            {/* Task List */}
+            <div className="grid gap-6">
+                {tasks.map((task, index) => (
+                    <CardAnimation key={task.id} index={index}>
+                        <div className={`neo-box p-5 relative transition-opacity ${task.enabled ? 'opacity-100' : 'opacity-60 bg-[var(--bg-secondary)]'}`}>
+                            <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                                <div className="min-w-0 flex-1 w-full"> {/* min-w-0 ensures truncation works */}
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <h3 className="text-lg font-heading font-black uppercase tracking-tight truncate">
+                                            {task.name}
+                                        </h3>
+                                        <div className="flex gap-2">
+                                            {task.deleteMissing && (
+                                                <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-error)] text-white">
+                                                    DEL
+                                                </span>
+                                            )}
+                                            {task.checksumMode && (
+                                                <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-warning)] text-black">
+                                                    CHK
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Path Display with Overflow Protection */}
+                                    <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] mb-1 break-all">
+                                        <span className="font-bold text-[var(--accent-main)]">SRC:</span> {task.source}
+                                    </div>
+                                    <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] break-all">
+                                        <span className="font-bold text-[var(--accent-success)]">DST:</span> {task.target}
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
+                                    <button
+                                        className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                                        onClick={() => handleDryRun(task)}
+                                        title={t('syncTasks.dryRun')}
+                                    >
+                                        <IconEye size={20} stroke={2} />
+                                    </button>
+                                    <button
+                                        className={`p-2 border-2 border-[var(--border-main)] transition-all ${syncing === task.id ? 'bg-[var(--bg-secondary)] cursor-wait' : 'bg-[var(--accent-main)] text-white hover:shadow-[2px_2px_0_0_black]'}`}
+                                        onClick={() => handleSync(task)}
+                                        disabled={syncing === task.id}
+                                        title={t('syncTasks.startSync')}
+                                    >
+                                        <IconPlayerPlay size={20} stroke={2} className={syncing === task.id ? 'animate-spin' : ''} />
+                                    </button>
+                                    <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
+                                    <button
+                                        className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
+                                        onClick={() => { setEditingTask(task); setShowForm(true); }}
+                                    >
+                                        EDIT
+                                    </button>
+                                    <button
+                                        className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--color-accent-error)] hover:text-white transition-colors"
+                                        onClick={() => handleDelete(task)}
+                                    >
                                         DEL
-                                    </span>
-                                )}
-                                {task.checksumMode && (
-                                    <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-warning)] text-black">
-                                        CHK
-                                    </span>
-                                )}
+                                    </button>
+                                </div>
                             </div>
                         </div>
-
-                        {/* Path Display with Overflow Protection */}
-                        <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] mb-1 break-all">
-                            <span className="font-bold text-[var(--accent-main)]">SRC:</span> {task.source}
-                        </div>
-                        <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] break-all">
-                            <span className="font-bold text-[var(--accent-success)]">DST:</span> {task.target}
-                        </div>
-                    </div>
-
-                    <div className="flex gap-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
-                        <button
-                            className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                            onClick={() => handleDryRun(task)}
-                            title={t('syncTasks.dryRun')}
-                        >
-                            <IconEye size={20} stroke={2} />
-                        </button>
-                        <button
-                            className={`p-2 border-2 border-[var(--border-main)] transition-all ${syncing === task.id ? 'bg-[var(--bg-secondary)] cursor-wait' : 'bg-[var(--accent-main)] text-white hover:shadow-[2px_2px_0_0_black]'}`}
-                            onClick={() => handleSync(task)}
-                            disabled={syncing === task.id}
-                            title={t('syncTasks.startSync')}
-                        >
-                            <IconPlayerPlay size={20} stroke={2} className={syncing === task.id ? 'animate-spin' : ''} />
-                        </button>
-                        <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
-                        <button
-                            className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
-                            onClick={() => { setEditingTask(task); setShowForm(true); }}
-                        >
-                            EDIT
-                        </button>
-                        <button
-                            className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--color-accent-error)] hover:text-white transition-colors"
-                            onClick={() => handleDelete(task)}
-                        >
-                            DEL
-                        </button>
-                    </div>
-                </div>
+                    </CardAnimation>
+                ))}
             </div>
-        </CardAnimation>
-    ))}
-</div>
         </div >
     );
 }
