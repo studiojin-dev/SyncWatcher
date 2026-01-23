@@ -47,10 +47,6 @@ export function CardAnimation({ children, index = 0 }: CardAnimationProps) {
                 delay: index * 0.05, // Stagger effect
                 ease: [0.33, 1, 0.68, 1],
             }}
-            whileHover={{
-                y: -2,
-                transition: { duration: 0.1 },
-            }}
         >
             {children}
         </motion.div>
