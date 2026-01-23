@@ -4,6 +4,9 @@ pub mod logging;
 pub mod license;
 pub mod path_validation;
 
+#[cfg(test)]
+mod lib_tests;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};

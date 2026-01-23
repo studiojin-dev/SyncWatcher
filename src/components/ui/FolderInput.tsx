@@ -32,11 +32,16 @@ function FolderInput({ value, onChange, name, label }: FolderInputProps) {
 
   return (
     <div>
-      <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
+      <label
+        className="text-sm text-secondary"
+        style={{ display: 'block', marginBottom: 'var(--space-3)' }}
+        htmlFor={name}
+      >
         {label}
       </label>
       <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
         <input
+          id={name}
           name={name}
           value={value}
           onChange={(e) => onChange(e.target.value)}
