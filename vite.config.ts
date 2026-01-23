@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import license from 'rollup-plugin-license';
+import path from 'path';
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -10,6 +12,24 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    license({
+      thirdParty: {
+        output: {
+          file: path.join(__dirname, 'dist', 'oss-licenses.json'),
+          encoding: 'utf-8',
+          template(dependencies) {
+            return JSON.stringify(dependencies.map(dep => ({
+              name: dep.name,
+              version: dep.version,
+              license: dep.license,
+              repository: dep.repository,
+              url: dep.homepage || dep.repository?.url,
+              author: dep.author?.name
+            })), null, 2);
+          },
+        },
+      },
+    }),
   ],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

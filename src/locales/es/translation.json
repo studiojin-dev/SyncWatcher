@@ -6,12 +6,12 @@
       "syncTasks": "Tareas de Sincronización",
       "activityLog": "Registro de Actividad",
       "settings": "Configuración",
-      "help": "Help",
-      "about": "About"
+      "help": "Ayuda",
+      "about": "Acerca de"
     },
     "dashboard": {
       "title": "Panel de Control",
-      "noDevices": "No dispositivos conectados",
+      "noDevices": "No hay dispositivos conectados",
       "currentSpeed": "Velocidad Actual",
       "freeSpace": "Espacio Libre",
       "deviceStatus": "Estado del Dispositivo",
@@ -24,16 +24,16 @@
       "addTask": "Agregar Tarea",
       "editTask": "Editar Tarea",
       "deleteTask": "Eliminar Tarea",
-      "taskName": "Nombre de Tarea",
+      "taskName": "Nombre de la Tarea",
       "source": "Origen",
       "target": "Destino",
       "enabled": "Habilitado",
-      "deleteMissing": "Eliminar Ausentes",
-      "checksumMode": "Modo de Checksum",
+      "deleteMissing": "Eliminar Faltantes",
+      "checksumMode": "Modo Checksum",
       "save": "Guardar",
       "cancel": "Cancelar",
       "startSync": "Iniciar Sincronización",
-      "dryRun": "Ejecución en Prueba",
+      "dryRun": "Simulacro",
       "noTasks": "No hay tareas de sincronización configuradas"
     },
     "activityLog": {
@@ -47,7 +47,7 @@
       "errors": "Errores",
       "noLogs": "No hay registros de actividad",
       "success": "Éxito",
-      "failed": "Falló",
+      "failed": "Fallido",
       "inProgress": "En Progreso"
     },
     "settings": {
@@ -57,9 +57,9 @@
       "systemTheme": "Tema del Sistema",
       "notifications": "Notificaciones",
       "deleteConfirmation": "Confirmación de Eliminación",
-      "verifyAfterCopy": "Verificar Después de Copiar",
+      "verifyAfterCopy": "Verificar después de copiar",
       "saveSettings": "Guardar Configuración",
-      "resetDefaults": "Restablecer Valores Predeterminados"
+      "resetDefaults": "Restablecer Valores"
     },
     "sync": {
       "phase": {
@@ -82,28 +82,28 @@
       "title": "Ayuda y Documentación",
       "syncEngine": {
         "title": "Motor de Sincronización",
-        "description": "Sincronización unidireccional de archivos potente con verificación de suma de comprobación",
-        "oneWaySync": "Sincronización unidireccional del Directorio de Origen al Directorio de Destino",
-        "dryRun": "Vista previa de los cambios antes de ejecutar en modo de prueba",
-        "checksum": "Comparación de precisión xxHash64"
+        "description": "Potente sincronización unidireccional de archivos con verificación de checksum",
+        "oneWaySync": "Sincronización unidireccional de Origen a Destino",
+        "dryRun": "Vista previa de cambios antes de ejecutar con el modo Simulacro",
+        "checksum": "Comparación rápida de checksum xxHash64 para mayor precisión"
       },
       "watchMode": {
-        "title": "Modo de Observación",
-        "description": "Supervisión en tiempo real de directorios para copias de seguridad instantáneas",
-        "autoDetection": "Detecta automáticamente los cambios en el directorio de origen",
-        "realTime": "Iniciar sincronización inmediatamente cuando se modifican archivos"
+        "title": "Modo Vigilancia",
+        "description": "Monitoreo de directorios en tiempo real para copias de seguridad instantáneas",
+        "autoDetection": "Detecta automáticamente cambios de archivos en el directorio de origen",
+        "realTime": "Inicia la sincronización inmediatamente cuando se modifican los archivos"
       },
       "security": {
         "title": "Integridad de Datos",
-        "description": "Garantiza la seguridad y consistencia de tus datos",
-        "verifyAfterCopy": "Verificar de nuevo con checksum después de copiar (solo para datos críticos)",
-        "deleteMissing": "Eliminar archivos que no existen en el directorio de origen"
+        "description": "Asegure que sus datos permanezcan seguros y consistentes",
+        "verifyAfterCopy": "Verificar archivos después de copiar con re-checksum (solo para datos críticos)",
+        "deleteMissing": "Opcionalmente eliminar archivos en el destino que no existen en el origen"
       },
       "preview": {
-        "title": "Modo de Vista Previa",
-        "description": "Ver qué ocurrirá sin realizar operaciones reales de archivos",
-        "whatIf": "Muestra una lista detallada de los archivos que serán copiados/actualizados/eliminados",
-        "noChanges": "No se realizan operaciones reales de archivos"
+        "title": "Modo Vista Previa",
+        "description": "Vea lo que sucedería sin realizar cambios",
+        "whatIf": "Muestra una diferencia detallada de los archivos que se copiarán/actualizarán/eliminarán",
+        "noChanges": "No se realizan operaciones de archivos reales en el modo de vista previa"
       }
     },
     "about": {
@@ -111,7 +111,7 @@
       "developer": "Desarrollador",
       "license": "Licencia",
       "openSourceLibraries": "Bibliotecas de Código Abierto",
-      "generateReport": "Generar Informe",
+      "viewLicenses": "Ver licencias de código abierto",
       "viewOnGithub": "Ver en GitHub"
     },
     "common": {
@@ -122,9 +122,9 @@
       "save": "Guardar",
       "delete": "Eliminar",
       "edit": "Editar",
-      "add": "Agregar",
+      "add": "Añadir",
       "close": "Cerrar",
-      "ok": "OK",
+      "ok": "Aceptar",
       "loading": "Cargando...",
       "error": "Error",
       "success": "Éxito",
@@ -135,14 +135,14 @@
       "parseError": "Error de Análisis YAML",
       "line": "Línea",
       "column": "Columna",
-      "jumpToError": "Ir a Línea de Error",
+      "jumpToError": "Ir al Error",
       "placeholder": "Ingrese contenido YAML...",
       "validationError": "Error de Validación",
       "validYaml": "YAML Válido",
-      "validYamlDescription": "Este YAML es válido y listo para guardar.",
+      "validYamlDescription": "Este YAML es válido y se puede guardar.",
       "openExternal": "Abrir en Editor Externo",
       "saveAndReload": "Guardar y Recargar",
-      "unsavedChangesWarning": "Tienes cambios sin guardar. ¿Cerrar de todos modos?"
+      "unsavedChangesWarning": "Hay cambios sin guardar. ¿Desea cerrar de todos modos?"
     },
     "errors": {
       "diskFull": "Disco Lleno",

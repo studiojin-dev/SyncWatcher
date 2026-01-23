@@ -2,133 +2,133 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "Dashboard",
-      "syncTasks": "Sync Tasks",
-      "activityLog": "Activity Log",
-      "settings": "Settings",
-      "help": "Help",
-      "about": "About"
+      "dashboard": "ダッシュボード",
+      "syncTasks": "同期タスク",
+      "activityLog": "アクティビティログ",
+      "settings": "設定",
+      "help": "ヘルプ",
+      "about": "情報"
     },
     "dashboard": {
-      "title": "Dashboard",
-      "noDevices": "No devices connected",
-      "currentSpeed": "Current Speed",
-      "freeSpace": "Free Space",
-      "deviceStatus": "Device Status",
-      "connected": "Connected",
-      "disconnected": "Disconnected",
-      "bytesPerSecond": "bytes/s"
+      "title": "ダッシュボード",
+      "noDevices": "接続されたデバイスなし",
+      "currentSpeed": "現在の速度",
+      "freeSpace": "空き容量",
+      "deviceStatus": "デバイスの状態",
+      "connected": "接続済み",
+      "disconnected": "切断",
+      "bytesPerSecond": "バイト/秒"
     },
     "syncTasks": {
-      "title": "Sync Tasks",
-      "addTask": "Add Task",
-      "editTask": "Edit Task",
-      "deleteTask": "Delete Task",
-      "taskName": "Task Name",
-      "source": "Source",
-      "target": "Target",
-      "enabled": "Enabled",
-      "deleteMissing": "Delete Missing",
-      "checksumMode": "Checksum Mode",
-      "save": "Save",
-      "cancel": "Cancel",
-      "startSync": "Start Sync",
-      "dryRun": "Dry Run",
-      "noTasks": "No sync tasks configured"
+      "title": "同期タスク",
+      "addTask": "タスク追加",
+      "editTask": "タスク編集",
+      "deleteTask": "タスク削除",
+      "taskName": "タスク名",
+      "source": "転送元",
+      "target": "転送先",
+      "enabled": "有効",
+      "deleteMissing": "欠落ファイルを削除",
+      "checksumMode": "チェックサムモード",
+      "save": "保存",
+      "cancel": "キャンセル",
+      "startSync": "同期開始",
+      "dryRun": "ドライラン",
+      "noTasks": "同期タスクが設定されていません"
     },
     "activityLog": {
-      "title": "Activity Log",
-      "date": "Date",
-      "source": "Source",
-      "target": "Target",
-      "status": "Status",
-      "filesCopied": "Files Copied",
-      "bytesCopied": "Bytes Copied",
-      "errors": "Errors",
-      "noLogs": "No activity logs",
-      "success": "Success",
-      "failed": "Failed",
-      "inProgress": "In Progress"
+      "title": "アクティビティログ",
+      "date": "日付",
+      "source": "転送元",
+      "target": "転送先",
+      "status": "ステータス",
+      "filesCopied": "コピー済みファイル",
+      "bytesCopied": "コピー済みバイト",
+      "errors": "エラー",
+      "noLogs": "アクティビティログなし",
+      "success": "成功",
+      "failed": "失敗",
+      "inProgress": "進行中"
     },
     "settings": {
-      "title": "Settings",
-      "language": "Language",
-      "darkMode": "Dark Mode",
-      "systemTheme": "System Theme",
-      "notifications": "Notifications",
-      "deleteConfirmation": "Delete Confirmation",
-      "verifyAfterCopy": "Verify After Copy",
-      "saveSettings": "Save Settings",
-      "resetDefaults": "Reset to Defaults"
+      "title": "設定",
+      "language": "言語",
+      "darkMode": "ダークモード",
+      "systemTheme": "システムテーマ",
+      "notifications": "通知",
+      "deleteConfirmation": "削除確認",
+      "verifyAfterCopy": "コピー後の検証",
+      "saveSettings": "設定を保存",
+      "resetDefaults": "初期設定に戻す"
     },
     "sync": {
       "phase": {
-        "scanning": "Scanning",
-        "copying": "Copying",
-        "deleting": "Deleting",
-        "verifying": "Verifying"
+        "scanning": "スキャン中",
+        "copying": "コピー中",
+        "deleting": "削除中",
+        "verifying": "検証中"
       },
-      "file": "File",
-      "progress": "Progress",
-      "completed": "Completed",
-      "cancelled": "Cancelled",
-      "error": "Error",
-      "syncComplete": "Sync Complete",
-      "filesCopied": "{{count}} files copied",
-      "filesDeleted": "{{count}} files deleted",
-      "bytesCopied": "{{bytes}} MB copied"
+      "file": "ファイル",
+      "progress": "進捗",
+      "completed": "完了",
+      "cancelled": "キャンセル",
+      "error": "エラー",
+      "syncComplete": "同期完了",
+      "filesCopied": "{{count}} ファイルをコピーしました",
+      "filesDeleted": "{{count}} ファイルを削除しました",
+      "bytesCopied": "{{bytes}} MB コピーしました"
     },
     "help": {
-      "title": "Help & Documentation",
+      "title": "ヘルプとドキュメント",
       "syncEngine": {
-        "title": "Sync Engine",
-        "description": "Powerful one-way file synchronization with checksum verification",
-        "oneWaySync": "One-way sync from Source to Target directory",
-        "dryRun": "Preview changes before executing with Dry Run mode",
-        "checksum": "Fast xxHash64 checksum comparison for accuracy"
+        "title": "同期エンジン",
+        "description": "チェックサム検証を備えた強力な一方向ファイル同期",
+        "oneWaySync": "転送元から転送先ディレクトリへの一方向同期",
+        "dryRun": "ドライランモードで実行前に変更内容をプレビュー",
+        "checksum": "正確性のための高速 xxHash64 チェックサム比較"
       },
       "watchMode": {
-        "title": "Watch Mode",
-        "description": "Real-time directory monitoring for instant backups",
-        "autoDetection": "Automatically detects file changes in source directory",
-        "realTime": "Initiates sync immediately when files are modified"
+        "title": "監視モード",
+        "description": "インスタントバックアップのためのリアルタイムディレクトリ監視",
+        "autoDetection": "転送元ディレクトリのファイル変更を自動検出",
+        "realTime": "ファイルが変更されると直ちに同期を開始"
       },
       "security": {
-        "title": "Data Integrity",
-        "description": "Ensure your data remains safe and consistent",
-        "verifyAfterCopy": "Verify files after copying with re-checksum (for critical data only)",
-        "deleteMissing": "Optionally delete files in target that don't exist in source"
+        "title": "データ整合性",
+        "description": "データの安全性と一貫性を確保",
+        "verifyAfterCopy": "コピー後の再チェックサムによるファイル検証（重要データ向け）",
+        "deleteMissing": "転送先にのみ存在するファイルをオプションで削除"
       },
       "preview": {
-        "title": "Preview Mode",
-        "description": "See what would happen without making changes",
-        "whatIf": "Shows a detailed diff of files to be copied/updated/deleted",
-        "noChanges": "No actual file operations are performed in preview mode"
+        "title": "プレビューモード",
+        "description": "変更を行わずに何が起こるかを確認",
+        "whatIf": "コピー/更新/削除されるファイルの詳細な差分を表示",
+        "noChanges": "プレビューモードでは実際のファイル操作は行われません"
       }
     },
     "about": {
-      "title": "About",
-      "developer": "Developer",
-      "license": "License",
-      "openSourceLibraries": "Open Source Libraries",
-      "generateReport": "Generate Report",
-      "viewOnGithub": "View on GitHub"
+      "title": "情報",
+      "developer": "開発者",
+      "license": "ライセンス",
+      "openSourceLibraries": "オープンソースライブラリ",
+      "viewLicenses": "オープンソースライセンスを表示",
+      "viewOnGithub": "GitHub で表示"
     },
     "common": {
-      "confirm": "Confirm",
-      "yes": "Yes",
-      "no": "No",
-      "cancel": "Cancel",
-      "save": "Save",
-      "delete": "Delete",
-      "edit": "Edit",
-      "add": "Add",
-      "close": "Close",
+      "confirm": "確認",
+      "yes": "はい",
+      "no": "いいえ",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "delete": "削除",
+      "edit": "編集",
+      "add": "追加",
+      "close": "閉じる",
       "ok": "OK",
-      "loading": "Loading...",
-      "error": "Error",
-      "success": "Success",
-      "warning": "Warning"
+      "loading": "読み込み中...",
+      "error": "エラー",
+      "success": "成功",
+      "warning": "警告"
     },
     "yamlEditor": {
       "title": "YAMLファイル編集",
@@ -145,11 +145,11 @@
       "unsavedChangesWarning": "未保存の変更があります。閉じますか？"
     },
     "errors": {
-      "diskFull": "Disk Full",
-      "smbDisconnected": "SMB Disconnected",
-      "permissionDenied": "Permission Denied",
-      "fileNotFound": "File Not Found",
-      "networkError": "Network Error"
+      "diskFull": "ディスク容量不足",
+      "smbDisconnected": "SMB 切断",
+      "permissionDenied": "アクセス拒否",
+      "fileNotFound": "ファイルが見つかりません",
+      "networkError": "ネットワークエラー"
     }
   }
 }

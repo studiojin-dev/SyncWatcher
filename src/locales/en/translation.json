@@ -111,7 +111,7 @@
       "developer": "Developer",
       "license": "License",
       "openSourceLibraries": "Open Source Libraries",
-      "generateReport": "Generate Report",
+      "viewLicenses": "View Open Source Licenses",
       "viewOnGithub": "View on GitHub"
     },
     "common": {

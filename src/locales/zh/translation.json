@@ -2,133 +2,133 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "Dashboard",
-      "syncTasks": "Sync Tasks",
-      "activityLog": "Activity Log",
-      "settings": "Settings",
-      "help": "Help",
-      "about": "About"
+      "dashboard": "仪表板",
+      "syncTasks": "同步任务",
+      "activityLog": "活动日志",
+      "settings": "设置",
+      "help": "帮助",
+      "about": "关于"
     },
     "dashboard": {
-      "title": "Dashboard",
-      "noDevices": "No devices connected",
-      "currentSpeed": "Current Speed",
-      "freeSpace": "Free Space",
-      "deviceStatus": "Device Status",
-      "connected": "Connected",
-      "disconnected": "Disconnected",
-      "bytesPerSecond": "bytes/s"
+      "title": "仪表板",
+      "noDevices": "未连接设备",
+      "currentSpeed": "当前速度",
+      "freeSpace": "剩余空间",
+      "deviceStatus": "设备状态",
+      "connected": "已连接",
+      "disconnected": "已断开",
+      "bytesPerSecond": "字节/秒"
     },
     "syncTasks": {
-      "title": "Sync Tasks",
-      "addTask": "Add Task",
-      "editTask": "Edit Task",
-      "deleteTask": "Delete Task",
-      "taskName": "Task Name",
-      "source": "Source",
-      "target": "Target",
-      "enabled": "Enabled",
-      "deleteMissing": "Delete Missing",
-      "checksumMode": "Checksum Mode",
-      "save": "Save",
-      "cancel": "Cancel",
-      "startSync": "Start Sync",
-      "dryRun": "Dry Run",
-      "noTasks": "No sync tasks configured"
+      "title": "同步任务",
+      "addTask": "添加任务",
+      "editTask": "编辑任务",
+      "deleteTask": "删除任务",
+      "taskName": "任务名称",
+      "source": "源目录",
+      "target": "目标目录",
+      "enabled": "启用",
+      "deleteMissing": "删除缺失项",
+      "checksumMode": "校验和模式",
+      "save": "保存",
+      "cancel": "取消",
+      "startSync": "开始同步",
+      "dryRun": "模拟运行",
+      "noTasks": "未配置同步任务"
     },
     "activityLog": {
-      "title": "Activity Log",
-      "date": "Date",
-      "source": "Source",
-      "target": "Target",
-      "status": "Status",
-      "filesCopied": "Files Copied",
-      "bytesCopied": "Bytes Copied",
-      "errors": "Errors",
-      "noLogs": "No activity logs",
-      "success": "Success",
-      "failed": "Failed",
-      "inProgress": "In Progress"
+      "title": "活动日志",
+      "date": "日期",
+      "source": "源",
+      "target": "目标",
+      "status": "状态",
+      "filesCopied": "已复制文件",
+      "bytesCopied": "已复制字节",
+      "errors": "错误",
+      "noLogs": "无活动日志",
+      "success": "成功",
+      "failed": "失败",
+      "inProgress": "进行中"
     },
     "settings": {
-      "title": "Settings",
-      "language": "Language",
-      "darkMode": "Dark Mode",
-      "systemTheme": "System Theme",
-      "notifications": "Notifications",
-      "deleteConfirmation": "Delete Confirmation",
-      "verifyAfterCopy": "Verify After Copy",
-      "saveSettings": "Save Settings",
-      "resetDefaults": "Reset to Defaults"
+      "title": "设置",
+      "language": "语言",
+      "darkMode": "深色模式",
+      "systemTheme": "系统主题",
+      "notifications": "通知",
+      "deleteConfirmation": "删除“确认”",
+      "verifyAfterCopy": "复制后验证",
+      "saveSettings": "保存设置",
+      "resetDefaults": "恢复默认值"
     },
     "sync": {
       "phase": {
-        "scanning": "Scanning",
-        "copying": "Copying",
-        "deleting": "Deleting",
-        "verifying": "Verifying"
+        "scanning": "扫描中",
+        "copying": "复制中",
+        "deleting": "删除中",
+        "verifying": "验证中"
       },
-      "file": "File",
-      "progress": "Progress",
-      "completed": "Completed",
-      "cancelled": "Cancelled",
-      "error": "Error",
-      "syncComplete": "Sync Complete",
-      "filesCopied": "{{count}} files copied",
-      "filesDeleted": "{{count}} files deleted",
-      "bytesCopied": "{{bytes}} MB copied"
+      "file": "文件",
+      "progress": "进度",
+      "completed": "已完成",
+      "cancelled": "已取消",
+      "error": "错误",
+      "syncComplete": "同步完成",
+      "filesCopied": "已复制 {{count}} 个文件",
+      "filesDeleted": "已删除 {{count}} 个文件",
+      "bytesCopied": "已复制 {{bytes}} MB"
     },
     "help": {
-      "title": "Help & Documentation",
+      "title": "帮助与文档",
       "syncEngine": {
-        "title": "Sync Engine",
-        "description": "Powerful one-way file synchronization with checksum verification",
-        "oneWaySync": "One-way sync from Source to Target directory",
-        "dryRun": "Preview changes before executing with Dry Run mode",
-        "checksum": "Fast xxHash64 checksum comparison for accuracy"
+        "title": "同步引擎",
+        "description": "具有校验和验证功能的强大单向文件同步",
+        "oneWaySync": "从源目录到目标目录的单向同步",
+        "dryRun": "在执行前使用模拟运行模式预览更改",
+        "checksum": "快速 xxHash64 校验和比较以确保准确性"
       },
       "watchMode": {
-        "title": "Watch Mode",
-        "description": "Real-time directory monitoring for instant backups",
-        "autoDetection": "Automatically detects file changes in source directory",
-        "realTime": "Initiates sync immediately when files are modified"
+        "title": "监控模式",
+        "description": "实时目录监控以进行即时备份",
+        "autoDetection": "自动检测源目录中的文件更改",
+        "realTime": "文件修改时立即启动同步"
       },
       "security": {
-        "title": "Data Integrity",
-        "description": "Ensure your data remains safe and consistent",
-        "verifyAfterCopy": "Verify files after copying with re-checksum (for critical data only)",
-        "deleteMissing": "Optionally delete files in target that don't exist in source"
+        "title": "数据完整性",
+        "description": "确保您的数据保持安全和一致",
+        "verifyAfterCopy": "复制后使用重新校验和验证文件（仅针对关键数据）",
+        "deleteMissing": "可选地删除目标目录中不存在于源目录的文件"
       },
       "preview": {
-        "title": "Preview Mode",
-        "description": "See what would happen without making changes",
-        "whatIf": "Shows a detailed diff of files to be copied/updated/deleted",
-        "noChanges": "No actual file operations are performed in preview mode"
+        "title": "预览模式",
+        "description": "查看如果不进行更改会发生什么",
+        "whatIf": "显示将被复制/更新/删除的文件的详细差异",
+        "noChanges": "预览模式下不执行实际文件操作"
       }
     },
     "about": {
-      "title": "About",
-      "developer": "Developer",
-      "license": "License",
-      "openSourceLibraries": "Open Source Libraries",
-      "generateReport": "Generate Report",
-      "viewOnGithub": "View on GitHub"
+      "title": "关于",
+      "developer": "开发者",
+      "license": "许可证",
+      "openSourceLibraries": "开源库",
+      "viewLicenses": "查看开源许可证",
+      "viewOnGithub": "在 GitHub 上查看"
     },
     "common": {
-      "confirm": "Confirm",
-      "yes": "Yes",
-      "no": "No",
-      "cancel": "Cancel",
-      "save": "Save",
-      "delete": "Delete",
-      "edit": "Edit",
-      "add": "Add",
-      "close": "Close",
-      "ok": "OK",
-      "loading": "Loading...",
-      "error": "Error",
-      "success": "Success",
-      "warning": "Warning"
+      "confirm": "确认",
+      "yes": "是",
+      "no": "否",
+      "cancel": "取消",
+      "save": "保存",
+      "delete": "删除",
+      "edit": "编辑",
+      "add": "添加",
+      "close": "关闭",
+      "ok": "确定",
+      "loading": "加载中...",
+      "error": "错误",
+      "success": "成功",
+      "warning": "警告"
     },
     "yamlEditor": {
       "title": "编辑 YAML 文件",
@@ -145,11 +145,11 @@
       "unsavedChangesWarning": "您有未保存的更改。仍要关闭吗？"
     },
     "errors": {
-      "diskFull": "Disk Full",
-      "smbDisconnected": "SMB Disconnected",
-      "permissionDenied": "Permission Denied",
-      "fileNotFound": "File Not Found",
-      "networkError": "Network Error"
+      "diskFull": "磁盘已满",
+      "smbDisconnected": "SMB 已断开",
+      "permissionDenied": "权限被拒绝",
+      "fileNotFound": "文件未找到",
+      "networkError": "网络错误"
     }
   }
 }

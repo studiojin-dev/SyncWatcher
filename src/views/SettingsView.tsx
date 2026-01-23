@@ -55,139 +55,183 @@ function SettingsView() {
     };
 
     return (
-        <div className="fade-in">
-            <header style={{ marginBottom: 'var(--space-8)' }}>
-                <h1 className="text-xl" style={{ fontWeight: 'var(--weight-normal)', marginBottom: 'var(--space-2)' }}>
+        <div className="fade-in max-w-3xl">
+            <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-b-3 border-[var(--border-main)]">
+                <h1 className="text-2xl font-heading font-black uppercase mb-1">
                     {t('settings.title')}
                 </h1>
+                <div className="font-mono text-xs">
+                    // SYSTEM_CONFIGURATION
+                </div>
             </header>
 
-            <div style={{ maxWidth: '480px', display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
-                {/* Language */}
-                <div className="card">
-                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
-                        {t('settings.language')}
-                    </label>
-                    <Select
-                        value={settings.language}
-                        onChange={(value) => value && updateSettings({ language: value })}
-                        data={languages}
-                        styles={{
-                            input: {
-                                background: 'var(--bg-secondary)',
-                                border: '1px solid var(--accent-border)',
-                                color: 'var(--text-primary)',
-                            },
-                        }}
-                    />
-                </div>
-
-                {/* Theme */}
-                <div className="card">
-                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
-                        {t('settings.darkMode')}
-                    </label>
-                    <Select
-                        value={settings.theme}
-                        onChange={(value) => value && updateSettings({ theme: value as 'light' | 'dark' | 'system' })}
-                        data={themes}
-                        styles={{
-                            input: {
-                                background: 'var(--bg-secondary)',
-                                border: '1px solid var(--accent-border)',
-                                color: 'var(--text-primary)',
-                            },
-                        }}
-                    />
-                </div>
-
-                {/* State Location */}
-                <div className="card">
-                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
-                        State Location
-                    </label>
-                    <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                        <input
-                            value={settings.stateLocation}
-                            onChange={(e) => updateSettings({ stateLocation: e.target.value })}
-                            className="btn-ghost"
-                            style={{ flex: 1 }}
-                            placeholder="Default: Tauri AppData"
-                        />
-                        <button
-                            onClick={() => handleBrowseFolder('stateLocation')}
-                            className="btn-ghost"
-                        >
-                            Browse
-                        </button>
-                    </div>
-                </div>
-
-                {/* Max Log Lines */}
-                <div className="card">
-                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-3)' }}>
-                        Max Log Lines (per log file)
-                    </label>
-                    <input
-                        type="number"
-                        min="100"
-                        max="100000"
-                        value={settings.maxLogLines}
-                        onChange={(e) => updateSettings({ maxLogLines: parseInt(e.target.value) || 10000 })}
-                        className="btn-ghost"
-                        style={{ width: '100%' }}
-                    />
-                </div>
-
-                {/* Hide to Tray */}
-                <div className="card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="grid gap-8">
+                {/* Visual Settings Section */}
+                <section>
+                    <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-main)]">
+                        Display
+                    </h2>
+                    <div className="neo-box p-6 space-y-6">
+                        {/* Language */}
                         <div>
-                            <div className="text-sm">Hide to Tray</div>
-                            <div className="text-xs text-tertiary">
-                                Run in background without dock icon
+                            <label className="block text-sm font-bold mb-2 uppercase font-mono">
+                                {t('settings.language')}
+                            </label>
+                            <Select
+                                value={settings.language}
+                                onChange={(value) => value && updateSettings({ language: value })}
+                                data={languages}
+                                styles={{
+                                    input: {
+                                        background: 'var(--bg-primary)',
+                                        color: 'var(--text-primary)',
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        fontFamily: 'var(--font-heading)',
+                                        fontWeight: 'bold',
+                                        minHeight: '42px',
+                                    },
+                                    dropdown: {
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        boxShadow: '4px 4px 0 0 black',
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        {/* Theme */}
+                        <div>
+                            <label className="block text-sm font-bold mb-2 uppercase font-mono">
+                                {t('settings.darkMode')}
+                            </label>
+                            <Select
+                                value={settings.theme}
+                                onChange={(value) => value && updateSettings({ theme: value as 'light' | 'dark' | 'system' })}
+                                data={themes}
+                                styles={{
+                                    input: {
+                                        background: 'var(--bg-primary)',
+                                        color: 'var(--text-primary)',
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        fontFamily: 'var(--font-heading)',
+                                        fontWeight: 'bold',
+                                        minHeight: '42px',
+                                    },
+                                    dropdown: {
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        boxShadow: '4px 4px 0 0 black',
+                                    }
+                                }}
+                            />
+                        </div>
+                    </div>
+                </section>
+
+                {/* System Settings Section */}
+                <section>
+                    <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-warning)]">
+                        System
+                    </h2>
+                    <div className="neo-box p-6 space-y-6">
+                        {/* State Location */}
+                        <div>
+                            <label className="block text-sm font-bold mb-2 uppercase font-mono">
+                                State Location
+                            </label>
+                            <div className="flex gap-2">
+                                <input
+                                    value={settings.stateLocation}
+                                    onChange={(e) => updateSettings({ stateLocation: e.target.value })}
+                                    className="neo-input flex-1 font-mono text-sm"
+                                    placeholder="Default: Tauri AppData"
+                                />
+                                <button
+                                    onClick={() => handleBrowseFolder('stateLocation')}
+                                    className="px-4 font-bold uppercase border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
+                                >
+                                    Browse
+                                </button>
                             </div>
                         </div>
-                        <button
-                            onClick={handleHideToTray}
-                            className="btn-ghost"
-                        >
-                            Hide
-                        </button>
-                    </div>
-                </div>
 
-                {/* Toggles */}
-                <div className="card">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="text-sm">{t('settings.notifications')}</span>
+                        {/* Max Log Lines */}
+                        <div>
+                            <label className="block text-sm font-bold mb-2 uppercase font-mono">
+                                Max Log Lines
+                            </label>
+                            <input
+                                type="number"
+                                min="100"
+                                max="100000"
+                                value={settings.maxLogLines}
+                                onChange={(e) => updateSettings({ maxLogLines: parseInt(e.target.value) || 10000 })}
+                                className="neo-input w-full"
+                            />
+                        </div>
+                    </div>
+                </section>
+
+                {/* Behavior Section */}
+                <section>
+                    <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-success)]">
+                        Behavior
+                    </h2>
+                    <div className="neo-box p-6 space-y-4">
+                        <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
+                            <div>
+                                <div className="font-bold">Hide to Tray</div>
+                                <div className="text-xs text-[var(--text-secondary)]">Run in background without dock icon</div>
+                            </div>
+                            <button
+                                onClick={handleHideToTray}
+                                className="px-4 py-1 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] font-bold text-sm uppercase"
+                            >
+                                HIDE
+                            </button>
+                        </div>
+
+                        <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
+                            <span className="font-bold">{t('settings.notifications')}</span>
                             <Switch
+                                size="md"
                                 checked={settings.notifications}
                                 onChange={(e) => updateSettings({ notifications: e.currentTarget.checked })}
+                                styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
                             />
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="text-sm">{t('settings.deleteConfirmation')}</span>
+                        <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
+                            <span className="font-bold">{t('settings.deleteConfirmation')}</span>
                             <Switch
+                                size="md"
                                 checked={settings.deleteConfirmation}
                                 onChange={(e) => updateSettings({ deleteConfirmation: e.currentTarget.checked })}
+                                styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
                             />
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="text-sm">{t('settings.verifyAfterCopy')}</span>
+                        <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
+                            <span className="font-bold">{t('settings.verifyAfterCopy')}</span>
                             <Switch
+                                size="md"
                                 checked={settings.verifyAfterCopy}
                                 onChange={(e) => updateSettings({ verifyAfterCopy: e.currentTarget.checked })}
+                                styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
                             />
                         </div>
                     </div>
-                </div>
+                </section>
 
-                {/* Reset Button */}
-                <button className="btn-ghost" onClick={resetSettings}>
-                    {t('settings.resetDefaults')}
-                </button>
+                {/* Danger Zone */}
+                <div className="mt-8 pt-8 border-t-3 border-[var(--border-main)] border-dashed">
+                    <button
+                        className="w-full py-3 border-3 border-dashed border-[var(--color-accent-error)] text-[var(--color-accent-error)] font-black hover:bg-[var(--color-accent-error)] hover:text-white transition-all uppercase"
+                        onClick={resetSettings}
+                    >
+                        ⚠ {t('settings.resetDefaults')}
+                    </button>
+                </div>
             </div>
         </div>
     );

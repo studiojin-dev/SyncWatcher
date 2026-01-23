@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlus, IconTrash, IconPlayerPlay, IconEye } from '@tabler/icons-react';
+import { IconPlus, IconPlayerPlay, IconEye } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useSyncTasks, SyncTask } from '../hooks/useSyncTasks';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
@@ -13,7 +13,7 @@ import YamlEditorModal from '../components/ui/YamlEditorModal';
  */
 function SyncTasksView() {
     const { t } = useTranslation();
-    const { tasks, addTask, updateTask, deleteTask, toggleTask, error, reload } = useSyncTasks();
+    const { tasks, addTask, updateTask, deleteTask, error, reload } = useSyncTasks();
     const { showToast } = useToast();
     const [showForm, setShowForm] = useState(false);
     const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
@@ -91,7 +91,7 @@ function SyncTasksView() {
     };
 
     return (
-        <div>
+        <div className="space-y-8">
             {/* YAML Error Editor Modal */}
             {error && (
                 <YamlEditorModal
@@ -102,21 +102,20 @@ function SyncTasksView() {
             )}
 
             <FadeIn>
-                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-8)' }}>
+                <header className="flex justify-between items-center mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
                     <div>
-                        <h1 className="text-xl" style={{ fontWeight: 'var(--weight-normal)', marginBottom: 'var(--space-2)' }}>
+                        <h1 className="text-2xl font-heading font-bold uppercase mb-1">
                             {t('syncTasks.title')}
                         </h1>
-                        <p className="text-secondary text-sm">
-                            {tasks.length > 0 ? `${tasks.length} ${t('syncTasks.title')}` : t('syncTasks.noTasks')}
+                        <p className="text-[var(--text-secondary)] font-mono text-sm">
+                            {tasks.length > 0 ? `// ${tasks.length} ACTIVE_TASKS` : '// NO_TASKS_DEFINED'}
                         </p>
                     </div>
                     <button
-                        className="btn-primary"
+                        className="bg-[var(--accent-main)] text-white px-4 py-2 border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] font-bold flex items-center gap-2 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_var(--shadow-color)] transition-all"
                         onClick={() => { setShowForm(true); setEditingTask(null); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
                     >
-                        <IconPlus size={16} />
+                        <IconPlus size={20} stroke={3} />
                         {t('syncTasks.addTask')}
                     </button>
                 </header>
@@ -124,121 +123,150 @@ function SyncTasksView() {
 
             {/* Task Form Modal */}
             {showForm && (
-                <CardAnimation>
-                    <div className="card" style={{ marginBottom: 'var(--space-6)', maxWidth: '480px' }}>
-                        <h3 className="text-base" style={{ marginBottom: 'var(--space-4)' }}>
-                            {editingTask ? t('syncTasks.editTask') : t('syncTasks.addTask')}
-                        </h3>
-                        <form onSubmit={handleSubmit}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <CardAnimation>
+                        <div className="neo-box p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
+                            <h3 className="text-xl font-heading font-bold mb-6 border-b-3 border-[var(--border-main)] pb-2 uppercase">
+                                {editingTask ? t('syncTasks.editTask') : t('syncTasks.addTask')}
+                            </h3>
+                            <form onSubmit={handleSubmit} className="space-y-4">
                                 <div>
-                                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                                    <label className="block text-sm font-bold mb-1 uppercase font-mono">
                                         {t('syncTasks.taskName')}
                                     </label>
                                     <input
                                         name="name"
                                         defaultValue={editingTask?.name || ''}
                                         required
-                                        className="btn-ghost"
-                                        style={{ width: '100%', background: 'var(--bg-secondary)' }}
+                                        className="neo-input"
+                                        placeholder="MY_BACKUP_TASK"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                                    <label className="block text-sm font-bold mb-1 uppercase font-mono">
                                         {t('syncTasks.source')}
                                     </label>
                                     <input
                                         name="source"
                                         defaultValue={editingTask?.source || ''}
                                         required
-                                        className="btn-ghost font-mono"
-                                        style={{ width: '100%', background: 'var(--bg-secondary)' }}
+                                        className="neo-input font-mono text-sm"
+                                        placeholder="/path/to/source"
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-sm text-secondary" style={{ display: 'block', marginBottom: 'var(--space-1)' }}>
+                                    <label className="block text-sm font-bold mb-1 uppercase font-mono">
                                         {t('syncTasks.target')}
                                     </label>
                                     <input
                                         name="target"
                                         defaultValue={editingTask?.target || ''}
                                         required
-                                        className="btn-ghost font-mono"
-                                        style={{ width: '100%', background: 'var(--bg-secondary)' }}
+                                        className="neo-input font-mono text-sm"
+                                        placeholder="/path/to/target"
                                     />
                                 </div>
-                                <div style={{ display: 'flex', gap: 'var(--space-4)' }}>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                        <input type="checkbox" name="deleteMissing" defaultChecked={editingTask?.deleteMissing} />
-                                        <span className="text-sm">{t('syncTasks.deleteMissing')}</span>
+                                <div className="flex gap-6 py-2">
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                        <div className="relative">
+                                            <input type="checkbox" name="deleteMissing" defaultChecked={editingTask?.deleteMissing} className="peer sr-only" />
+                                            <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-main)] transition-colors"></div>
+                                            <div className="absolute inset-0 hidden peer-checked:flex items-center justify-center text-white pointer-events-none">✓</div>
+                                        </div>
+                                        <span className="font-bold text-sm uppercase">{t('syncTasks.deleteMissing')}</span>
                                     </label>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                                        <input type="checkbox" name="checksumMode" defaultChecked={editingTask?.checksumMode} />
-                                        <span className="text-sm">{t('syncTasks.checksumMode')}</span>
+                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                        <div className="relative">
+                                            <input type="checkbox" name="checksumMode" defaultChecked={editingTask?.checksumMode} className="peer sr-only" />
+                                            <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-main)] transition-colors"></div>
+                                            <div className="absolute inset-0 hidden peer-checked:flex items-center justify-center text-white pointer-events-none">✓</div>
+                                        </div>
+                                        <span className="font-bold text-sm uppercase">{t('syncTasks.checksumMode')}</span>
                                     </label>
                                 </div>
-                                <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-2)' }}>
-                                    <button type="submit" className="btn-primary">{t('syncTasks.save')}</button>
-                                    <button type="button" className="btn-ghost" onClick={() => { setShowForm(false); setEditingTask(null); }}>
+                                <div className="flex gap-3 mt-6 justify-end">
+                                    <button
+                                        type="button"
+                                        className="px-4 py-2 font-bold uppercase hover:underline"
+                                        onClick={() => { setShowForm(false); setEditingTask(null); }}
+                                    >
                                         {t('syncTasks.cancel')}
                                     </button>
+                                    <button
+                                        type="submit"
+                                        className="bg-[var(--text-primary)] text-[var(--bg-primary)] px-6 py-2 border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] font-bold uppercase hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[3px_3px_0_0_var(--shadow-color)] transition-all"
+                                    >
+                                        {t('syncTasks.save')}
+                                    </button>
                                 </div>
-                            </div>
-                        </form>
-                    </div>
-                </CardAnimation>
+                            </form>
+                        </div>
+                    </CardAnimation>
+                </div>
             )}
 
             {/* Task List */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <div className="grid gap-6">
                 {tasks.map((task, index) => (
                     <CardAnimation key={task.id} index={index}>
-                        <div className="card" style={{ opacity: task.enabled ? 1 : 0.6 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div>
-                                    <h3 className="text-base" style={{ marginBottom: 'var(--space-1)' }}>{task.name}</h3>
-                                    <div className="text-xs text-tertiary font-mono" style={{ marginBottom: 'var(--space-1)' }}>
-                                        {task.source} → {task.target}
+                        <div className={`neo-box p-5 relative transition-opacity ${task.enabled ? 'opacity-100' : 'opacity-60 bg-[var(--bg-secondary)]'}`}>
+                            <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                                <div className="min-w-0 flex-1 w-full"> {/* min-w-0 ensures truncation works */}
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <h3 className="text-lg font-heading font-black uppercase tracking-tight truncate">
+                                            {task.name}
+                                        </h3>
+                                        <div className="flex gap-2">
+                                            {task.deleteMissing && (
+                                                <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-error)] text-white">
+                                                    DEL
+                                                </span>
+                                            )}
+                                            {task.checksumMode && (
+                                                <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-warning)] text-black">
+                                                    CHK
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="text-xs text-secondary">
-                                        {task.deleteMissing && <span style={{ marginRight: 'var(--space-2)' }}>🗑️ Delete</span>}
-                                        {task.checksumMode && <span>🔏 Checksum</span>}
+
+                                    {/* Path Display with Overflow Protection */}
+                                    <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] mb-1 break-all">
+                                        <span className="font-bold text-[var(--accent-main)]">SRC:</span> {task.source}
+                                    </div>
+                                    <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] break-all">
+                                        <span className="font-bold text-[var(--accent-success)]">DST:</span> {task.target}
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+
+                                <div className="flex gap-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
                                     <button
-                                        className="btn-ghost"
+                                        className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                         onClick={() => handleDryRun(task)}
                                         title={t('syncTasks.dryRun')}
                                     >
-                                        <IconEye size={16} />
+                                        <IconEye size={20} stroke={2} />
                                     </button>
                                     <button
-                                        className="btn-primary"
+                                        className={`p-2 border-2 border-[var(--border-main)] transition-all ${syncing === task.id ? 'bg-[var(--bg-secondary)] cursor-wait' : 'bg-[var(--accent-main)] text-white hover:shadow-[2px_2px_0_0_black]'}`}
                                         onClick={() => handleSync(task)}
                                         disabled={syncing === task.id}
                                         title={t('syncTasks.startSync')}
                                     >
-                                        <IconPlayerPlay size={16} />
+                                        <IconPlayerPlay size={20} stroke={2} className={syncing === task.id ? 'animate-spin' : ''} />
                                     </button>
+                                    <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
                                     <button
-                                        className="btn-ghost"
+                                        className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
                                         onClick={() => { setEditingTask(task); setShowForm(true); }}
                                     >
-                                        {t('common.edit')}
+                                        EDIT
                                     </button>
                                     <button
-                                        className="btn-ghost"
-                                        onClick={() => toggleTask(task.id)}
-                                    >
-                                        {task.enabled ? t('syncTasks.enabled') : t('common.add')}
-                                    </button>
-                                    <button
-                                        className="btn-ghost"
+                                        className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--color-accent-error)] hover:text-white transition-colors"
                                         onClick={() => handleDelete(task)}
-                                        style={{ color: 'var(--status-error-text)' }}
                                     >
-                                        <IconTrash size={16} />
+                                        DEL
                                     </button>
                                 </div>
                             </div>

@@ -6,7 +6,7 @@ import ActivityLogView from './views/ActivityLogView';
 import SettingsView from './views/SettingsView';
 import HelpView from './views/HelpView';
 import AboutView from './views/AboutView';
-import { useSettings } from './hooks/useSettings';
+import { SettingsProvider } from './context/SettingsContext';
 import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
@@ -17,9 +17,6 @@ import ErrorBoundary from './components/ui/ErrorBoundary';
  */
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-
-  // Initialize settings (applies theme/language)
-  useSettings();
 
   const renderContent = () => {
     switch (activeTab) {
@@ -42,13 +39,15 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <ToastProvider>
-        <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
-          <PageTransition pageKey={activeTab}>
-            {renderContent()}
-          </PageTransition>
-        </AppShell>
-      </ToastProvider>
+      <SettingsProvider>
+        <ToastProvider>
+          <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
+            <PageTransition pageKey={activeTab}>
+              {renderContent()}
+            </PageTransition>
+          </AppShell>
+        </ToastProvider>
+      </SettingsProvider>
     </ErrorBoundary>
   );
 }

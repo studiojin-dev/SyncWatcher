@@ -1,90 +1,120 @@
 @import "tailwindcss";
 
-/* 
- * SyncWatcher Global Styles
- * Design System CSS is loaded separately
- */
+@theme {
+  /* Colors - Neo Brutalism */
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #F0F0F0;
+  --color-bg-tertiary: #E0E7FF;
 
-/* Override Tailwind defaults with design system values */
+  --color-text-primary: #000000;
+  --color-text-secondary: #404040;
+
+  --color-border-main: #000000;
+
+  --color-accent-main: #5C7CFA;
+  --color-accent-success: #20E070;
+  --color-accent-warning: #FFD43B;
+  --color-accent-error: #FF6B6B;
+
+  /* Shadows - Hard Shadows */
+  --shadow-hard: 4px 4px 0 0 #000;
+  --shadow-hard-sm: 2px 2px 0 0 #000;
+  --shadow-hard-lg: 8px 8px 0 0 #000;
+
+  /* Fonts */
+  --font-heading: 'JetBrains Mono', monospace;
+  --font-body: 'Pretendard', sans-serif;
+}
+
+/* Root variables for dynamic switching */
+:root {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F0F0F0;
+  --bg-tertiary: #E0E7FF;
+
+  --text-primary: #000000;
+  --text-secondary: #404040;
+
+  --border-main: #000000;
+  --shadow-color: #000000;
+
+  --accent-main: #5C7CFA;
+  --accent-success: #20E070;
+  --accent-warning: #FFD43B;
+  --accent-error: #FF6B6B;
+}
+
+/* Dark Mode - Terminal Style */
+/* Dark Mode - Terminal Style */
+:root[data-theme="dark"],
+.dark {
+  --bg-primary: #111111;
+  --bg-secondary: #1A1A1A;
+  --bg-tertiary: #2C2C2C;
+  /* Code block bg */
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #AAAAAA;
+
+  --border-main: #FFFFFF;
+  --shadow-color: #5C7CFA;
+  /* Glow effect shadows */
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-/* Mantine component overrides for design system consistency */
-.mantine-Select-input,
-.mantine-Switch-root {
-  font-size: var(--text-sm);
-}
-
-.mantine-Select-input {
-  background-color: var(--bg-secondary);
-  border-color: var(--accent-border);
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-primary);
   color: var(--text-primary);
+  font-family: var(--font-body);
 }
 
-.mantine-Select-dropdown {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+}
+
+/* Common Neo-Brutalist Utilities */
+.neo-box {
+  border: 3px solid var(--border-main);
+  box-shadow: 4px 4px 0 0 var(--shadow-color);
+  background-color: var(--bg-primary);
+  transition: all 0.15s ease-out;
+}
+
+.neo-box:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 var(--shadow-color);
+}
+
+.neo-input {
+  border: 3px solid var(--border-main);
+  background: var(--bg-primary);
+  padding: 0.5rem 1rem;
+  font-family: var(--font-heading);
+  width: 100%;
+}
+
+.neo-input:focus {
+  outline: none;
   background-color: var(--bg-tertiary);
-  border-color: var(--accent-border);
 }
 
-.mantine-Select-option {
-  color: var(--text-primary);
-}
-
-.mantine-Select-option[data-checked] {
-  background-color: var(--accent-blue);
-  color: var(--text-primary);
-}
-
-.mantine-Select-option[data-hovered] {
-  background-color: var(--hover-overlay);
-  color: var(--text-primary);
-}
-
-.mantine-Select-input {
-  background-color: var(--bg-secondary);
-  border-color: var(--accent-border);
-  color: var(--text-primary);
-}
-
-.mantine-Select-dropdown {
-  background-color: var(--bg-tertiary);
-  border-color: var(--accent-border);
-}
-
-.mantine-Select-option {
-  color: var(--text-primary);
-}
-
-.mantine-Select-option[data-checked] {
-  background-color: var(--accent-blue);
-  color: var(--text-primary);
-}
-
-.mantine-Select-option[data-hovered] {
-  background-color: var(--hover-overlay);
-  color: var(--text-primary);
-}
-
-/* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
+  width: 12px;
   background: var(--bg-secondary);
+  border-left: 2px solid var(--border-main);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--accent-border);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-tertiary);
+  background: var(--accent-main);
+  border: 2px solid var(--border-main);
 }
