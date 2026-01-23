@@ -130,6 +130,20 @@
       "success": "Éxito",
       "warning": "Advertencia"
     },
+    "yamlEditor": {
+      "title": "Editar Archivo YAML",
+      "parseError": "Error de Análisis YAML",
+      "line": "Línea",
+      "column": "Columna",
+      "jumpToError": "Ir a Línea de Error",
+      "placeholder": "Ingrese contenido YAML...",
+      "validationError": "Error de Validación",
+      "validYaml": "YAML Válido",
+      "validYamlDescription": "Este YAML es válido y listo para guardar.",
+      "openExternal": "Abrir en Editor Externo",
+      "saveAndReload": "Guardar y Recargar",
+      "unsavedChangesWarning": "Tienes cambios sin guardar. ¿Cerrar de todos modos?"
+    },
     "errors": {
       "diskFull": "Disco Lleno",
       "smbDisconnected": "SMB Desconectado",

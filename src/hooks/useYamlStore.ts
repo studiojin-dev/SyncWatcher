@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as yaml from 'js-yaml';
 import { invoke } from '@tauri-apps/api/core';
+import { isYAMLException, hasMark } from '../types/yaml';
 
 interface YamlStoreOptions<T> {
   fileName: string;
@@ -57,8 +58,9 @@ export function useYamlStore<T extends Record<string, any>>({
       }
 
       // File exists - try to read and parse
+      let content = '';
       try {
-        const content = await invoke<string>('read_yaml_file', { path: filePath });
+        content = await invoke<string>('read_yaml_file', { path: filePath });
 
         // Validate YAML content size
         if (content && content.length > MAX_YAML_SIZE) {
@@ -98,27 +100,36 @@ export function useYamlStore<T extends Record<string, any>>({
           setData(defaultData);
           setError(null);
         }
-      } catch (parseError: any) {
+      } catch (parseError: unknown) {
         // YAML parsing error - extract detailed error info
         console.error(`Failed to parse ${fileName}:`, parseError);
 
-        // Check if it's a YAMLException with line/column info
-        if (parseError.name === 'YAMLException' && parseError.mark) {
+        // Check if it's a YAMLException with line/column info using type guard
+        if (isYAMLException(parseError) && hasMark(parseError)) {
           setError({
             type: 'PARSE_ERROR',
             message: parseError.message || 'Unknown YAML parsing error',
             line: parseError.mark.line + 1, // Convert from 0-indexed to 1-indexed
             column: parseError.mark.column + 1,
             filePath,
-            rawContent: await invoke<string>('read_yaml_file', { path: filePath })
+            rawContent: content // Reuse already-read content
+          });
+        } else if (isYAMLException(parseError)) {
+          // YAMLException but no mark info
+          setError({
+            type: 'PARSE_ERROR',
+            message: parseError.message || 'Unknown YAML parsing error',
+            filePath,
+            rawContent: content // Reuse already-read content
           });
         } else {
           // Generic error - still show editor
+          const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
           setError({
             type: 'PARSE_ERROR',
-            message: parseError.message || 'Unknown error',
+            message: errorMessage,
             filePath,
-            rawContent: await invoke<string>('read_yaml_file', { path: filePath })
+            rawContent: content // Reuse already-read content
           });
         }
         setData(defaultData);

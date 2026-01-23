@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal, Textarea, Button, Group, Alert, Text, Stack } from '@mantine/core';
 import { IconAlertTriangle, IconCheck, IconExternalLink } from '@tabler/icons-react';
 import * as yaml from 'js-yaml';
@@ -12,20 +13,50 @@ interface YamlEditorModalProps {
 }
 
 function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
+  const { t } = useTranslation();
   const [content, setContent] = useState(error.rawContent);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isValid, setIsValid] = useState(false);
-  const [lineNumbers, setLineNumbers] = useState<number[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Update content when error changes
   useEffect(() => {
     setContent(error.rawContent);
+    setHasUnsavedChanges(false);
   }, [error.rawContent, opened]);
 
-  // Update line numbers when content changes
+  // Track unsaved changes
   useEffect(() => {
+    setHasUnsavedChanges(content !== error.rawContent);
+  }, [content, error.rawContent]);
+
+  // Watch for external file changes (polling every 1 second when modal is open)
+  useEffect(() => {
+    if (!opened) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const updated = await invoke<string>('read_yaml_file', {
+          path: error.filePath
+        });
+        if (updated !== content) {
+          setContent(updated);
+          // Don't show toast during rapid external edits
+        }
+      } catch (err) {
+        // File might not exist yet, silently ignore
+        console.error('Failed to watch file:', err);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [opened, error.filePath, content]);
+
+  // Memoize line numbers calculation
+  const lineNumbers = useMemo(() => {
+    if (!content) return [];
     const lines = content.split('\n');
-    setLineNumbers(Array.from({ length: lines.length }, (_, i) => i + 1));
+    return Array.from({ length: lines.length }, (_, i) => i + 1);
   }, [content]);
 
   // Validate YAML content
@@ -35,8 +66,8 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
       setValidationError(null);
       setIsValid(true);
       return true;
-    } catch (err: any) {
-      const errorMsg = err.message || 'Unknown YAML error';
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown YAML error';
       setValidationError(errorMsg);
       setIsValid(false);
       return false;
@@ -63,10 +94,22 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
         path: error.filePath,
         content
       });
+      setHasUnsavedChanges(false);
       onClose();
     } catch (err) {
       console.error('Failed to save YAML file:', err);
       setValidationError(`Failed to save: ${err}`);
+    }
+  };
+
+  // Handle close with confirmation for unsaved changes
+  const handleClose = () => {
+    if (hasUnsavedChanges) {
+      if (confirm(t('yamlEditor.unsavedChangesWarning'))) {
+        onClose();
+      }
+    } else {
+      onClose();
     }
   };
 
@@ -99,10 +142,10 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
   return (
     <Modal
       opened={opened}
-      onClose={onClose}
+      onClose={handleClose}
       title={
         <Group gap="xs">
-          <Text fw={500}>Edit YAML File</Text>
+          <Text fw={500}>{t('yamlEditor.title')}</Text>
           <Text size="sm" c="dimmed">
             ({error.filePath.split('/').pop()})
           </Text>
@@ -119,10 +162,10 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
           <Alert
             icon={<IconAlertTriangle size={16} />}
             color="red"
-            title="YAML Parsing Error"
+            title={t('yamlEditor.parseError')}
           >
             <Text size="sm">
-              Line <strong>{error.line}</strong>, Column <strong>{error.column || '?'}</strong>: {error.message}
+              {t('yamlEditor.line')} <strong>{error.line}</strong>, {t('yamlEditor.column')} <strong>{error.column || '?'}</strong>: {error.message}
             </Text>
             <Button
               variant="light"
@@ -130,7 +173,7 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
               mt="xs"
               onClick={jumpToError}
             >
-              Jump to Error Line
+              {t('yamlEditor.jumpToError')}
             </Button>
           </Alert>
         )}
@@ -172,6 +215,21 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
             name="yaml-editor"
             value={content}
             onChange={(e) => setContent(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              // Keyboard shortcuts
+              if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                if (isValid) handleSave();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                handleClose();
+              }
+            }}
+            aria-label={t('yamlEditor.placeholder')}
+            aria-invalid={!isValid}
+            aria-describedby={
+              validationError ? 'validation-error-alert' : isValid ? 'valid-yaml-alert' : undefined
+            }
             styles={{
               input: {
                 fontFamily: 'Monaco, Menlo, Ubuntu Mono, Consolas, monospace',
@@ -182,16 +240,18 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
               }
             }}
             minRows={20}
-            placeholder="Enter YAML content..."
+            placeholder={t('yamlEditor.placeholder')}
           />
         </div>
 
         {/* Validation Error */}
         {validationError && (
           <Alert
+            id="validation-error-alert"
             icon={<IconAlertTriangle size={16} />}
             color="orange"
-            title="Validation Error"
+            title={t('yamlEditor.validationError')}
+            role="alert"
           >
             {validationError}
           </Alert>
@@ -200,11 +260,13 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
         {/* Validation Success */}
         {isValid && !validationError && (
           <Alert
+            id="valid-yaml-alert"
             icon={<IconCheck size={16} />}
             color="teal"
-            title="Valid YAML"
+            title={t('yamlEditor.validYaml')}
+            role="status"
           >
-            This YAML is valid and ready to save.
+            {t('yamlEditor.validYamlDescription')}
           </Alert>
         )}
 
@@ -215,17 +277,17 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
             leftSection={<IconExternalLink size={16} />}
             onClick={openExternal}
           >
-            Open in External Editor
+            {t('yamlEditor.openExternal')}
           </Button>
-          <Button variant="light" onClick={onClose}>
-            Cancel
+          <Button variant="light" onClick={handleClose}>
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleSave}
             disabled={!isValid}
             color={isValid ? 'teal' : 'gray'}
           >
-            Save & Reload
+            {t('yamlEditor.saveAndReload')}
           </Button>
         </Group>
       </Stack>

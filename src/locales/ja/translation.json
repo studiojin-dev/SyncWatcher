@@ -130,6 +130,20 @@
       "success": "Success",
       "warning": "Warning"
     },
+    "yamlEditor": {
+      "title": "YAMLファイル編集",
+      "parseError": "YAML解析エラー",
+      "line": "行",
+      "column": "列",
+      "jumpToError": "エラー行に移動",
+      "placeholder": "YAMLコンテンツを入力...",
+      "validationError": "検証エラー",
+      "validYaml": "有効なYAML",
+      "validYamlDescription": "このYAMLは有効で保存可能です。",
+      "openExternal": "外部エディタで開く",
+      "saveAndReload": "保存して再読み込み",
+      "unsavedChangesWarning": "未保存の変更があります。閉じますか？"
+    },
     "errors": {
       "diskFull": "Disk Full",
       "smbDisconnected": "SMB Disconnected",

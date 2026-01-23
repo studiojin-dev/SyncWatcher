@@ -89,15 +89,48 @@ async fn file_exists(path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn open_in_editor(path: String) -> Result<(), String> {
+async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    use std::path::Path;
+
+    // Path validation for security
+    let path_obj = Path::new(&path);
+
+    // Only allow absolute paths
+    if !path_obj.is_absolute() {
+        return Err("Only absolute paths are allowed".to_string());
+    }
+
+    // Canonicalize the path to resolve symlinks and .. components
+    let canonical = path_obj
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {e}"))?;
+
+    // Get the config directory for validation
+    let app_data = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+    let config_dir = app_data.join("config");
+
+    // Ensure config directory exists for comparison
+    let config_canonical = config_dir
+        .canonicalize()
+        .unwrap_or(config_dir);
+
+    // Verify the path is within the config directory
+    let canonical_str = canonical.to_string_lossy();
+    let config_str = config_canonical.to_string_lossy();
+
+    if !canonical_str.as_ref().starts_with(config_str.as_ref()) {
+        return Err(format!("Access denied: Path outside config directory\nAllowed: {config_str}\nRequested: {canonical_str}"));
+    }
+
     // Try to open with default system editor
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
             .arg("-t")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
+            .map_err(|e| format!("Failed to open file: {e}"))?;
     }
 
     #[cfg(target_os = "linux")]
@@ -108,7 +141,7 @@ async fn open_in_editor(path: String) -> Result<(), String> {
 
         for editor in editors {
             if std::process::Command::new(editor)
-                .arg(&path)
+                .arg(&canonical)
                 .spawn()
                 .is_ok()
             {
@@ -125,9 +158,9 @@ async fn open_in_editor(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("notepad.exe")
-            .arg(&path)
+            .arg(&canonical)
             .spawn()
-            .map_err(|e| format!("Failed to open file: {}", e))?;
+            .map_err(|e| format!("Failed to open file: {e}"))?;
     }
 
     Ok(())

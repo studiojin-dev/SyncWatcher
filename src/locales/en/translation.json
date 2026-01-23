@@ -130,6 +130,20 @@
       "success": "Success",
       "warning": "Warning"
     },
+    "yamlEditor": {
+      "title": "Edit YAML File",
+      "parseError": "YAML Parsing Error",
+      "line": "Line",
+      "column": "Column",
+      "jumpToError": "Jump to Error Line",
+      "placeholder": "Enter YAML content...",
+      "validationError": "Validation Error",
+      "validYaml": "Valid YAML",
+      "validYamlDescription": "This YAML is valid and ready to save.",
+      "openExternal": "Open in External Editor",
+      "saveAndReload": "Save & Reload",
+      "unsavedChangesWarning": "You have unsaved changes. Close anyway?"
+    },
     "errors": {
       "diskFull": "Disk Full",
       "smbDisconnected": "SMB Disconnected",

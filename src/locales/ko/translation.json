@@ -130,6 +130,20 @@
       "success": "Success",
       "warning": "Warning"
     },
+    "yamlEditor": {
+      "title": "YAML 파일 편집",
+      "parseError": "YAML 파싱 오류",
+      "line": "줄",
+      "column": "열",
+      "jumpToError": "오류 라인으로 이동",
+      "placeholder": "YAML 내용을 입력하세요...",
+      "validationError": "검증 오류",
+      "validYaml": "유효한 YAML",
+      "validYamlDescription": "이 YAML은 유효하며 저장할 수 있습니다.",
+      "openExternal": "외부 에디터에서 열기",
+      "saveAndReload": "저장 후 다시 로드",
+      "unsavedChangesWarning": "저장되지 않은 변경사항이 있습니다. 그래도 닫으시겠습니까?"
+    },
     "errors": {
       "diskFull": "Disk Full",
       "smbDisconnected": "SMB Disconnected",

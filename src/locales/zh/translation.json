@@ -130,6 +130,20 @@
       "success": "Success",
       "warning": "Warning"
     },
+    "yamlEditor": {
+      "title": "编辑 YAML 文件",
+      "parseError": "YAML 解析错误",
+      "line": "行",
+      "column": "列",
+      "jumpToError": "跳转到错误行",
+      "placeholder": "输入 YAML 内容...",
+      "validationError": "验证错误",
+      "validYaml": "有效的 YAML",
+      "validYamlDescription": "这个 YAML 有效，可以保存。",
+      "openExternal": "在外部编辑器中打开",
+      "saveAndReload": "保存并重新加载",
+      "unsavedChangesWarning": "您有未保存的更改。仍要关闭吗？"
+    },
     "errors": {
       "diskFull": "Disk Full",
       "smbDisconnected": "SMB Disconnected",
