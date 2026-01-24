@@ -12,6 +12,10 @@ export interface SyncTask {
     watching?: boolean;
     verifyAfterCopy?: boolean;
     exclusionSets?: string[];
+    /** 감시 모드 - 소스 디렉토리 변경 시 자동 복사 */
+    watchMode?: boolean;
+    /** 복사 후 자동 unmount (removable 디스크) */
+    autoUnmount?: boolean;
 }
 
 export function useSyncTasks() {

@@ -533,22 +533,49 @@ mod tests {
     async fn test_exclusion_validation_limits() -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;
+        
+        // 소스 디렉토리에 파일 생성 (read_directory가 호출되도록)
+        let test_file = source_dir.path().join("test.txt");
+        fs::write(&test_file, b"test content").await?;
+        
         let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
         
-        // Test count limit
+        // Test count limit (101개 패턴 -> MAX_PATTERN_COUNT=100 초과)
         let mut options = SyncOptions::default();
         options.exclude_patterns = (0..101).map(|i| format!("pattern_{}", i)).collect();
         let result = engine.dry_run(&options).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Too many"));
+        
+        // 에러 체인 전체를 확인 (anyhow는 context로 래핑되므로 :# 포맷 사용)
+        match &result {
+            Ok(_) => panic!("Expected error for too many patterns, but got Ok"),
+            Err(e) => {
+                // anyhow 에러 체인 전체를 문자열로 (debug format 사용)
+                let full_err = format!("{:#}", e);
+                println!("Full error chain for count limit: {}", full_err);
+                assert!(
+                    full_err.contains("Too many") || full_err.contains("too many"),
+                    "Error chain should contain 'Too many', got: {}", full_err
+                );
+            }
+        }
 
-        // Test length limit
+        // Test length limit (300자 패턴 -> MAX_PATTERN_LENGTH=255 초과)
         let mut options2 = SyncOptions::default();
         let long_pattern = "a".repeat(300);
         options2.exclude_patterns = vec![long_pattern];
         let result2 = engine.dry_run(&options2).await;
-        assert!(result2.is_err());
-        assert!(result2.unwrap_err().to_string().contains("too long"));
+        
+        match &result2 {
+            Ok(_) => panic!("Expected error for too long pattern, but got Ok"),
+            Err(e) => {
+                let full_err = format!("{:#}", e);
+                println!("Full error chain for length limit: {}", full_err);
+                assert!(
+                    full_err.contains("too long") || full_err.contains("Too long"),
+                    "Error chain should contain 'too long', got: {}", full_err
+                );
+            }
+        }
 
         Ok(())
     }

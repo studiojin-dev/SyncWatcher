@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { IconRefresh } from '@tabler/icons-react';
 
 interface LogEntry {
   id: string;
@@ -13,12 +14,24 @@ interface LogEntry {
 function ActivityLogView() {
   const { t } = useTranslation();
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [filter] = useState<'all' | 'system' | 'task'>('all');
+  const [loading, setLoading] = useState(false);
 
   const loadLogs = async () => {
-    const result = await invoke<LogEntry[]>('get_system_logs');
-    setLogs(result);
+    setLoading(true);
+    try {
+      const result = await invoke<LogEntry[]>('get_system_logs');
+      // 최신 로그가 상단에 오도록 정렬
+      setLogs(result.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+    } catch (error) {
+      console.error('Failed to load logs:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
 
   const getLevelIcon = (level: LogEntry['level']) => {
     switch (level) {
@@ -34,37 +47,34 @@ function ActivityLogView() {
   return (
     <div>
       <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-b-3 border-[var(--border-main)]">
-        <h1 className="text-2xl font-heading font-black uppercase mb-1">
-          {t('activityLog.title')}
-        </h1>
-        <div className="font-mono text-xs">
-          {logs.length > 0 ? `// ${logs.length} ENTRIES_LOGGED` : '// SYSTEM_IDLE'}
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-heading font-black uppercase mb-1">
+              {t('activityLog.title')}
+            </h1>
+            <div className="font-mono text-xs">
+              {logs.length > 0 ? `// ${logs.length} ENTRIES_LOGGED` : '// SYSTEM_IDLE'}
+            </div>
+          </div>
+          <button
+            onClick={loadLogs}
+            disabled={loading}
+            className="px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center gap-2 transition-colors disabled:opacity-50"
+          >
+            <IconRefresh size={18} className={loading ? 'animate-spin' : ''} />
+            {t('common.refresh', { defaultValue: 'Refresh' })}
+          </button>
         </div>
       </header>
-
-      <div className="flex gap-4 mb-6 border-b-2 border-dashed border-[var(--border-main)] pb-4">
-        <button
-          onClick={loadLogs}
-          className={`px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] transition-all ${filter === 'all' ? 'bg-[var(--text-primary)] text-[var(--bg-primary)] shadow-[4px_4px_0_0_var(--shadow-color)]' : 'hover:bg-[var(--bg-tertiary)]'}`}
-        >
-          All Logs
-        </button>
-        <button
-          onClick={loadLogs}
-          className={`px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] transition-all ${filter === 'system' ? 'bg-[var(--text-primary)] text-[var(--bg-primary)] shadow-[4px_4px_0_0_var(--shadow-color)]' : 'hover:bg-[var(--bg-tertiary)]'}`}
-        >
-          System Logs
-        </button>
-      </div>
 
       <div className="neo-box p-4 min-h-[400px] max-h-[600px] overflow-y-auto font-mono text-sm bg-[var(--bg-primary)]">
         {logs.map((log) => (
           <div key={log.id} className="border-b border-[var(--border-main)] last:border-0 py-3 flex gap-4 hover:bg-[var(--bg-secondary)] px-2 transition-colors">
-            <div className="min-w-[40px] pt-1">
+            <div className="min-w-[40px] pt-1 shrink-0">
               {getLevelIcon(log.level)}
             </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wider">
                   [{log.timestamp}]
                 </span>
@@ -74,7 +84,7 @@ function ActivityLogView() {
                   </span>
                 )}
               </div>
-              <div className="text-[var(--text-primary)] font-medium break-all">
+              <div className="text-[var(--text-primary)] font-medium break-words whitespace-pre-wrap overflow-wrap-anywhere">
                 {log.message}
               </div>
             </div>
@@ -91,3 +101,4 @@ function ActivityLogView() {
 }
 
 export default ActivityLogView;
+

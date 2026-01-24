@@ -153,6 +153,24 @@ impl DiskMonitor {
             .filter(|v| v.is_removable)
             .collect())
     }
+
+    /// Removable 디스크를 언마운트합니다.
+    /// macOS의 diskutil 명령을 사용합니다.
+    pub fn unmount_volume(path: &Path) -> Result<()> {
+        use std::process::Command;
+        
+        let output = Command::new("diskutil")
+            .args(["unmount", path.to_str().unwrap_or("")])
+            .output()
+            .map_err(|e| anyhow::anyhow!("diskutil 실행 실패: {}", e))?;
+        
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(anyhow::anyhow!("Unmount 실패: {}", stderr))
+        }
+    }
 }
 
 fn get_disk_space(path: &Path) -> Result<u64> {

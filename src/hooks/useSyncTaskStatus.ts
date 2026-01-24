@@ -1,0 +1,104 @@
+import { create } from 'zustand';
+
+export interface TaskStatus {
+    taskId: string;
+    status: 'idle' | 'syncing' | 'dryRunning' | 'watching';
+    lastLog?: {
+        message: string;
+        timestamp: string;
+        level: 'info' | 'success' | 'warning' | 'error';
+    };
+    progress?: {
+        current: number;
+        total: number;
+        currentFile?: string;
+    };
+}
+
+interface SyncTaskStatusStore {
+    /** 각 Task의 상태 맵 */
+    statuses: Map<string, TaskStatus>;
+
+    /** 상태 업데이트 */
+    setStatus: (taskId: string, status: TaskStatus['status']) => void;
+
+    /** 마지막 로그 업데이트 */
+    setLastLog: (taskId: string, log: TaskStatus['lastLog']) => void;
+
+    /** 진행률 업데이트 */
+    setProgress: (taskId: string, progress: TaskStatus['progress']) => void;
+
+    /** 상태 조회 */
+    getStatus: (taskId: string) => TaskStatus | undefined;
+
+    /** 상태 초기화 */
+    clearStatus: (taskId: string) => void;
+}
+
+/**
+ * Sync Task 상태 관리 스토어
+ * 뷰 전환 시에도 상태 유지
+ */
+export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => ({
+    statuses: new Map<string, TaskStatus>(),
+
+    setStatus: (taskId, status) => {
+        set((state) => {
+            const newStatuses = new Map(state.statuses);
+            const current = newStatuses.get(taskId) || { taskId, status: 'idle' };
+            newStatuses.set(taskId, { ...current, status });
+            return { statuses: newStatuses };
+        });
+    },
+
+    setLastLog: (taskId, log) => {
+        set((state) => {
+            const newStatuses = new Map(state.statuses);
+            const current = newStatuses.get(taskId) || { taskId, status: 'idle' };
+            newStatuses.set(taskId, { ...current, lastLog: log });
+            return { statuses: newStatuses };
+        });
+    },
+
+    setProgress: (taskId, progress) => {
+        set((state) => {
+            const newStatuses = new Map(state.statuses);
+            const current = newStatuses.get(taskId) || { taskId, status: 'idle' };
+            newStatuses.set(taskId, { ...current, progress });
+            return { statuses: newStatuses };
+        });
+    },
+
+    getStatus: (taskId) => {
+        return get().statuses.get(taskId);
+    },
+
+    clearStatus: (taskId) => {
+        set((state) => {
+            const newStatuses = new Map(state.statuses);
+            newStatuses.delete(taskId);
+            return { statuses: newStatuses };
+        });
+    },
+}));
+
+/**
+ * 단일 Task의 상태를 조회하는 Hook
+ */
+export function useSyncTaskStatus(taskId: string) {
+    const status = useSyncTaskStatusStore((state) => state.statuses.get(taskId));
+    const setStatus = useSyncTaskStatusStore((state) => state.setStatus);
+    const setLastLog = useSyncTaskStatusStore((state) => state.setLastLog);
+    const setProgress = useSyncTaskStatusStore((state) => state.setProgress);
+    const clearStatus = useSyncTaskStatusStore((state) => state.clearStatus);
+
+    return {
+        status: status?.status || 'idle',
+        lastLog: status?.lastLog,
+        progress: status?.progress,
+        setStatus: (newStatus: TaskStatus['status']) => setStatus(taskId, newStatus),
+        setLastLog: (log: TaskStatus['lastLog']) => setLastLog(taskId, log),
+        setProgress: (progress: TaskStatus['progress']) => setProgress(taskId, progress),
+        clearStatus: () => clearStatus(taskId),
+    };
+}

@@ -2,7 +2,10 @@
 mod integration_tests {
     use crate::{get_app_version, join_paths, AppState};
     use crate::logging::LogManager;
+    use crate::watcher::WatcherManager;
     use std::sync::Arc;
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
 
     #[test]
     fn test_get_app_version_command() {
@@ -47,9 +50,12 @@ mod integration_tests {
     #[test]
     fn test_app_state_initialization() {
         // Test that AppState can be created
+        let rt = tokio::runtime::Runtime::new().unwrap();
         let log_manager = LogManager::new(100);
         let state = AppState {
             log_manager: Arc::new(log_manager),
+            cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
         };
 
         // Verify log_manager is accessible by checking logs count

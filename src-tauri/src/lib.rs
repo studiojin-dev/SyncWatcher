@@ -3,12 +3,16 @@ pub mod system_integration;
 pub mod logging;
 pub mod license;
 pub mod path_validation;
+pub mod watcher;
 
 #[cfg(test)]
 mod lib_tests;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::collections::HashMap;
+use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tauri::{Emitter, Manager};
 
 use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
@@ -18,8 +22,14 @@ use logging::LogManager;
 use logging::{add_log, get_system_logs, get_task_logs, DEFAULT_MAX_LOG_LINES};
 use license::generate_licenses_report;
 
+use watcher::{WatcherManager, WatchEvent};
+
 pub struct AppState {
     pub log_manager: Arc<LogManager>,
+    /// 현재 실행 중인 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
+    pub cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// 파일 시스템 감시 매니저
+    pub watcher_manager: Arc<RwLock<WatcherManager>>,
 }
 
 #[tauri::command]
@@ -219,6 +229,24 @@ fn get_removable_volumes() -> Result<Vec<system_integration::VolumeInfo>, String
     monitor.get_removable_volumes().map_err(|e| e.to_string())
 }
 
+/// Removable 디스크를 언마운트합니다.
+#[tauri::command]
+async fn unmount_volume(
+    path: PathBuf,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    DiskMonitor::unmount_volume(&path)
+        .map_err(|e| e.to_string())?;
+    
+    state.log_manager.log(
+        "success", 
+        &format!("Volume unmounted: {}", path.display()), 
+        None
+    );
+    
+    Ok(())
+}
+
 #[tauri::command]
 async fn start_sync(
     task_id: String,
@@ -231,6 +259,13 @@ async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncResult, String> {
+    // 취소 토큰 생성 및 등록
+    let cancel_token = CancellationToken::new();
+    {
+        let mut tokens = state.cancel_tokens.write().await;
+        tokens.insert(task_id.clone(), cancel_token.clone());
+    }
+
     state.log_manager.log("info", "Sync started", Some(task_id.clone()));
 
     let engine = SyncEngine::new(source, target);
@@ -243,11 +278,22 @@ async fn start_sync(
         exclude_patterns,
     };
 
-    let result = engine
-        .sync_files(&options, |progress| {
+    // 동기화 실행 (취소 토큰과 함께)
+    let task_id_clone = task_id.clone();
+    let result = tokio::select! {
+        res = engine.sync_files(&options, |progress| {
             let _ = app.emit("sync-progress", &progress);
-        })
-        .await;
+        }) => res,
+        _ = cancel_token.cancelled() => {
+            Err(anyhow::anyhow!("Operation cancelled by user"))
+        }
+    };
+
+    // 취소 토큰 정리
+    {
+        let mut tokens = state.cancel_tokens.write().await;
+        tokens.remove(&task_id_clone);
+    }
 
     match &result {
         Ok(res) => {
@@ -271,6 +317,72 @@ async fn start_sync(
 #[tauri::command]
 async fn list_sync_tasks() -> Result<Vec<SyncTask>, String> {
     Ok(vec![])
+}
+
+/// 실행 중인 동기화 작업을 취소합니다.
+#[tauri::command]
+async fn cancel_operation(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let tokens = state.cancel_tokens.read().await;
+    if let Some(token) = tokens.get(&task_id) {
+        token.cancel();
+        state.log_manager.log("warning", "Operation cancelled by user", Some(task_id));
+        Ok(true)
+    } else {
+        Ok(false) // 해당 task_id로 실행 중인 작업 없음
+    }
+}
+
+/// 파일 시스템 감시를 시작합니다.
+#[tauri::command]
+async fn start_watch(
+    task_id: String,
+    source_path: PathBuf,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let task_id_clone = task_id.clone();
+    let app_clone = app.clone();
+    
+    let mut manager = state.watcher_manager.write().await;
+    manager.start_watching(task_id.clone(), source_path.clone(), move |event| {
+        // 변경 감지 시 프론트엔드에 이벤트 전송
+        let watch_event = WatchEvent::from_notify_event(task_id_clone.clone(), &event);
+        let _ = app_clone.emit("watch-event", &watch_event);
+    }).map_err(|e| format!("감시 시작 실패: {}", e))?;
+    
+    state.log_manager.log(
+        "info", 
+        &format!("Watch started: {}", source_path.display()), 
+        Some(task_id)
+    );
+    
+    Ok(())
+}
+
+/// 파일 시스템 감시를 중지합니다.
+#[tauri::command]
+async fn stop_watch(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut manager = state.watcher_manager.write().await;
+    manager.stop_watching(&task_id)
+        .map_err(|e| format!("감시 중지 실패: {}", e))?;
+    
+    state.log_manager.log("info", "Watch stopped", Some(task_id));
+    Ok(())
+}
+
+/// 현재 감시 중인 Task 목록을 반환합니다.
+#[tauri::command]
+async fn get_watching_tasks(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let manager = state.watcher_manager.read().await;
+    Ok(manager.get_watching_tasks())
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -306,14 +418,36 @@ pub fn format_number(n: u64) -> String {
     result.chars().rev().collect()
 }
 
+/// Mac 알림 센터에 알림을 보냅니다.
+#[tauri::command]
+async fn send_notification(
+    title: String,
+    body: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    
+    app.notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show()
+        .map_err(|e| format!("알림 전송 실패: {}", e))?;
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             log_manager: Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES)),
+            cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -321,8 +455,14 @@ pub fn run() {
             sync_dry_run,
             list_volumes,
             get_removable_volumes,
+            unmount_volume,
             start_sync,
             list_sync_tasks,
+            cancel_operation,
+            send_notification,
+            start_watch,
+            stop_watch,
+            get_watching_tasks,
             get_app_config_dir,
             join_paths,
             read_yaml_file,
@@ -338,3 +478,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

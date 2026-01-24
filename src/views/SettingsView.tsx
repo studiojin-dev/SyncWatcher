@@ -206,20 +206,14 @@ function SettingsView() {
                             />
                         </div>
                         <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
-                            <span className="font-bold">{t('settings.deleteConfirmation')}</span>
+                            <div>
+                                <span className="font-bold">{t('settings.autoWatchStart', { defaultValue: '자동 감시 시작' })}</span>
+                                <p className="text-xs text-[var(--text-secondary)] mt-1">{t('settings.autoWatchStartDesc', { defaultValue: '앱 시작 시 감시 모드가 활성화된 Task 자동 시작' })}</p>
+                            </div>
                             <Switch
                                 size="md"
-                                checked={settings.deleteConfirmation}
-                                onChange={(e) => updateSettings({ deleteConfirmation: e.currentTarget.checked })}
-                                styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
-                            />
-                        </div>
-                        <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
-                            <span className="font-bold">{t('settings.verifyAfterCopy')}</span>
-                            <Switch
-                                size="md"
-                                checked={settings.verifyAfterCopy}
-                                onChange={(e) => updateSettings({ verifyAfterCopy: e.currentTarget.checked })}
+                                checked={settings.autoWatchStart ?? false}
+                                onChange={(e) => updateSettings({ autoWatchStart: e.currentTarget.checked })}
                                 styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
                             />
                         </div>
