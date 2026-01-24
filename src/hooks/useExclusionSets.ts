@@ -30,7 +30,7 @@ const DEFAULT_SETS: ExclusionSet[] = [
     {
         id: 'rust',
         name: 'Rust (Tauri)',
-        patterns: ['target', 'Cargo.lock', '**/*.rs.bk']
+        patterns: ['src-tauri/target', '**/src-tauri/target', 'Cargo.lock', '**/*.rs.bk']
     }
 ];
 
