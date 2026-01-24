@@ -191,8 +191,10 @@ async fn sync_dry_run(
     match engine.dry_run(&options).await {
         Ok(result) => {
             let msg = format!(
-                "Dry run completed. To copy: {}, To delete: {}, Bytes: {}",
-                result.files_to_copy, result.files_to_delete, result.bytes_to_copy
+                "Dry run completed.\nTo copy: {} files\nTo delete: {} files\nTotal size: {}",
+                format_number(result.files_to_copy), 
+                format_number(result.files_to_delete), 
+                format_bytes(result.bytes_to_copy)
             );
             state.log_manager.log("success", &msg, Some(task_id));
             Ok(result)
@@ -250,8 +252,10 @@ async fn start_sync(
     match &result {
         Ok(res) => {
              let msg = format!(
-                "Sync completed. Copied: {}, Deleted: {}, Bytes: {}",
-                res.files_copied, res.files_deleted, res.bytes_copied
+                "Sync completed.\nCopied: {} files\nDeleted: {} files\nData transferred: {}",
+                format_number(res.files_copied), 
+                format_number(res.files_deleted), 
+                format_bytes(res.bytes_copied)
             );
             state.log_manager.log("success", &msg, Some(task_id));
         }
@@ -276,6 +280,30 @@ pub struct SyncTask {
     pub source: String,
     pub target: String,
     pub enabled: bool,
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    const UNIT: u64 = 1024;
+    if bytes < UNIT {
+        return format!("{} B", format_number(bytes));
+    }
+    let exp = (bytes as f64).ln() / (UNIT as f64).ln();
+    let pre = "KMGTPE".chars().nth(exp as usize - 1).unwrap_or('?');
+    format!("{:.2} {}B", bytes as f64 / UNIT.pow(exp as u32) as f64, pre)
+}
+
+pub fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let mut count = 0;
+    for c in s.chars().rev() {
+        if count > 0 && count % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+        count += 1;
+    }
+    result.chars().rev().collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

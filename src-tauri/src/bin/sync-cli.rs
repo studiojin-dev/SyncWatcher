@@ -3,6 +3,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
 use syncwatcher_lib::sync_engine::{FileDiffKind, SyncEngine, SyncOptions};
+use syncwatcher_lib::{format_bytes, format_number};
 
 #[derive(Parser)]
 #[command(name = "sync-cli")]
@@ -102,11 +103,11 @@ async fn main() -> anyhow::Result<()> {
         match engine.dry_run(&options).await {
             Ok(dry_run) => {
                 println!("📊 Comparison Results:");
-                println!("   Total files in source: {}", dry_run.total_files);
-                println!("   Files to copy: {}", dry_run.files_to_copy);
-                println!("   Files modified: {}", dry_run.files_modified);
-                println!("   Files to delete: {}", dry_run.files_to_delete);
-                println!("   Bytes to copy: {} MB", dry_run.bytes_to_copy / 1_048_576);
+                println!("   Total files in source: {}", format_number(dry_run.total_files as u64));
+                println!("   Files to copy: {}", format_number(dry_run.files_to_copy as u64));
+                println!("   Files modified: {}", format_number(dry_run.files_modified as u64));
+                println!("   Files to delete: {}", format_number(dry_run.files_to_delete as u64));
+                println!("   Bytes to copy: {}", format_bytes(dry_run.bytes_to_copy));
                 println!();
 
                 if !dry_run.diffs.is_empty() {
@@ -123,11 +124,11 @@ async fn main() -> anyhow::Result<()> {
                             FileDiffKind::Deleted => "DELETE",
                         };
                         println!(
-                            "   {} {:?} - {} ({} bytes)",
+                            "   {} {:?} - {} ({})",
                             icon,
                             diff.path,
                             action,
-                            diff.source_size.unwrap_or(0)
+                            format_bytes(diff.source_size.unwrap_or(0))
                         );
                     }
                 } else {
@@ -180,9 +181,9 @@ async fn main() -> anyhow::Result<()> {
                 pb.finish_with_message("✅ Synchronization complete!");
                 println!();
                 println!("📊 Results:");
-                println!("   Files copied: {}", result.files_copied);
-                println!("   Files deleted: {}", result.files_deleted);
-                println!("   Bytes copied: {} MB", result.bytes_copied / 1_048_576);
+                println!("   Files copied: {}", format_number(result.files_copied));
+                println!("   Files deleted: {}", format_number(result.files_deleted));
+                println!("   Bytes copied: {}", format_bytes(result.bytes_copied));
                 if !result.errors.is_empty() {
                     println!("   Errors: {}", result.errors.len());
                     for error in &result.errors {
