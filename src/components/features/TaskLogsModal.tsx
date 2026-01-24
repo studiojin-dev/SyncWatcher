@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { IconX, IconRefresh } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';
@@ -37,9 +38,25 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
     };
 
     useEffect(() => {
+        // Initial fetch
         fetchLogs();
-        const interval = setInterval(fetchLogs, 1000);
-        return () => clearInterval(interval);
+
+        // Listen for new log events instead of polling
+        const unlistenPromise = listen<{ task_id?: string; entry: LogEntry }>('new-log-task', (event) => {
+            // Only update if log is for this task
+            if (event.payload.task_id === taskId) {
+                setLogs(prevLogs => {
+                    const newLogs = [event.payload.entry, ...prevLogs];
+                    // Keep max 1000 logs to prevent memory issues
+                    return newLogs.slice(0, 1000);
+                });
+            }
+        });
+
+        // Cleanup listener on unmount
+        return () => {
+            unlistenPromise.then(unlisten => unlisten());
+        };
     }, [taskId]);
 
     const getLevelColor = (level: string) => {

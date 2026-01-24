@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use crate::AppState;
 
 /// Default maximum number of log lines to keep in memory
@@ -12,6 +13,13 @@ pub struct LogEntry {
     pub level: String,
     pub message: String,
     pub task_id: Option<String>,
+}
+
+/// Event emitted when a new log entry is added
+#[derive(Debug, Clone, Serialize)]
+pub struct LogEvent {
+    pub task_id: Option<String>,
+    pub entry: LogEntry,
 }
 
 pub struct LogManager {
@@ -27,23 +35,35 @@ impl LogManager {
         }
     }
 
-    pub fn log(&self, level: &str, message: &str, task_id: Option<String>) {
+    pub fn log_with_event(&self, level: &str, message: &str, task_id: Option<String>, app: Option<&tauri::AppHandle>) {
         let now = chrono::Utc::now().to_rfc3339();
         let entry = LogEntry {
             id: now.clone(),
             timestamp: now,
             level: level.to_string(),
             message: message.to_string(),
-            task_id,
+            task_id: task_id.clone(),
         };
 
         let mut logs = self.system_logs.lock().unwrap();
-        logs.push(entry);
+        logs.push(entry.clone());
 
         let len = logs.len();
         if len > self.max_lines {
             logs.drain(0..(len - self.max_lines));
         }
+
+        // Emit event to frontend if app handle is provided
+        if let Some(app) = app {
+            let _ = app.emit("new-log-task", &LogEvent {
+                task_id: task_id.clone(),
+                entry,
+            });
+        }
+    }
+
+    pub fn log(&self, level: &str, message: &str, task_id: Option<String>) {
+        self.log_with_event(level, message, task_id, None);
     }
 
     pub fn get_logs(&self, task_id: Option<String>) -> Vec<LogEntry> {

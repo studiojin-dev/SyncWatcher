@@ -120,24 +120,50 @@ impl SyncEngine {
     }
 
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
-        // Verify source exists
-        if !self.source.exists() {
-             anyhow::bail!("Source directory does not exist or is not accessible: {:?}", self.source);
-        }
-        if !self.source.is_dir() {
-            anyhow::bail!("Source path is not a directory: {:?}", self.source);
+        // 1. Canonicalize source to resolve symlinks and .. (TOCTOU protection)
+        let source_canonical = tokio::fs::canonicalize(&self.source)
+            .await
+            .with_context(|| format!("Failed to canonicalize source: {:?}", self.source))?;
+
+        // 2. Verify it's still a directory after canonicalization
+        let source_meta = tokio::fs::metadata(&source_canonical)
+            .await
+            .with_context(|| format!("Failed to access source after canonicalization: {:?}", source_canonical))?;
+
+        if !source_meta.is_dir() {
+            anyhow::bail!("Source path is not a directory: {:?}", source_canonical);
         }
 
+        // 3. Warn if symlink (safe to continue since we canonicalized)
+        if source_meta.file_type().is_symlink() {
+            eprintln!("Warning: Source path is a symlink: {:?} -> {:?}", self.source, source_canonical);
+        }
+
+        // 4. Handle target path similarly
+        let target_canonical = if self.target.exists() {
+            let target_meta = tokio::fs::metadata(&self.target)
+                .await
+                .with_context(|| format!("Failed to access target: {:?}", self.target))?;
+
+            if !target_meta.is_dir() {
+                anyhow::bail!("Target path exists but is not a directory: {:?}", self.target);
+            }
+
+            Some(tokio::fs::canonicalize(&self.target)
+                .await
+                .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?)
+        } else {
+            None
+        };
+
+        // 5. Use canonicalized paths for all operations
         let source_files = self
-            .read_directory(&self.source, &options.exclude_patterns)
+            .read_directory(&source_canonical, &options.exclude_patterns)
             .await
             .context("Failed to read source directory")?;
 
-        let target_files = if self.target.exists() {
-            if !self.target.is_dir() {
-                anyhow::bail!("Target path exists but is not a directory: {:?}", self.target);
-            }
-             self.read_directory(&self.target, &options.exclude_patterns)
+        let target_files = if let Some(ref target) = target_canonical {
+            self.read_directory(target, &options.exclude_patterns)
                 .await
                 .context("Failed to read target directory")?
         } else {

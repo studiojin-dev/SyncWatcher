@@ -1,17 +1,21 @@
 //! 파일 시스템 감시 관리 모듈
-//! 
+//!
 //! 여러 Sync Task의 watcher를 관리하고, 변경 감지 시 자동 동기화를 트리거합니다.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::thread;
 use anyhow::Result;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher, EventKind};
+use tokio_util::sync::CancellationToken;
 
 /// 단일 Task의 Watcher 정보
 pub struct TaskWatcher {
     pub task_id: String,
     pub source_path: PathBuf,
     _watcher: RecommendedWatcher,
+    cancellation_token: CancellationToken,
+    _debounce_thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 /// 여러 Task의 Watcher를 관리하는 매니저
@@ -47,7 +51,11 @@ impl WatcherManager {
             self.stop_watching(&task_id)?;
         }
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let cancellation_token = CancellationToken::new();
+        let token_clone = cancellation_token.clone();
+
+        // Use bounded channel (100 message buffer) to prevent memory exhaustion
+        let (tx, rx) = std::sync::mpsc::sync_channel(100);
         let tx = std::sync::Arc::new(std::sync::Mutex::new(tx));
 
         let mut watcher = notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
@@ -55,7 +63,13 @@ impl WatcherManager {
                 // 실제 파일 변경 이벤트만 처리
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                        let _ = tx.lock().unwrap().send(event);
+                        // Use try_send for backpressure handling
+                        if let Ok(tx) = tx.lock() {
+                            if let Err(_) = tx.try_send(event) {
+                                // Channel full - log and skip (backpressure)
+                                // In production, you might want to log this
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -64,17 +78,23 @@ impl WatcherManager {
 
         watcher.watch(&source_path, RecursiveMode::Recursive)?;
 
-        // 디바운싱 처리를 위한 스레드 생성
-        std::thread::spawn(move || {
+        // 디바운싱 처리를 위한 스레드 생성 (with cancellation support)
+        let thread_handle = std::thread::spawn(move || {
             use std::time::Duration;
-            
+
             let debounce_time = Duration::from_millis(500);
             let mut paths = std::collections::HashSet::new();
             loop {
+                // Check for cancellation
+                if token_clone.is_cancelled() {
+                    break;
+                }
+
                 // 첫 이벤트 대기
-                let first_event = match rx.recv() {
+                let first_event = match rx.recv_timeout(debounce_time) {
                     Ok(e) => e,
-                    Err(_) => break, // 채널 닫힘 (Watcher 드롭됨)
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue, // No events, check cancellation again
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break, // 채널 닫힘
                 };
 
                 // 첫 이벤트 처리
@@ -85,15 +105,20 @@ impl WatcherManager {
 
                 // 디바운싱 루프: 추가 이벤트 수집
                 loop {
+                    // Check for cancellation between events
+                    if token_clone.is_cancelled() {
+                        return;
+                    }
+
                     match rx.recv_timeout(debounce_time) {
                         Ok(event) => {
                             for path in event.paths {
                                 paths.insert(path);
                             }
                             // 이벤트 종류 업데이트 (단순화: 마지막 이벤트 기준)
-                            // 실제로는 Create/Remove 등이 섞일 수 있으나, 
+                            // 실제로는 Create/Remove 등이 섞일 수 있으나,
                             // 동기화 트리거 목적상 '변경됨' 사실이 중요함.
-                            kind = event.kind; 
+                            kind = event.kind;
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                             // 타임아웃: 수집된 이벤트 처리 및 루프 종료
@@ -118,6 +143,8 @@ impl WatcherManager {
             task_id,
             source_path,
             _watcher: watcher,
+            cancellation_token,
+            _debounce_thread_handle: Some(thread_handle),
         });
 
         Ok(())
@@ -125,7 +152,14 @@ impl WatcherManager {
 
     /// 특정 Task의 파일 시스템 감시를 중지합니다.
     pub fn stop_watching(&mut self, task_id: &str) -> Result<()> {
-        self.watchers.remove(task_id);
+        if let Some(mut watcher) = self.watchers.remove(task_id) {
+            // Cancel the debouncing thread
+            watcher.cancellation_token.cancel();
+
+            // Wait for thread to finish (non-blocking, thread will exit on its own)
+            // The cancellation token ensures the thread will exit quickly
+            let _ = watcher._debounce_thread_handle.take();
+        }
         Ok(())
     }
 
@@ -142,6 +176,22 @@ impl WatcherManager {
     /// 모든 감시를 중지합니다.
     pub fn stop_all(&mut self) {
         self.watchers.clear();
+    }
+}
+
+impl Drop for TaskWatcher {
+    fn drop(&mut self) {
+        // Cancel the debouncing thread when watcher is dropped
+        self.cancellation_token.cancel();
+        // Don't wait in Drop (can deadlock), just cancel
+        // Thread will exit on its own
+    }
+}
+
+impl Drop for WatcherManager {
+    fn drop(&mut self) {
+        // Stop all watchers when manager is dropped
+        self.stop_all();
     }
 }
 

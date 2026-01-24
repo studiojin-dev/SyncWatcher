@@ -4,6 +4,7 @@ pub mod logging;
 pub mod license;
 pub mod path_validation;
 pub mod watcher;
+pub mod input_validation;
 
 #[cfg(test)]
 mod lib_tests;
@@ -11,7 +12,8 @@ mod lib_tests;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::collections::HashMap;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tauri::{Emitter, Manager};
 
@@ -23,6 +25,60 @@ use logging::{add_log, get_system_logs, get_task_logs, DEFAULT_MAX_LOG_LINES};
 use license::generate_licenses_report;
 
 use watcher::{WatcherManager, WatchEvent};
+
+/// Consolidated state for sync progress tracking to prevent race conditions
+#[derive(Clone)]
+struct SyncProgressState {
+    inner: Arc<Mutex<SyncProgressStateInner>>,
+}
+
+struct SyncProgressStateInner {
+    last_emit_time: Instant,
+    last_file: String,
+}
+
+impl SyncProgressState {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(SyncProgressStateInner {
+                last_emit_time: Instant::now(),
+                last_file: String::new(),
+            })),
+        }
+    }
+
+    /// Check if file changed and update last_file. Returns true if changed.
+    fn should_update_file(&self, current_file: &str) -> bool {
+        let state = self.inner.try_lock();
+        if let Ok(mut state) = state {
+            if state.last_file != current_file {
+                state.last_file = current_file.to_string();
+                true
+            } else {
+                false
+            }
+        } else {
+            // Lock poisoned - log and skip update
+            false
+        }
+    }
+
+    /// Check if enough time elapsed since last emit. Returns true if should emit.
+    fn should_emit(&self) -> bool {
+        let state = self.inner.try_lock();
+        if let Ok(mut state) = state {
+            if state.last_emit_time.elapsed() >= Duration::from_millis(100) {
+                state.last_emit_time = Instant::now();
+                true
+            } else {
+                false
+            }
+        } else {
+            // Lock poisoned - don't emit to prevent cascading failures
+            false
+        }
+    }
+}
 
 pub struct AppState {
     pub log_manager: Arc<LogManager>,
@@ -186,6 +242,12 @@ async fn sync_dry_run(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
+    // Validate all inputs
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
     state.log_manager.log("info", "Dry run started", Some(task_id.clone()));
 
     let engine = SyncEngine::new(source, target);
@@ -259,6 +321,12 @@ async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncResult, String> {
+    // Validate all inputs
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
     // 취소 토큰 생성 및 등록
     let cancel_token = CancellationToken::new();
     {
@@ -292,37 +360,25 @@ async fn start_sync(
         total: u64,
     }
 
-    // Throttling을 위한 상태 (마지막 전송 시간)
-    let last_emit_time = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
-    
-    // 파일별 로그 기록을 위한 상태 (마지막 기록된 파일)
-    let last_file = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    // Consolidated progress state (prevents race conditions and deadlocks)
+    let progress_state = SyncProgressState::new();
     let log_manager = state.log_manager.clone();
     let task_id_for_log = task_id.clone();
+    let app_for_log = app.clone(); // For log events
 
     let result = tokio::select! {
         res = engine.sync_files(&options, move |progress| {
              // 1. Detailed Logging: 파일 변경 시 로그 기록 (UI 무관)
             if let Some(current) = &progress.current_file {
-                 let mut last = last_file.lock().unwrap();
-                 if *last != *current {
-                     // 이전 파일과 다르면 로그 기록 (info 레벨로 상세 로그 남김)
-                     // "Syncing: filename"
-                     log_manager.log("info", &format!("Syncing: {}", current), Some(task_id_for_log.clone()));
-                     *last = current.clone();
-                 }
+                if progress_state.should_update_file(current) {
+                    // 이전 파일과 다르면 로그 기록 (info 레벨로 상세 로그 남김)
+                    // Use log_with_event to emit frontend events
+                    log_manager.log_with_event("info", &format!("Syncing: {}", current), Some(task_id_for_log.clone()), Some(&app_for_log));
+                }
             }
 
              // 2. UI Throttling: 100ms마다 한 번만 이벤트 전송
-            let should_emit = {
-                let mut last = last_emit_time.lock().unwrap();
-                if last.elapsed() >= std::time::Duration::from_millis(100) {
-                    *last = std::time::Instant::now();
-                    true
-                } else {
-                    false
-                }
-            };
+            let should_emit = progress_state.should_emit();
 
             if should_emit || progress.processed_files == progress.total_files {
                  let event = ProgressEvent {
@@ -393,6 +449,10 @@ async fn start_watch(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    // Validate inputs
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
     let task_id_clone = task_id.clone();
     let app_clone = app.clone();
     

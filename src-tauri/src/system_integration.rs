@@ -157,32 +157,68 @@ impl DiskMonitor {
     /// Removable 디스크를 언마운트합니다.
     /// macOS의 diskutil 명령을 사용합니다.
     pub fn unmount_volume(path: &Path) -> Result<()> {
+        use crate::path_validation::{validate_path, verify_path_exists};
         use std::process::Command;
         use std::thread;
         use std::time::Duration;
+
+        // 1. Convert to string, reject if invalid UTF-8 or contains null
+        let path_str = path.to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path: contains non-UTF-8 characters"))?;
+
+        // 2. Use existing validation module
+        validate_path(path_str)
+            .map_err(|e| anyhow::anyhow!("Path validation failed: {}", e))?;
+
+        // 3. Verify path exists and is accessible
+        verify_path_exists(path)
+            .map_err(|e| anyhow::anyhow!("Path verification failed: {}", e))?;
+
+        // 4. Additional validation: must be under /Volumes
+        if !path_str.starts_with("/Volumes/") {
+            return Err(anyhow::anyhow!(
+                "Invalid volume path: must be under /Volumes, got: {}",
+                path_str
+            ));
+        }
+
+        // 5. Validate no shell metacharacters
+        if path_str.contains('|') || path_str.contains('&') || path_str.contains(';')
+            || path_str.contains('$') || path_str.contains('`') || path_str.contains('\n')
+        {
+            return Err(anyhow::anyhow!("Path contains shell metacharacters"));
+        }
 
         let max_retries = 3;
         let mut last_error = String::new();
 
         for attempt in 1..=max_retries {
+            // 6. Pass PathBuf directly, not string (safer)
             let output = Command::new("diskutil")
-                .args(["unmount", path.to_str().unwrap_or("")])
+                .arg("unmount")
+                .arg(path)  // Pass PathBuf directly
                 .output()
-                .map_err(|e| anyhow::anyhow!("diskutil 실행 실패: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("diskutil execution failed: {}", e))?;
 
             if output.status.success() {
                 return Ok(());
             }
 
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+            // 7. Validate error message doesn't contain injection indicators
+            if stderr.contains("shell") || stderr.contains("syntax error") {
+                return Err(anyhow::anyhow!("Potential command injection detected"));
+            }
+
             last_error = stderr;
-            
+
             if attempt < max_retries {
                 thread::sleep(Duration::from_secs(1));
             }
         }
 
-        Err(anyhow::anyhow!("Unmount 실패 ({}회 시도): {}", max_retries, last_error))
+        Err(anyhow::anyhow!("Unmount failed ({} attempts): {}", max_retries, last_error))
     }
 }
 
