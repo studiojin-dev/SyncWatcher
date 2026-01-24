@@ -280,9 +280,59 @@ async fn start_sync(
 
     // 동기화 실행 (취소 토큰과 함께)
     let task_id_clone = task_id.clone();
+    let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
+    let app_clone = app.clone();
+
+    #[derive(serde::Serialize, Clone)]
+    struct ProgressEvent {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        message: String,
+        current: u64,
+        total: u64,
+    }
+
+    // Throttling을 위한 상태 (마지막 전송 시간)
+    let last_emit_time = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    
+    // 파일별 로그 기록을 위한 상태 (마지막 기록된 파일)
+    let last_file = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let log_manager = state.log_manager.clone();
+    let task_id_for_log = task_id.clone();
+
     let result = tokio::select! {
-        res = engine.sync_files(&options, |progress| {
-            let _ = app.emit("sync-progress", &progress);
+        res = engine.sync_files(&options, move |progress| {
+             // 1. Detailed Logging: 파일 변경 시 로그 기록 (UI 무관)
+            if let Some(current) = &progress.current_file {
+                 let mut last = last_file.lock().unwrap();
+                 if *last != *current {
+                     // 이전 파일과 다르면 로그 기록 (info 레벨로 상세 로그 남김)
+                     // "Syncing: filename"
+                     log_manager.log("info", &format!("Syncing: {}", current), Some(task_id_for_log.clone()));
+                     *last = current.clone();
+                 }
+            }
+
+             // 2. UI Throttling: 100ms마다 한 번만 이벤트 전송
+            let should_emit = {
+                let mut last = last_emit_time.lock().unwrap();
+                if last.elapsed() >= std::time::Duration::from_millis(100) {
+                    *last = std::time::Instant::now();
+                    true
+                } else {
+                    false
+                }
+            };
+
+            if should_emit || progress.processed_files == progress.total_files {
+                 let event = ProgressEvent {
+                    task_id: task_id_for_event.clone(),
+                    message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
+                    current: progress.processed_files,
+                    total: progress.total_files,
+                };
+                let _ = app_clone.emit("sync-progress", &event);
+            }
         }) => res,
         _ = cancel_token.cancelled() => {
             Err(anyhow::anyhow!("Operation cancelled by user"))

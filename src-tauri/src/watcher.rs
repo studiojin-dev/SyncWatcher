@@ -47,12 +47,15 @@ impl WatcherManager {
             self.stop_watching(&task_id)?;
         }
 
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Arc::new(std::sync::Mutex::new(tx));
+
         let mut watcher = notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
             if let Ok(event) = res {
                 // 실제 파일 변경 이벤트만 처리
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                        on_change(event);
+                        let _ = tx.lock().unwrap().send(event);
                     }
                     _ => {}
                 }
@@ -60,6 +63,56 @@ impl WatcherManager {
         })?;
 
         watcher.watch(&source_path, RecursiveMode::Recursive)?;
+
+        // 디바운싱 처리를 위한 스레드 생성
+        std::thread::spawn(move || {
+            use std::time::Duration;
+            
+            let debounce_time = Duration::from_millis(500);
+            let mut paths = std::collections::HashSet::new();
+            loop {
+                // 첫 이벤트 대기
+                let first_event = match rx.recv() {
+                    Ok(e) => e,
+                    Err(_) => break, // 채널 닫힘 (Watcher 드롭됨)
+                };
+
+                // 첫 이벤트 처리
+                for path in first_event.paths {
+                    paths.insert(path);
+                }
+                let mut kind = first_event.kind;
+
+                // 디바운싱 루프: 추가 이벤트 수집
+                loop {
+                    match rx.recv_timeout(debounce_time) {
+                        Ok(event) => {
+                            for path in event.paths {
+                                paths.insert(path);
+                            }
+                            // 이벤트 종류 업데이트 (단순화: 마지막 이벤트 기준)
+                            // 실제로는 Create/Remove 등이 섞일 수 있으나, 
+                            // 동기화 트리거 목적상 '변경됨' 사실이 중요함.
+                            kind = event.kind; 
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            // 타임아웃: 수집된 이벤트 처리 및 루프 종료
+                            if !paths.is_empty() {
+                                let collected_paths: Vec<PathBuf> = paths.drain().collect();
+                                let synthetic_event = Event {
+                                    kind: kind.clone(), // 마지막 이벤트 종류 사용
+                                    paths: collected_paths,
+                                    attrs: Default::default(),
+                                };
+                                on_change(synthetic_event);
+                            }
+                            break; // 안쪽 루프 탈출, 다시 첫 이벤트 대기
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return, // 스레드 종료
+                    }
+                }
+            }
+        });
 
         self.watchers.insert(task_id.clone(), TaskWatcher {
             task_id,
@@ -92,6 +145,78 @@ impl WatcherManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_watcher_debouncing() {
+        // 임시 디렉토리 생성
+        let dir = tempdir().unwrap();
+        let dir_path = dir.path().to_path_buf();
+        let (tx, rx) = mpsc::channel();
+
+        let mut manager = WatcherManager::new();
+        let task_id = "test_debounce".to_string();
+
+        // 감시 시작
+        manager.start_watching(task_id.clone(), dir_path.clone(), move |event| {
+            tx.send(event).unwrap();
+        }).unwrap();
+
+        // 파일 5개를 100ms 간격으로 생성 (총 500ms 미만 간격이므로 하나로 묶여야 함)
+        // Debounce 설정이 500ms이므로, 100ms 간격이면 계속 타임아웃이 연장됨.
+        for i in 0..5 {
+            let file_path = dir_path.join(format!("file_{}.txt", i));
+            fs::write(file_path, "content").unwrap();
+            std::thread::sleep(Duration::from_millis(50)); 
+        }
+
+        // Debounce 시간(500ms) + 여유 시간 대기 후 이벤트 수신 확인
+        // 첫 번째 이벤트 수신
+        let event = rx.recv_timeout(Duration::from_secs(2)).expect("Should receive debounced event");
+        
+        println!("Received event with {} paths", event.paths.len());
+
+        // 추가 이벤트가 없어야 함 (하나로 묶였으므로)
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "Should not receive more events");
+
+        // 생성된 파일들이 경로에 포함되어 있는지 확인
+        assert!(!event.paths.is_empty());
+        
+        manager.stop_watching(&task_id).unwrap();
+    }
+
+    #[test]
+    fn test_watcher_manager_creation() {
+        let manager = WatcherManager::new();
+        assert!(manager.get_watching_tasks().is_empty());
+    }
+
+    #[test]
+    fn test_start_stop_watching() {
+        let mut manager = WatcherManager::new();
+        let temp = tempfile::tempdir().unwrap();
+        
+        let result = manager.start_watching(
+            "test-task".to_string(),
+            temp.path().to_path_buf(),
+            |_| {},
+        );
+        
+        assert!(result.is_ok());
+        assert!(manager.is_watching("test-task"));
+        
+        let result = manager.stop_watching("test-task");
+        assert!(result.is_ok());
+        assert!(!manager.is_watching("test-task"));
+    }
+}
+
 /// 감시 이벤트 정보 (프론트엔드 전송용)
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WatchEvent {
@@ -119,33 +244,4 @@ impl WatchEvent {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
-    #[test]
-    fn test_watcher_manager_creation() {
-        let manager = WatcherManager::new();
-        assert!(manager.get_watching_tasks().is_empty());
-    }
-
-    #[test]
-    fn test_start_stop_watching() {
-        let mut manager = WatcherManager::new();
-        let temp = tempfile::tempdir().unwrap();
-        
-        let result = manager.start_watching(
-            "test-task".to_string(),
-            temp.path().to_path_buf(),
-            |_| {},
-        );
-        
-        assert!(result.is_ok());
-        assert!(manager.is_watching("test-task"));
-        
-        let result = manager.stop_watching("test-task");
-        assert!(result.is_ok());
-        assert!(!manager.is_watching("test-task"));
-    }
-}

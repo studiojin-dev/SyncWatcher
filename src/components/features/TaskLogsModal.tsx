@@ -38,6 +38,8 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
 
     useEffect(() => {
         fetchLogs();
+        const interval = setInterval(fetchLogs, 1000);
+        return () => clearInterval(interval);
     }, [taskId]);
 
     const getLevelColor = (level: string) => {

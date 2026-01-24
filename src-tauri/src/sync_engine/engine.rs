@@ -42,74 +42,81 @@ impl SyncEngine {
     }
 
     async fn read_directory(&self, dir: &Path, exclude_patterns: &[String]) -> Result<Vec<FileMetadata>> {
-        let mut files = Vec::new();
+        let dir_buf = dir.to_path_buf();
+        let patterns = exclude_patterns.to_vec();
 
-        // Pattern validation constants
-        const MAX_PATTERN_LENGTH: usize = 255;
-        const MAX_PATTERN_COUNT: usize = 100;
+        tokio::task::spawn_blocking(move || {
+            let mut files = Vec::new();
 
-        // Validate pattern count
-        if exclude_patterns.len() > MAX_PATTERN_COUNT {
-            anyhow::bail!(
-                "Too many exclusion patterns: {} (max: {})",
-                exclude_patterns.len(),
-                MAX_PATTERN_COUNT
-            );
-        }
+            // Pattern validation constants
+            const MAX_PATTERN_LENGTH: usize = 255;
+            const MAX_PATTERN_COUNT: usize = 100;
 
-        // Build GlobSet with validation
-        let mut builder = GlobSetBuilder::new();
-        for pattern in exclude_patterns {
-            // Skip empty patterns
-            let trimmed = pattern.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Validate pattern length
-            if trimmed.len() > MAX_PATTERN_LENGTH {
+            // Validate pattern count
+            if patterns.len() > MAX_PATTERN_COUNT {
                 anyhow::bail!(
-                    "Exclusion pattern too long: '{}...' ({} chars, max: {})",
-                    &trimmed[..50.min(trimmed.len())],
-                    trimmed.len(),
-                    MAX_PATTERN_LENGTH
+                    "Too many exclusion patterns: {} (max: {})",
+                    patterns.len(),
+                    MAX_PATTERN_COUNT
                 );
             }
 
-            // Add pattern with better error context
-            match Glob::new(trimmed) {
-                Ok(glob) => builder.add(glob),
-                Err(e) => anyhow::bail!("Invalid exclusion pattern '{}': {}", trimmed, e),
-            };
-        }
-        let globs = builder.build()?;
-
-        for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            
-            // Check exclusions
-            // We need to check the relative path against the glob patterns
-            if let Ok(relative_path) = path.strip_prefix(dir) {
-                if globs.is_match(relative_path) {
+            // Build GlobSet with validation
+            let mut builder = GlobSetBuilder::new();
+            for pattern in &patterns {
+                // Skip empty patterns
+                let trimmed = pattern.trim();
+                if trimmed.is_empty() {
                     continue;
                 }
+
+                // Validate pattern length
+                if trimmed.len() > MAX_PATTERN_LENGTH {
+                    anyhow::bail!(
+                        "Exclusion pattern too long: '{}...' ({} chars, max: {})",
+                        &trimmed[..50.min(trimmed.len())],
+                        trimmed.len(),
+                        MAX_PATTERN_LENGTH
+                    );
+                }
+
+                // Add pattern with better error context
+                match Glob::new(trimmed) {
+                    Ok(glob) => builder.add(glob),
+                    Err(e) => anyhow::bail!("Invalid exclusion pattern '{}': {}", trimmed, e),
+                };
+            }
+            let globs = builder.build()?;
+
+            for entry in WalkDir::new(&dir_buf).into_iter().filter_map(|e| e.ok()) {
+                let path = entry.path();
+                
+                // Check exclusions
+                // We need to check the relative path against the glob patterns
+                if let Ok(relative_path) = path.strip_prefix(&dir_buf) {
+                    if globs.is_match(relative_path) {
+                        continue;
+                    }
+                }
+
+                // Use std::fs instead of tokio::fs inside blocking task
+                let metadata = std::fs::symlink_metadata(path)
+                    .with_context(|| format!("Failed to get metadata for: {:?}", path))?;
+                
+                let relative_path = path.strip_prefix(&dir_buf)?.to_path_buf();
+
+                files.push(FileMetadata {
+                    path: relative_path,
+                    size: metadata.len(),
+                    modified: metadata.modified()
+                        .with_context(|| format!("Failed to get modification time for: {:?}", path))?,
+                    is_file: metadata.is_file(),
+                });
             }
 
-            let metadata = fs::symlink_metadata(path)
-                .await
-                .with_context(|| format!("Failed to get metadata for: {:?}", path))?;
-            let relative_path = path.strip_prefix(dir)?.to_path_buf();
-
-            files.push(FileMetadata {
-                path: relative_path,
-                size: metadata.len(),
-                modified: metadata.modified()
-                    .with_context(|| format!("Failed to get modification time for: {:?}", path))?,
-                is_file: metadata.is_file(),
-            });
-        }
-
-        Ok(files)
+            Ok(files)
+        })
+        .await?
     }
 
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {

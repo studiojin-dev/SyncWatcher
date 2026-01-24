@@ -158,18 +158,31 @@ impl DiskMonitor {
     /// macOS의 diskutil 명령을 사용합니다.
     pub fn unmount_volume(path: &Path) -> Result<()> {
         use std::process::Command;
-        
-        let output = Command::new("diskutil")
-            .args(["unmount", path.to_str().unwrap_or("")])
-            .output()
-            .map_err(|e| anyhow::anyhow!("diskutil 실행 실패: {}", e))?;
-        
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(anyhow::anyhow!("Unmount 실패: {}", stderr))
+        use std::thread;
+        use std::time::Duration;
+
+        let max_retries = 3;
+        let mut last_error = String::new();
+
+        for attempt in 1..=max_retries {
+            let output = Command::new("diskutil")
+                .args(["unmount", path.to_str().unwrap_or("")])
+                .output()
+                .map_err(|e| anyhow::anyhow!("diskutil 실행 실패: {}", e))?;
+
+            if output.status.success() {
+                return Ok(());
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            last_error = stderr;
+            
+            if attempt < max_retries {
+                thread::sleep(Duration::from_secs(1));
+            }
         }
+
+        Err(anyhow::anyhow!("Unmount 실패 ({}회 시도): {}", max_retries, last_error))
     }
 }
 

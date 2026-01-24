@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop } from '@tabler/icons-react';
+import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc } from '@tabler/icons-react';
 import { MultiSelect } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, ask } from '@tauri-apps/plugin-dialog';
 import { useSyncTasks, SyncTask } from '../hooks/useSyncTasks';
 import { useExclusionSets } from '../hooks/useExclusionSets';
 import { useSyncTaskStatusStore } from '../hooks/useSyncTaskStatus';
@@ -197,8 +197,16 @@ function SyncTasksView() {
         }
     };
 
-    const handleDelete = (task: SyncTask) => {
-        if (window.confirm(t('syncTasks.confirmDelete', { defaultValue: 'Are you sure you want to delete this task?' }))) {
+    const handleDelete = async (task: SyncTask) => {
+        const confirmed = await ask(
+            t('syncTasks.confirmDelete', { defaultValue: 'Are you sure you want to delete this task?' }),
+            {
+                title: t('syncTasks.deleteTask', { defaultValue: 'Delete Task' }),
+                kind: 'warning',
+            }
+        );
+
+        if (confirmed) {
             deleteTask(task.id);
             showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
         }
@@ -492,20 +500,86 @@ function SyncTasksView() {
                                         <h3 className="text-lg font-heading font-black uppercase tracking-tight truncate">
                                             {task.name}
                                         </h3>
-                                        <div className="flex gap-2">
-                                            {task.deleteMissing && (
-                                                <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-error)] text-white">
-                                                    DEL
-                                                </span>
-                                            )}
-                                            {task.checksumMode && (
-                                                <span className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--color-accent-warning)] text-black">
-                                                    CHK
-                                                </span>
-                                            )}
+                                        <div className="flex gap-1.5 items-center">
+                                            {/* DEL Badge */}
+                                            <span className={`px-1.5 py-0.5 text-[10px] font-bold border-2 transition-colors ${task.deleteMissing
+                                                ? 'border-black bg-[var(--color-accent-error)] text-white'
+                                                : 'border-[var(--border-main)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-40 grayscale'
+                                                }`} title="Delete Missing">
+                                                DEL
+                                            </span>
+
+                                            {/* CHK Badge */}
+                                            <span className={`px-1.5 py-0.5 text-[10px] font-bold border-2 transition-colors ${task.checksumMode
+                                                ? 'border-black bg-[var(--color-accent-warning)] text-black'
+                                                : 'border-[var(--border-main)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-40 grayscale'
+                                                }`} title="Checksum Mode">
+                                                CHK
+                                            </span>
+
+                                            {/* WATCH Badge (Icon) */}
+                                            <span className={`p-0.5 border-2 transition-colors flex items-center justify-center ${task.watchMode
+                                                ? 'border-black bg-[var(--accent-success)] text-white'
+                                                : 'border-[var(--border-main)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-40 grayscale'
+                                                }`} title="Watch Mode">
+                                                <IconEye size={12} stroke={3} />
+                                            </span>
+
+                                            {/* UNMNT Badge (Icon) */}
+                                            <span className={`p-0.5 border-2 transition-colors flex items-center justify-center ${task.autoUnmount
+                                                ? 'border-black bg-[var(--accent-main)] text-white'
+                                                : 'border-[var(--border-main)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-40 grayscale'
+                                                }`} title="Auto Unmount">
+                                                <IconDisc size={12} stroke={3} />
+                                            </span>
                                         </div>
                                     </div>
-
+                                    <div className="flex gap-2 pb-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
+                                        <button
+                                            className={`p-2 border-2 border-[var(--border-main)] transition-all ${dryRunning === task.id ? 'bg-[var(--color-accent-warning)] animate-pulse' : 'hover:bg-[var(--bg-tertiary)]'}`}
+                                            onClick={() => handleDryRun(task)}
+                                            title={dryRunning === task.id ? t('common.cancel', { defaultValue: '취소' }) : t('syncTasks.dryRun')}
+                                        >
+                                            {dryRunning === task.id ? (
+                                                <IconPlayerStop size={20} stroke={2} />
+                                            ) : (
+                                                <IconFlask size={20} stroke={2} />
+                                            )}
+                                        </button>
+                                        <button
+                                            className={`p-2 border-2 border-[var(--border-main)] transition-all ${syncing === task.id ? 'bg-[var(--color-accent-error)] animate-pulse text-white' : 'bg-[var(--accent-main)] text-white hover:shadow-[2px_2px_0_0_black]'}`}
+                                            onClick={() => handleSync(task)}
+                                            disabled={syncing !== null && syncing !== task.id}
+                                            title={syncing === task.id ? t('common.cancel', { defaultValue: '취소' }) : t('syncTasks.startSync')}
+                                        >
+                                            {syncing === task.id ? (
+                                                <IconPlayerStop size={20} stroke={2} />
+                                            ) : (
+                                                <IconPlayerPlay size={20} stroke={2} />
+                                            )}
+                                        </button>
+                                        <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
+                                        <button
+                                            className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
+                                            onClick={() => { setEditingTask(task); setShowForm(true); }}
+                                        >
+                                            EDIT
+                                        </button>
+                                        <button
+                                            className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--color-accent-error)] hover:text-white transition-colors"
+                                            onClick={() => handleDelete(task)}
+                                        >
+                                            DEL
+                                        </button>
+                                        <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
+                                        <button
+                                            className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                                            onClick={() => setLogsTask(task)}
+                                            title="View Logs"
+                                        >
+                                            <IconList size={20} stroke={2} />
+                                        </button>
+                                    </div>
                                     {/* Path Display with Overflow Protection */}
                                     <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] mb-1 break-all">
                                         <span className="font-bold text-[var(--accent-main)]">SRC:</span> {task.source}
@@ -515,73 +589,36 @@ function SyncTasksView() {
                                     </div>
 
                                     {/* 최종 로그 표시 영역 */}
-                                    {(() => {
-                                        const taskStatus = statuses.get(task.id);
-                                        if (taskStatus?.lastLog) {
-                                            return (
-                                                <div className="mt-2 p-2 border-2 border-dashed border-[var(--border-main)] bg-[var(--bg-tertiary)] font-mono text-xs">
-                                                    <span className="text-[var(--text-secondary)]">[{taskStatus.lastLog.timestamp}]</span>{' '}
-                                                    <span className={
-                                                        taskStatus.lastLog.level === 'success' ? 'text-[var(--accent-success)]' :
-                                                            taskStatus.lastLog.level === 'error' ? 'text-[var(--color-accent-error)]' :
-                                                                taskStatus.lastLog.level === 'warning' ? 'text-[var(--color-accent-warning)]' :
-                                                                    'text-[var(--text-primary)]'
-                                                    }>
-                                                        {taskStatus.lastLog.message}
-                                                    </span>
-                                                </div>
-                                            );
-                                        }
-                                        return null;
-                                    })()}
+                                    {/* 최종 로그 표시 영역 - Fixed height and truncation to prevent jitter */}
+                                    {/* 최종 로그 표시 영역 - Fixed height and truncation to prevent jitter */}
+                                    <div className="mt-2 h-8 px-2 border-2 border-dashed border-[var(--border-main)] bg-[var(--bg-tertiary)] font-mono text-xs flex items-center min-w-0 w-full overflow-hidden">
+                                        {(() => {
+                                            const taskStatus = statuses.get(task.id);
+                                            if (taskStatus?.lastLog) {
+                                                return (
+                                                    <div className="flex-1 min-w-0 flex items-center">
+                                                        <span className="text-[var(--text-secondary)] mr-2 shrink-0 whitespace-nowrap">
+                                                            [{taskStatus.lastLog.timestamp}]
+                                                        </span>
+                                                        <span
+                                                            className={`block truncate flex-1 min-w-0 ${taskStatus.lastLog.level === 'success' ? 'text-[var(--accent-success)]' :
+                                                                taskStatus.lastLog.level === 'error' ? 'text-[var(--color-accent-error)]' :
+                                                                    taskStatus.lastLog.level === 'warning' ? 'text-[var(--color-accent-warning)]' :
+                                                                        'text-[var(--text-primary)]'
+                                                                }`}
+                                                            title={taskStatus.lastLog.message}
+                                                        >
+                                                            {taskStatus.lastLog.message}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            }
+                                            return <span className="text-[var(--text-secondary)] opacity-50 shrink-0">Waiting for logs...</span>;
+                                        })()}
+                                    </div>
                                 </div>
 
-                                <div className="flex gap-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
-                                    <button
-                                        className={`p-2 border-2 border-[var(--border-main)] transition-all ${dryRunning === task.id ? 'bg-[var(--color-accent-warning)] animate-pulse' : 'hover:bg-[var(--bg-tertiary)]'}`}
-                                        onClick={() => handleDryRun(task)}
-                                        title={dryRunning === task.id ? t('common.cancel', { defaultValue: '취소' }) : t('syncTasks.dryRun')}
-                                    >
-                                        {dryRunning === task.id ? (
-                                            <IconPlayerStop size={20} stroke={2} />
-                                        ) : (
-                                            <IconEye size={20} stroke={2} />
-                                        )}
-                                    </button>
-                                    <button
-                                        className={`p-2 border-2 border-[var(--border-main)] transition-all ${syncing === task.id ? 'bg-[var(--color-accent-error)] animate-pulse text-white' : 'bg-[var(--accent-main)] text-white hover:shadow-[2px_2px_0_0_black]'}`}
-                                        onClick={() => handleSync(task)}
-                                        disabled={syncing !== null && syncing !== task.id}
-                                        title={syncing === task.id ? t('common.cancel', { defaultValue: '취소' }) : t('syncTasks.startSync')}
-                                    >
-                                        {syncing === task.id ? (
-                                            <IconPlayerStop size={20} stroke={2} />
-                                        ) : (
-                                            <IconPlayerPlay size={20} stroke={2} />
-                                        )}
-                                    </button>
-                                    <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
-                                    <button
-                                        className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
-                                        onClick={() => { setEditingTask(task); setShowForm(true); }}
-                                    >
-                                        EDIT
-                                    </button>
-                                    <button
-                                        className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--color-accent-error)] hover:text-white transition-colors"
-                                        onClick={() => handleDelete(task)}
-                                    >
-                                        DEL
-                                    </button>
-                                    <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
-                                    <button
-                                        className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                                        onClick={() => setLogsTask(task)}
-                                        title="View Logs"
-                                    >
-                                        <IconList size={20} stroke={2} />
-                                    </button>
-                                </div>
+
                             </div>
                         </div>
                     </CardAnimation>
