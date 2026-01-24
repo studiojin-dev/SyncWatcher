@@ -19,20 +19,32 @@
       "disconnected": "Disconnected",
       "bytesPerSecond": "bytes/s"
     },
+    "logs": {
+      "title": "Task Logs"
+    },
     "syncTasks": {
       "title": "Sync Tasks",
       "addTask": "Add Task",
       "editTask": "Edit Task",
       "deleteTask": "Delete Task",
+      "confirmDelete": "Are you sure you want to delete this task?",
       "taskName": "Task Name",
       "source": "Source",
       "target": "Target",
       "enabled": "Enabled",
       "deleteMissing": "Delete Missing",
+      "deleteMissingWarning": "Warning: Files deleted in source will be deleted in target.",
       "checksumMode": "Checksum Mode",
+      "watchMode": "Watch Mode",
+      "watchModeDesc": "Monitors source directory and auto-syncs on changes. 'Delete Missing' is disabled.",
+      "autoUnmount": "Auto Unmount",
       "save": "Save",
       "cancel": "Cancel",
       "startSync": "Start Sync",
+      "cancelSync": "Cancel Sync",
+      "cancelDryRun": "Cancel Dry Run",
+      "cancelConfirm": "Are you sure you want to cancel the operation?",
+      "cancelled": "Operation cancelled.",
       "dryRun": "Dry Run",
       "noTasks": "No sync tasks configured"
     },
