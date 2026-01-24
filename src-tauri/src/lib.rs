@@ -26,103 +26,379 @@ use license::generate_licenses_report;
 
 use watcher::{WatcherManager, WatchEvent};
 
-/// Consolidated state for sync progress tracking to prevent race conditions
+// Consolidated progress state (prevents race conditions and deadlocks)
+struct SyncProgressStateInner {
+    last_emit_time: Instant,
+    last_file: String,
+    log_buffer: Vec<logging::LogEntry>,
+    last_log_emit_time: Instant,
+}
+
+impl SyncProgressStateInner {
+    fn new() -> Self {
+        Self {
+            last_emit_time: Instant::now(),
+            last_file: String::new(),
+            log_buffer: Vec::with_capacity(50), // Buffer size 50
+            last_log_emit_time: Instant::now(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SyncProgressState {
     inner: Arc<Mutex<SyncProgressStateInner>>,
 }
 
-    // Consolidated progress state (prevents race conditions and deadlocks)
-    struct SyncProgressStateInner {
-        last_emit_time: Instant,
-        last_file: String,
-        log_buffer: Vec<logging::LogEntry>,
-        last_log_emit_time: Instant,
-    }
-
-    impl SyncProgressStateInner {
-        fn new() -> Self {
-            Self {
-                last_emit_time: Instant::now(),
-                last_file: String::new(),
-                log_buffer: Vec::with_capacity(50), // Buffer size 50
-                last_log_emit_time: Instant::now(),
-            }
+impl SyncProgressState {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(SyncProgressStateInner::new())),
         }
     }
 
-    #[derive(Clone)]
-    struct SyncProgressState {
-        inner: Arc<Mutex<SyncProgressStateInner>>,
-    }
-
-    impl SyncProgressState {
-        fn new() -> Self {
-            Self {
-                inner: Arc::new(Mutex::new(SyncProgressStateInner::new())),
-            }
-        }
-
-        fn should_update_file(&self, current_file: &str) -> bool {
-            let state = self.inner.try_lock();
-            if let Ok(mut state) = state {
-                if state.last_file != current_file {
-                    state.last_file = current_file.to_string();
-                    true
-                } else {
-                    false
-                }
+    fn should_update_file(&self, current_file: &str) -> bool {
+        let state = self.inner.try_lock();
+        if let Ok(mut state) = state {
+            if state.last_file != current_file {
+                state.last_file = current_file.to_string();
+                true
             } else {
                 false
             }
+        } else {
+            // Lock poisoned - log and skip update
+            false
         }
+    }
 
-        fn should_emit_progress(&self) -> bool {
-            let state = self.inner.try_lock();
-            if let Ok(mut state) = state {
-                if state.last_emit_time.elapsed() >= Duration::from_millis(100) {
-                    state.last_emit_time = Instant::now();
-                    true
-                } else {
-                    false
-                }
+    fn should_emit_progress(&self) -> bool {
+        let state = self.inner.try_lock();
+        if let Ok(mut state) = state {
+            if state.last_emit_time.elapsed() >= Duration::from_millis(100) {
+                state.last_emit_time = Instant::now();
+                true
             } else {
                 false
             }
+        } else {
+            // Lock poisoned - don't emit to prevent cascading failures
+            false
         }
+    }
 
-        fn add_log(&self, entry: logging::LogEntry) -> Option<Vec<logging::LogEntry>> {
+    fn add_log(&self, entry: logging::LogEntry) -> Option<Vec<logging::LogEntry>> {
+        let state = self.inner.try_lock();
+        if let Ok(mut state) = state {
+            state.log_buffer.push(entry);
+            
+            // Flush if buffer full or time elapsed (200ms)
+            if state.log_buffer.len() >= 50 || state.last_log_emit_time.elapsed() >= Duration::from_millis(200) {
+                state.last_log_emit_time = Instant::now();
+                let batch = std::mem::replace(&mut state.log_buffer, Vec::with_capacity(50));
+                Some(batch)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+    
+    // Force flush remaining logs
+    fn flush_logs(&self) -> Option<Vec<logging::LogEntry>> {
             let state = self.inner.try_lock();
             if let Ok(mut state) = state {
-                state.log_buffer.push(entry);
-                
-                // Flush if buffer full or time elapsed (200ms)
-                if state.log_buffer.len() >= 50 || state.last_log_emit_time.elapsed() >= Duration::from_millis(200) {
-                    state.last_log_emit_time = Instant::now();
+                if state.log_buffer.is_empty() {
+                    None
+                } else {
                     let batch = std::mem::replace(&mut state.log_buffer, Vec::with_capacity(50));
                     Some(batch)
-                } else {
-                    None
                 }
             } else {
                 None
             }
+    }
+}
+
+pub struct AppState {
+    pub log_manager: Arc<LogManager>,
+    /// 현재 실행 중인 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
+    pub cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// 파일 시스템 감시 매니저
+    pub watcher_manager: Arc<RwLock<WatcherManager>>,
+}
+
+#[tauri::command]
+async fn get_app_config_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let app_data = app.path().app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let config_dir = app_data.join("config");
+    tokio::fs::create_dir_all(&config_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(config_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn join_paths(path1: String, path2: String) -> Result<String, String> {
+    use std::path::Path;
+    let p1 = Path::new(&path1);
+    let p2 = Path::new(&path2);
+    p1.join(p2)
+        .to_str()
+        .ok_or_else(|| "Invalid path".to_string())
+        .map(|s| s.to_string())
+}
+
+#[tauri::command]
+fn greet(name: &str) -> String {
+    format!("Hello, {name}! You've been greeted from Rust!")
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+async fn get_app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
+    app.path().app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn read_yaml_file(path: String) -> Result<String, String> {
+    tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn write_yaml_file(path: String, content: String) -> Result<(), String> {
+    tokio::fs::write(&path, content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn ensure_directory_exists(path: String) -> Result<(), String> {
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn file_exists(path: String) -> Result<bool, String> {
+    Ok(std::path::Path::new(&path).exists())
+}
+
+#[tauri::command]
+async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    use std::path::Path;
+
+    // Path validation for security
+    let path_obj = Path::new(&path);
+
+    // Only allow absolute paths
+    if !path_obj.is_absolute() {
+        return Err("Only absolute paths are allowed".to_string());
+    }
+
+    // Canonicalize the path to resolve symlinks and .. components
+    let canonical = path_obj
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {e}"))?;
+
+    // Get the config directory for validation
+    let app_data = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+    let config_dir = app_data.join("config");
+
+    // Ensure config directory exists for comparison
+    let config_canonical = config_dir
+        .canonicalize()
+        .unwrap_or(config_dir);
+
+    // Verify the path is within the config directory
+    let canonical_str = canonical.to_string_lossy();
+    let config_str = config_canonical.to_string_lossy();
+
+    if !canonical_str.as_ref().starts_with(config_str.as_ref()) {
+        return Err(format!("Access denied: Path outside config directory\nAllowed: {config_str}\nRequested: {canonical_str}"));
+    }
+
+    // Try to open with default system editor
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-t")
+            .arg(&canonical)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {e}"))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Try xdg-open first, fall back to common editors
+        let editors = vec!["xdg-open", "gedit", "kate", "code", "vim"];
+        let mut opened = false;
+
+        for editor in editors {
+            if std::process::Command::new(editor)
+                .arg(&canonical)
+                .spawn()
+                .is_ok()
+            {
+                opened = true;
+                break;
+            }
         }
-        
-        // Force flush remaining logs
-        fn flush_logs(&self) -> Option<Vec<logging::LogEntry>> {
-             let state = self.inner.try_lock();
-             if let Ok(mut state) = state {
-                 if state.log_buffer.is_empty() {
-                     None
-                 } else {
-                     let batch = std::mem::replace(&mut state.log_buffer, Vec::with_capacity(50));
-                     Some(batch)
-                 }
-             } else {
-                 None
-             }
+
+        if !opened {
+            return Err("No suitable editor found".to_string());
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("notepad.exe")
+            .arg(&canonical)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {e}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn sync_dry_run(
+    task_id: String,
+    source: PathBuf,
+    target: PathBuf,
+    delete_missing: bool,
+    checksum_mode: bool,
+    exclude_patterns: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<DryRunResult, String> {
+    // Validate all inputs
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
+    state.log_manager.log("info", "Dry run started", Some(task_id.clone()));
+
+    let engine = SyncEngine::new(source, target);
+    let options = SyncOptions {
+        delete_missing,
+        checksum_mode,
+        preserve_permissions: true,
+        preserve_times: true,
+        verify_after_copy: false,
+        exclude_patterns,
+    };
+
+    match engine.dry_run(&options).await {
+        Ok(result) => {
+            let msg = format!(
+                "Dry run completed.\nTo copy: {} files\nTo delete: {} files\nTotal size: {}",
+                format_number(result.files_to_copy as u64), 
+                format_number(result.files_to_delete as u64), 
+                format_bytes(result.bytes_to_copy)
+            );
+            state.log_manager.log("success", &msg, Some(task_id));
+            Ok(result)
+        }
+        Err(e) => {
+            let msg = format!("Dry run failed: {:#}", e);
+            state.log_manager.log("error", &msg, Some(task_id));
+            Err(format!("{:#}", e))
+        }
+    }
+}
+
+#[tauri::command]
+fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
+    let monitor = DiskMonitor::new();
+    monitor.list_volumes().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_removable_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
+    let monitor = DiskMonitor::new();
+    monitor.get_removable_volumes().map_err(|e| e.to_string())
+}
+
+/// Removable 디스크를 언마운트합니다.
+#[tauri::command]
+async fn unmount_volume(
+    path: PathBuf,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    DiskMonitor::unmount_volume(&path)
+        .map_err(|e| e.to_string())?;
+    
+    state.log_manager.log(
+        "success", 
+        &format!("Volume unmounted: {}", path.display()), 
+        None
+    );
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_sync(
+    task_id: String,
+    source: PathBuf,
+    target: PathBuf,
+    delete_missing: bool,
+    checksum_mode: bool,
+    verify_after_copy: bool,
+    exclude_patterns: Vec<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncResult, String> {
+    // Validate all inputs
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
+    // 취소 토큰 생성 및 등록
+    let cancel_token = CancellationToken::new();
+    {
+        let mut tokens = state.cancel_tokens.write().await;
+        tokens.insert(task_id.clone(), cancel_token.clone());
+    }
+
+    state.log_manager.log("info", "Sync started", Some(task_id.clone()));
+
+    let engine = SyncEngine::new(source, target);
+    let options = SyncOptions {
+        delete_missing,
+        checksum_mode,
+        preserve_permissions: true,
+        preserve_times: true,
+        verify_after_copy,
+        exclude_patterns,
+    };
+
+    // 동기화 실행 (취소 토큰과 함께)
+    let task_id_clone = task_id.clone();
+    let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
+    let app_clone = app.clone();
+
+    #[derive(serde::Serialize, Clone)]
+    struct ProgressEvent {
+        #[serde(rename = "taskId")]
+        task_id: String,
+        message: String,
+        current: u64,
+        total: u64,
     }
 
     let progress_state = SyncProgressState::new();
@@ -130,11 +406,15 @@ struct SyncProgressState {
     let task_id_for_log = task_id.clone();
     let app_for_log = app.clone(); // For log events
 
+    // Create clones for the closure
+    let progress_state_closure = progress_state.clone();
+    let log_manager_closure = log_manager.clone();
+
     let result = tokio::select! {
         res = engine.sync_files(&options, move |progress| {
              // 1. Detailed Logging: Batching
             if let Some(current) = &progress.current_file {
-                if progress_state.should_update_file(current) {
+                if progress_state_closure.should_update_file(current) {
                     let now = chrono::Utc::now().to_rfc3339();
                     let entry = logging::LogEntry {
                         id: now.clone(),
@@ -144,14 +424,14 @@ struct SyncProgressState {
                         task_id: Some(task_id_for_log.clone()),
                     };
                     
-                    if let Some(batch) = progress_state.add_log(entry) {
-                         log_manager.log_batch(batch, Some(task_id_for_log.clone()), Some(&app_for_log));
+                    if let Some(batch) = progress_state_closure.add_log(entry) {
+                         log_manager_closure.log_batch(batch, Some(task_id_for_log.clone()), Some(&app_for_log));
                     }
                 }
             }
 
              // 2. UI Throttling: 100ms
-            let should_emit = progress_state.should_emit_progress();
+            let should_emit = progress_state_closure.should_emit_progress();
 
             if should_emit || progress.processed_files == progress.total_files {
                  let event = ProgressEvent {
@@ -371,4 +651,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

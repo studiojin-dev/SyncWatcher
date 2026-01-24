@@ -80,11 +80,32 @@ impl SyncEngine {
                     );
                 }
 
-                // Add pattern with better error context
-                match Glob::new(trimmed) {
-                    Ok(glob) => builder.add(glob),
-                    Err(e) => anyhow::bail!("Invalid exclusion pattern '{}': {}", trimmed, e),
+                // Helper to add glob with error handling
+                let mut add_glob = |p: &str| -> anyhow::Result<()> {
+                     match Glob::new(p) {
+                        Ok(glob) => {
+                            builder.add(glob);
+                            Ok(())
+                        },
+                        Err(e) => anyhow::bail!("Invalid exclusion pattern '{}': {}", p, e),
+                    }
                 };
+
+                // Add original pattern
+                add_glob(trimmed)?;
+
+                // If pattern doesn't start with explicitly anchored path or wildcard, allow matching in subdirectories
+                // e.g. ".venv" -> "**/.venv"
+                // e.g. "*.log" -> "**/*.log"
+                // e.g. "dist" -> "**/dist"
+                if !trimmed.starts_with('/') && !trimmed.starts_with("**/") {
+                    add_glob(&format!("**/{}", trimmed))?;
+                }
+                
+                // Also handle directory contents if the pattern matches a directory name?
+                // filter_entry takes care of directories, but if a pattern is "node_modules", we skip the dir.
+                // If we are already inside? No, filter_entry prevents entering.
+                // So "**/pattern" is sufficient to catch the directory at any depth.
             }
             let globs = builder.build()?;
 
