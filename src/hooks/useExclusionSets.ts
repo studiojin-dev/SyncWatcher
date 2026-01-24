@@ -26,6 +26,11 @@ const DEFAULT_SETS: ExclusionSet[] = [
         id: 'git',
         name: 'Git',
         patterns: ['.git', '.gitignore']
+    },
+    {
+        id: 'rust',
+        name: 'Rust (Tauri)',
+        patterns: ['target', 'Cargo.lock', '**/*.rs.bk']
     }
 ];
 
