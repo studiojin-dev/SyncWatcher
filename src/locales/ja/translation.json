@@ -17,22 +17,37 @@
       "deviceStatus": "デバイスの状態",
       "connected": "接続済み",
       "disconnected": "切断",
-      "bytesPerSecond": "バイト/秒"
+      "bytesPerSecond": "バイト/秒",
+      "success": "成功",
+      "warning": "警告",
+      "refresh": "更新"
+    },
+    "logs": {
+      "title": "タスクログ"
     },
     "syncTasks": {
       "title": "同期タスク",
       "addTask": "タスク追加",
       "editTask": "タスク編集",
       "deleteTask": "タスク削除",
+      "confirmDelete": "このタスクを削除してもよろしいですか？",
       "taskName": "タスク名",
       "source": "転送元",
       "target": "転送先",
       "enabled": "有効",
       "deleteMissing": "欠落ファイルを削除",
+      "deleteMissingWarning": "警告：ソースで削除されたファイルはターゲットでも削除されます。",
       "checksumMode": "チェックサムモード",
+      "watchMode": "監視モード",
+      "watchModeDesc": "ソースディレクトリを監視し、変更時に自動同期します。「欠落を削除」は無効になります。",
+      "autoUnmount": "自動アンマウント",
       "save": "保存",
       "cancel": "キャンセル",
       "startSync": "同期開始",
+      "cancelSync": "同期をキャンセル",
+      "cancelDryRun": "ドライランをキャンセル",
+      "cancelConfirm": "操作をキャンセルしてもよろしいですか？",
+      "cancelled": "操作がキャンセルされました。",
       "dryRun": "ドライラン",
       "noTasks": "同期タスクが設定されていません"
     },
