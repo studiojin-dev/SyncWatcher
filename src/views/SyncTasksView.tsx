@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlus, IconPlayerPlay, IconEye, IconFolder } from '@tabler/icons-react';
+import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList } from '@tabler/icons-react';
 import { MultiSelect } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -9,6 +9,7 @@ import { useExclusionSets } from '../hooks/useExclusionSets';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
 import { useToast } from '../components/ui/Toast';
 import YamlEditorModal from '../components/ui/YamlEditorModal';
+import TaskLogsModal from '../components/features/TaskLogsModal';
 
 /**
  * Sync Tasks View - Manage sync tasks
@@ -22,6 +23,8 @@ function SyncTasksView() {
     const [showForm, setShowForm] = useState(false);
     const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
     const [syncing, setSyncing] = useState<string | null>(null);
+
+    const [logsTask, setLogsTask] = useState<SyncTask | null>(null);
 
     // Changing the logic: adding state for selected sets in form
     const [selectedSets, setSelectedSets] = useState<string[]>([]);
@@ -94,9 +97,11 @@ function SyncTasksView() {
 
     const handleSync = async (task: SyncTask) => {
         try {
+            if (syncing) return;
             setSyncing(task.id);
             showToast(t('syncTasks.startSync') + ': ' + task.name, 'info');
             await invoke('start_sync', {
+                taskId: task.id,
                 source: task.source,
                 target: task.target,
                 deleteMissing: task.deleteMissing,
@@ -117,6 +122,7 @@ function SyncTasksView() {
         try {
             showToast(t('syncTasks.dryRun') + '...', 'info');
             const result = await invoke('sync_dry_run', {
+                taskId: task.id,
                 source: task.source,
                 target: task.target,
                 deleteMissing: task.deleteMissing,
@@ -132,8 +138,10 @@ function SyncTasksView() {
     };
 
     const handleDelete = (task: SyncTask) => {
-        deleteTask(task.id);
-        showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
+        if (window.confirm(t('syncTasks.confirmDelete', { defaultValue: 'Are you sure you want to delete this task?' }))) {
+            deleteTask(task.id);
+            showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
+        }
     };
 
     const handleEditorClose = async () => {
@@ -308,6 +316,15 @@ function SyncTasksView() {
                 </div>
             )}
 
+            {/* Task Logs Modal */}
+            {logsTask && (
+                <TaskLogsModal
+                    taskId={logsTask.id}
+                    taskName={logsTask.name}
+                    onClose={() => setLogsTask(null)}
+                />
+            )}
+
             {/* Task List */}
             <div className="grid gap-6">
                 {tasks.map((task, index) => (
@@ -343,6 +360,13 @@ function SyncTasksView() {
                                 </div>
 
                                 <div className="flex gap-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
+                                    <button
+                                        className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                                        onClick={() => setLogsTask(task)}
+                                        title="View Logs"
+                                    >
+                                        <IconList size={20} stroke={2} />
+                                    </button>
                                     <button
                                         className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                         onClick={() => handleDryRun(task)}

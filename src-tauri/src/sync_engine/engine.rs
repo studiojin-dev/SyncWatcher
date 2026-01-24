@@ -9,6 +9,7 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
 use globset::{Glob, GlobSetBuilder};
+use anyhow::Context; // Import Context trait
 
 pub struct SyncEngine {
     source: PathBuf,
@@ -23,7 +24,9 @@ impl SyncEngine {
     async fn calculate_checksum(&self, path: &Path) -> Result<String> {
         use twox_hash::XxHash64;
 
-        let mut file = fs::File::open(path).await?;
+        let mut file = fs::File::open(path)
+            .await
+            .with_context(|| format!("Failed to open file for checksum: {:?}", path))?;
         let mut hasher = XxHash64::with_seed(0);
         let mut buffer = [0u8; 8192];
 
@@ -92,13 +95,16 @@ impl SyncEngine {
                 }
             }
 
-            let metadata = fs::metadata(path).await?;
+            let metadata = fs::symlink_metadata(path)
+                .await
+                .with_context(|| format!("Failed to get metadata for: {:?}", path))?;
             let relative_path = path.strip_prefix(dir)?.to_path_buf();
 
             files.push(FileMetadata {
                 path: relative_path,
                 size: metadata.len(),
-                modified: metadata.modified()?,
+                modified: metadata.modified()
+                    .with_context(|| format!("Failed to get modification time for: {:?}", path))?,
                 is_file: metadata.is_file(),
             });
         }
@@ -107,9 +113,26 @@ impl SyncEngine {
     }
 
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
-        let source_files = self.read_directory(&self.source, &options.exclude_patterns).await?;
+        // Verify source exists
+        if !self.source.exists() {
+             anyhow::bail!("Source directory does not exist or is not accessible: {:?}", self.source);
+        }
+        if !self.source.is_dir() {
+            anyhow::bail!("Source path is not a directory: {:?}", self.source);
+        }
+
+        let source_files = self
+            .read_directory(&self.source, &options.exclude_patterns)
+            .await
+            .context("Failed to read source directory")?;
+
         let target_files = if self.target.exists() {
-            self.read_directory(&self.target, &options.exclude_patterns).await?
+            if !self.target.is_dir() {
+                anyhow::bail!("Target path exists but is not a directory: {:?}", self.target);
+            }
+             self.read_directory(&self.target, &options.exclude_patterns)
+                .await
+                .context("Failed to read target directory")?
         } else {
             Vec::new()
         };

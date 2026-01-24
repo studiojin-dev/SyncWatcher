@@ -135,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Err(e) => {
-                eprintln!("❌ Error during dry-run: {e}");
+                eprintln!("❌ Error during dry-run: {:#}", e);
                 std::process::exit(1);
             }
         }
@@ -198,7 +198,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(e) => {
                 pb.abandon_with_message("❌ Synchronization failed!");
-                eprintln!("❌ Error: {e}");
+                eprintln!("❌ Error: {:#}", e);
                 std::process::exit(1);
             }
         }

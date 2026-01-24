@@ -168,12 +168,16 @@ async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), Strin
 
 #[tauri::command]
 async fn sync_dry_run(
+    task_id: String,
     source: PathBuf,
     target: PathBuf,
     delete_missing: bool,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
+    state.log_manager.log("info", "Dry run started", Some(task_id.clone()));
+
     let engine = SyncEngine::new(source, target);
     let options = SyncOptions {
         delete_missing,
@@ -184,7 +188,21 @@ async fn sync_dry_run(
         exclude_patterns,
     };
 
-    engine.dry_run(&options).await.map_err(|e| e.to_string())
+    match engine.dry_run(&options).await {
+        Ok(result) => {
+            let msg = format!(
+                "Dry run completed. To copy: {}, To delete: {}, Bytes: {}",
+                result.files_to_copy, result.files_to_delete, result.bytes_to_copy
+            );
+            state.log_manager.log("success", &msg, Some(task_id));
+            Ok(result)
+        }
+        Err(e) => {
+            let msg = format!("Dry run failed: {:#}", e);
+            state.log_manager.log("error", &msg, Some(task_id));
+            Err(format!("{:#}", e))
+        }
+    }
 }
 
 #[tauri::command]
@@ -201,6 +219,7 @@ fn get_removable_volumes() -> Result<Vec<system_integration::VolumeInfo>, String
 
 #[tauri::command]
 async fn start_sync(
+    task_id: String,
     source: PathBuf,
     target: PathBuf,
     delete_missing: bool,
@@ -208,7 +227,10 @@ async fn start_sync(
     verify_after_copy: bool,
     exclude_patterns: Vec<String>,
     app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
 ) -> Result<SyncResult, String> {
+    state.log_manager.log("info", "Sync started", Some(task_id.clone()));
+
     let engine = SyncEngine::new(source, target);
     let options = SyncOptions {
         delete_missing,
@@ -219,12 +241,27 @@ async fn start_sync(
         exclude_patterns,
     };
 
-    engine
+    let result = engine
         .sync_files(&options, |progress| {
             let _ = app.emit("sync-progress", &progress);
         })
-        .await
-        .map_err(|e| e.to_string())
+        .await;
+
+    match &result {
+        Ok(res) => {
+             let msg = format!(
+                "Sync completed. Copied: {}, Deleted: {}, Bytes: {}",
+                res.files_copied, res.files_deleted, res.bytes_copied
+            );
+            state.log_manager.log("success", &msg, Some(task_id));
+        }
+        Err(e) => {
+            let msg = format!("Sync failed: {:#}", e);
+            state.log_manager.log("error", &msg, Some(task_id));
+        }
+    }
+
+    result.map_err(|e| format!("{:#}", e))
 }
 
 #[tauri::command]
