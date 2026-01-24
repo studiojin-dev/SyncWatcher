@@ -192,8 +192,8 @@ async fn sync_dry_run(
         Ok(result) => {
             let msg = format!(
                 "Dry run completed.\nTo copy: {} files\nTo delete: {} files\nTotal size: {}",
-                format_number(result.files_to_copy), 
-                format_number(result.files_to_delete), 
+                format_number(result.files_to_copy as u64), 
+                format_number(result.files_to_delete as u64), 
                 format_bytes(result.bytes_to_copy)
             );
             state.log_manager.log("success", &msg, Some(task_id));
