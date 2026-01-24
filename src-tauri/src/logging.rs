@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
@@ -22,15 +23,22 @@ pub struct LogEvent {
     pub entry: LogEntry,
 }
 
+/// Batch event for multiple logs
+#[derive(Debug, Clone, Serialize)]
+pub struct LogBatchEvent {
+    pub task_id: Option<String>,
+    pub entries: Vec<LogEntry>,
+}
+
 pub struct LogManager {
-    system_logs: Arc<Mutex<Vec<LogEntry>>>,
+    system_logs: Arc<Mutex<VecDeque<LogEntry>>>,
     max_lines: usize,
 }
 
 impl LogManager {
     pub fn new(max_lines: usize) -> Self {
         Self {
-            system_logs: Arc::new(Mutex::new(Vec::new())),
+            system_logs: Arc::new(Mutex::new(VecDeque::with_capacity(max_lines))),
             max_lines,
         }
     }
@@ -46,11 +54,11 @@ impl LogManager {
         };
 
         let mut logs = self.system_logs.lock().unwrap();
-        logs.push(entry.clone());
+        logs.push_back(entry.clone()); // Add to end
 
-        let len = logs.len();
-        if len > self.max_lines {
-            logs.drain(0..(len - self.max_lines));
+        // Remove from front if full
+        while logs.len() > self.max_lines {
+            logs.pop_front();
         }
 
         // Emit event to frontend if app handle is provided
@@ -58,6 +66,28 @@ impl LogManager {
             let _ = app.emit("new-log-task", &LogEvent {
                 task_id: task_id.clone(),
                 entry,
+            });
+        }
+    }
+
+    /// Add multiple logs at once and optionally emit a batch event
+    pub fn log_batch(&self, entries: Vec<LogEntry>, task_id: Option<String>, app: Option<&tauri::AppHandle>) {
+        if entries.is_empty() { return; }
+
+        let mut logs = self.system_logs.lock().unwrap();
+        
+        for entry in &entries {
+            logs.push_back(entry.clone());
+        }
+
+        while logs.len() > self.max_lines {
+            logs.pop_front();
+        }
+
+        if let Some(app) = app {
+            let _ = app.emit("new-logs-batch", &LogBatchEvent {
+                task_id,
+                entries,
             });
         }
     }
@@ -70,13 +100,15 @@ impl LogManager {
         let logs = self.system_logs.lock().unwrap();
         match task_id {
             Some(id) => logs.iter().filter(|l| l.task_id.as_ref() == Some(&id)).cloned().collect(),
-            None => logs.clone(),
+            None => logs.iter().cloned().collect(),
         }
     }
 
     /// Get logs with pagination for better performance with large log sets
     pub fn get_logs_paginated(&self, task_id: Option<String>, offset: usize, limit: usize) -> Vec<LogEntry> {
         let logs = self.system_logs.lock().unwrap();
+        // Since we can't efficiently index filter iterator on VecDeque without collecting,
+        // and we need to filter by task_id first:
         let filtered: Vec<_> = match task_id {
             Some(id) => logs.iter().filter(|l| l.task_id.as_ref() == Some(&id)).collect(),
             None => logs.iter().collect(),

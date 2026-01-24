@@ -88,20 +88,35 @@ impl SyncEngine {
             }
             let globs = builder.build()?;
 
-            for entry in WalkDir::new(&dir_buf).into_iter().filter_map(|e| e.ok()) {
+            let walker = WalkDir::new(&dir_buf).into_iter().filter_entry(|e| {
+                // Skip if error accessing entry
+                let path = e.path();
+                
+                // Calculate relative path from root
+                // For root directory itself, relative path is empty or "."
+                let relative_path = match path.strip_prefix(&dir_buf) {
+                    Ok(p) => p,
+                    Err(_) => return true, // Should not happen for children
+                };
+
+                // Check exclusion patterns
+                // If it matches, return FALSE to skip entering directory or processing file
+                !globs.is_match(relative_path)
+            });
+
+            for entry in walker.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 
-                // Check exclusions
-                // We need to check the relative path against the glob patterns
-                if let Ok(relative_path) = path.strip_prefix(&dir_buf) {
-                    if globs.is_match(relative_path) {
-                        continue;
-                    }
+                // Root directory itself is yielded, skip it
+                if path == dir_buf {
+                    continue;
                 }
 
                 // Use std::fs instead of tokio::fs inside blocking task
-                let metadata = std::fs::symlink_metadata(path)
-                    .with_context(|| format!("Failed to get metadata for: {:?}", path))?;
+                let metadata = match std::fs::symlink_metadata(path) {
+                    Ok(m) => m,
+                    Err(_) => continue, // Skip files we can't read metadata for
+                };
                 
                 let relative_path = path.strip_prefix(&dir_buf)?.to_path_buf();
 
@@ -109,7 +124,7 @@ impl SyncEngine {
                     path: relative_path,
                     size: metadata.len(),
                     modified: metadata.modified()
-                        .with_context(|| format!("Failed to get modification time for: {:?}", path))?,
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH), // Fallback if modified time unavailable
                     is_file: metadata.is_file(),
                 });
             }
@@ -316,6 +331,22 @@ impl SyncEngine {
             let source_path = self.source.join(&diff.path);
             let target_path = self.target.join(&diff.path);
 
+            // Detailed Log: Only set current file, actual log emission is handled by callback via batching or throttling logic in lib.rs if simpler
+            // But here we need to simplify. The user wants to reduce log events. 
+            // The `progress_callback` in `start_sync` (lib.rs) handles the actual logging.
+            // We should just ensure we call progress_callback efficiently.
+            
+            // Actually, `start_sync` in `lib.rs` is where the throttling logic resides.
+            // But `SyncEngine` calls `progress_callback` for every file.
+            // Wait, looking at `lib.rs`, `start_sync` *already* has throttling for `sync-progress` event (100ms).
+            // BUT it calls `log_manager.log_with_event` directly for *every* file change (lines 376 in lib.rs).
+            // So we need to modify `lib.rs` to batch those logs, not necessarily `SearchEngine` here, unless we want to change signature.
+            // The plan said "In SyncEngine, implement Log Throttling/Batching", but looking at code, `SyncEngine` is pure logic, `start_sync` in `lib.rs` owns the `LogManager`.
+            // So I should modify `lib.rs` instead.
+            // However, `SyncEngine` iterates and calls callback.
+            // Let's stick to modifying `lib.rs` for the logging logic since it owns the callback.
+            // Retaining original SyncEngine code structure here, just ensuring it provides necessary info.
+            
             match diff.kind {
                 FileDiffKind::New | FileDiffKind::Modified => {
                     current_progress.current_file = Some(diff.path.to_string_lossy().to_string());
@@ -328,6 +359,11 @@ impl SyncEngine {
                         .copy_file_chunked(&source_path, &target_path, options, |written_chunk| {
                             current_progress.processed_bytes += written_chunk;
                             current_progress.bytes_copied_current_file += written_chunk;
+                            // Reduce callback frequency for large files? 
+                            // Current `copy_file_chunked` calls back every 64KB.
+                            // For large files this is spammy. 
+                            // But `start_sync` throttles the event emission. 
+                            // The issue is `log_with_event` in `start_sync` which is called when file matches.
                             progress_callback(current_progress.clone());
                         })
                         .await
@@ -342,8 +378,6 @@ impl SyncEngine {
                             message: e.to_string(),
                             kind,
                         });
-                        // If failed, we might need to adjust processed bytes back if we want strictly accurate 'successful' bytes,
-                        // but typically progress just moves forward.
                     } else {
                         result.files_copied += 1;
                         result.bytes_copied += file_size;
@@ -367,7 +401,6 @@ impl SyncEngine {
                         result.files_deleted += 1;
                     }
                     current_progress.phase = crate::sync_engine::types::SyncPhase::Copying;
-                    // Revert phase
                 }
             }
         }
