@@ -57,11 +57,11 @@ function SettingsView() {
 
     return (
         <div className="fade-in max-w-3xl">
-            <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-b-3 border-[var(--border-main)]">
-                <h1 className="text-2xl font-heading font-black uppercase mb-1">
+            <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
+                <h1 className="text-3xl font-heading font-black uppercase mb-1">
                     {t('settings.title')}
                 </h1>
-                <div className="font-mono text-xs">
+                <div className="font-mono text-xs border-l-4 border-[var(--accent-warning)] pl-3">
                     // SYSTEM_CONFIGURATION
                 </div>
             </header>

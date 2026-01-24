@@ -46,20 +46,20 @@ function ActivityLogView() {
 
   return (
     <div>
-      <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-b-3 border-[var(--border-main)]">
+      <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-heading font-black uppercase mb-1">
+            <h1 className="text-3xl font-heading font-black uppercase mb-1">
               {t('activityLog.title')}
             </h1>
-            <div className="font-mono text-xs">
+            <div className="font-mono text-xs border-l-4 border-[var(--accent-main)] pl-3">
               {logs.length > 0 ? `// ${logs.length} ENTRIES_LOGGED` : '// SYSTEM_IDLE'}
             </div>
           </div>
           <button
             onClick={loadLogs}
             disabled={loading}
-            className="px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center gap-2 transition-colors disabled:opacity-50"
+            className="px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] bg-[var(--bg-primary)] hover:bg-[var(--bg-tertiary)] flex items-center gap-2 transition-all shadow-[2px_2px_0_0_var(--shadow-color)] active:translate-y-[2px] active:shadow-none disabled:opacity-50"
           >
             <IconRefresh size={18} className={loading ? 'animate-spin' : ''} />
             {t('common.refresh', { defaultValue: 'Refresh' })}

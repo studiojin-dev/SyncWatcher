@@ -30,20 +30,30 @@ const navItems: NavItem[] = [
 
 /**
  * Sidebar navigation component
- * Minimal design with ghost-style tabs
+ * "Hard" Neo-Brutalism Redesign
+ * - Thick borders
+ * - High contrast (Yellow/Black)
+ * - Deep shadows
  */
 function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const { t } = useTranslation();
 
     return (
-        <aside className="flex flex-col h-full bg-[var(--bg-secondary)] text-[var(--text-primary)]">
-            <header className="p-6 border-b-3 border-[var(--border-main)] bg-[var(--bg-primary)]">
-                <h1 className="text-2xl font-bold font-heading tracking-tight uppercase">
-                    {t('appName')}
-                </h1>
+        <aside className="flex flex-col h-full bg-[var(--bg-primary)] border-r-4 border-[var(--border-main)] overflow-hidden">
+            {/* Header Area */}
+            <header className="p-6 border-b-4 border-[var(--border-main)] bg-[var(--bg-tertiary)] flex flex-col gap-2 relative">
+                <div className="flex items-center gap-3 relative z-10">
+                    <div className="w-10 h-10 bg-[var(--accent-error)] border-3 border-[var(--border-main)] flex items-center justify-center shadow-[4px_4px_0_0_var(--shadow-color)]">
+                        <span className="font-heading font-black text-xl text-white">S</span>
+                    </div>
+                    <h1 className="text-2xl font-black font-heading tracking-tighter uppercase italic transform -rotate-2">
+                        {t('appName')}
+                    </h1>
+                </div>
             </header>
 
-            <nav className="flex-1 p-4 space-y-2">
+            {/* Nav Items */}
+            <nav className="flex-1 p-5 space-y-4 overflow-y-auto">
                 {navItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = activeTab === item.id;
@@ -52,26 +62,48 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                         <button
                             key={item.id}
                             className={`
-                                w-full flex items-center gap-3 px-4 py-3 
-                                font-bold font-heading uppercase tracking-wide
-                                border-3 transition-all duration-150
+                                group w-full flex items-center gap-4 px-5 py-4
+                                font-bold font-heading uppercase text-sm tracking-wider
+                                border-3 transition-all duration-100 ease-in-out relative
                                 ${isActive
-                                    ? 'bg-[var(--accent-main)] text-white border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] translate-x-[-2px] translate-y-[-2px]'
-                                    : 'bg-[var(--bg-primary)] border-transparent hover:border-[var(--border-main)] hover:shadow-[2px_2px_0_0_var(--shadow-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                    ? 'bg-[var(--accent-warning)] text-black border-[var(--border-main)] shadow-[6px_6px_0_0_var(--shadow-color)] translate-x-[-2px] translate-y-[-2px]'
+                                    : 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border-[var(--text-secondary)] hover:border-[var(--border-main)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] hover:shadow-[4px_4px_0_0_var(--shadow-color)] hover:translate-x-[-2px] hover:translate-y-[-2px]'
                                 }
                             `}
                             onClick={() => onTabChange(item.id)}
                             aria-current={isActive ? 'page' : undefined}
                         >
-                            <Icon size={20} stroke={2} />
+                            {/* Icon Box */}
+                            <div className={`
+                                p-1 border-2 transition-colors
+                                ${isActive
+                                    ? 'bg-black text-[var(--accent-warning)] border-black'
+                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] border-[var(--border-main)] group-hover:bg-white'
+                                }
+                            `}>
+                                <Icon size={22} stroke={2.5} />
+                            </div>
+
                             <span>{t(item.labelKey)}</span>
+
+                            {/* Active Indicator Arrow */}
+                            {isActive && (
+                                <div className="absolute right-4 font-black text-xl animate-pulse">
+                                    &lt;
+                                </div>
+                            )}
                         </button>
                     );
                 })}
             </nav>
 
-            <div className="p-4 border-t-3 border-[var(--border-main)] bg-[var(--bg-primary)] opacity-50 hover:opacity-100 transition-opacity">
-                <p className="text-xs font-mono text-center">v0.1.0 • AGPL-3.0</p>
+            {/* Footer */}
+            <div className="p-4 border-t-4 border-[var(--border-main)] bg-[var(--bg-secondary)]">
+                <div className="neo-box p-3 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest">
+                    v{import.meta.env.PACKAGE_VERSION || '0.1.0'}
+                    <span className="mx-2">•</span>
+                    AGPL-3.0
+                </div>
             </div>
         </aside>
     );

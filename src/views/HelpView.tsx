@@ -45,35 +45,36 @@ function HelpView() {
   ];
 
   return (
-    <div>
-      <header style={{ marginBottom: 'var(--space-8)' }}>
-        <h1 className="text-xl">{t('help.title')}</h1>
+
+    <div className="fade-in max-w-4xl">
+      <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
+        <h1 className="text-3xl font-heading font-black uppercase mb-1">{t('help.title')}</h1>
+        <div className="font-mono text-xs border-l-4 border-[var(--accent-info)] pl-3">
+             // USER_MANUAL_DB
+        </div>
       </header>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {helpSections.map((section, index) => {
           const Icon = section.icon;
           return (
-            <div key={index} className="card">
-              <div style={{ display: 'flex', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
-                <div style={{ 
-                  padding: '12px', 
-                  borderRadius: '8px', 
-                  background: 'var(--bg-secondary)' 
-                }}>
-                  <Icon size={32} />
+            <div key={index} className="neo-box p-6 bg-[var(--bg-primary)] hover:translate-y-[-2px] transition-transform">
+              <div className="flex items-start gap-4 mb-4">
+                <div className="p-3 rounded-none border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] shadow-[2px_2px_0_0_var(--shadow-color)]">
+                  <Icon size={32} stroke={1.5} />
                 </div>
-                <div style={{ flex: 1 }}>
-                  <h3 className="text-base" style={{ marginBottom: 'var(--space-1)' }}>
+                <div className="flex-1">
+                  <h3 className="text-lg font-bold uppercase mb-1 border-b-2 border-dashed border-[var(--border-main)] inline-block">
                     {section.title}
                   </h3>
-                  <p className="text-sm text-secondary">{section.description}</p>
+                  <p className="text-sm text-[var(--text-secondary)] mt-1">{section.description}</p>
                 </div>
               </div>
-              
-              <ul style={{ paddingLeft: 'var(--space-6)' }}>
+
+              <ul className="pl-4 space-y-2 list-none">
                 {section.features.map((feature, idx) => (
-                  <li key={idx} className="text-sm" style={{ marginBottom: 'var(--space-2)' }}>
+                  <li key={idx} className="text-sm flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 bg-[var(--accent-main)]"></span>
                     {feature}
                   </li>
                 ))}
@@ -84,6 +85,7 @@ function HelpView() {
       </div>
     </div>
   );
+
 }
 
 export default HelpView;

@@ -47,8 +47,8 @@ function AboutView() {
 
   return (
     <div className="fade-in">
-      <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-b-3 border-[var(--border-main)]">
-        <h1 className="text-2xl font-heading font-black uppercase mb-1">
+      <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
+        <h1 className="text-3xl font-heading font-black uppercase mb-1">
           {t('about.title')}
         </h1>
       </header>
