@@ -48,12 +48,13 @@ impl DiskMonitor {
     }
 
     /// 마운트 포인트로부터 Volume UUID와 Disk/Partition UUID를 획득합니다.
-    /// `diskutil info <mount_point>` 명령을 파싱합니다.
+    /// `diskutil info -plist <mount_point>` 명령을 사용합니다.
     fn get_volume_uuid(mount_point: &Path) -> (Option<String>, Option<String>) {
         use std::process::Command;
 
         let output = Command::new("diskutil")
             .arg("info")
+            .arg("-plist")
             .arg(mount_point)
             .output();
 
@@ -65,24 +66,26 @@ impl DiskMonitor {
             return (None, None);
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut volume_uuid = None;
-        let mut disk_uuid = None;
+        Self::parse_volume_uuids_from_plist(&output.stdout)
+    }
 
-        for line in stdout.lines() {
-            let line = line.trim();
-            if line.starts_with("Volume UUID:") {
-                volume_uuid = line
-                    .strip_prefix("Volume UUID:")
-                    .map(|s| s.trim().to_string());
-            } else if line.starts_with("Disk / Partition UUID:") {
-                disk_uuid = line
-                    .strip_prefix("Disk / Partition UUID:")
-                    .map(|s| s.trim().to_string());
+    /// `diskutil info -plist` 출력(XML) 파싱 로직 (순수 함수)
+    /// 테스트를 위해 분리됨
+    fn parse_volume_uuids_from_plist(data: &[u8]) -> (Option<String>, Option<String>) {
+        if let Ok(value) = plist::from_bytes::<plist::Value>(data) {
+            if let Some(dict) = value.as_dictionary() {
+                let volume_uuid = dict.get("VolumeUUID")
+                    .and_then(|v| v.as_string())
+                    .map(|s| s.to_string());
+                
+                let disk_uuid = dict.get("DiskPartitionUUID")
+                    .and_then(|v| v.as_string())
+                    .map(|s| s.to_string());
+
+                return (volume_uuid, disk_uuid);
             }
         }
-
-        (volume_uuid, disk_uuid)
+        (None, None)
     }
 
     pub fn list_volumes(&self) -> Result<Vec<VolumeInfo>> {
@@ -292,5 +295,49 @@ mod tests {
     fn test_folder_watcher_creation() {
         let temp = tempfile::tempdir().unwrap();
         let _watcher = FolderWatcher::new(temp.path().to_path_buf(), |_| {});
+    }
+
+    #[test]
+    fn test_parse_volume_uuids() {
+        // Mock output of `diskutil info -plist`
+        // Based on user provided example (though user provided `list -plist`, the structure keys are consistent)
+        let xml = r#"
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>VolumeName</key>
+            <string>TestVolume</string>
+            <key>VolumeUUID</key>
+            <string>D47B2E09-AF70-3B66-B96F-D51909930EEA</string>
+            <key>DiskPartitionUUID</key>
+            <string>F7E6416E-BAD0-4304-8B13-E3268A1A1A07</string>
+            <key>DeviceIdentifier</key>
+            <string>disk8s1</string>
+        </dict>
+        </plist>
+        "#;
+
+        let (vol_uuid, disk_uuid) = DiskMonitor::parse_volume_uuids_from_plist(xml.as_bytes());
+        assert_eq!(vol_uuid, Some("D47B2E09-AF70-3B66-B96F-D51909930EEA".to_string()));
+        assert_eq!(disk_uuid, Some("F7E6416E-BAD0-4304-8B13-E3268A1A1A07".to_string()));
+    }
+
+    #[test]
+    fn test_parse_volume_uuids_missing() {
+        let xml = r#"
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>VolumeName</key>
+            <string>NoUUID</string>
+        </dict>
+        </plist>
+        "#;
+
+        let (vol_uuid, disk_uuid) = DiskMonitor::parse_volume_uuids_from_plist(xml.as_bytes());
+        assert_eq!(vol_uuid, None);
+        assert_eq!(disk_uuid, None);
     }
 }

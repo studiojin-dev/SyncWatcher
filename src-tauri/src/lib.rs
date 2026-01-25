@@ -283,6 +283,29 @@ async fn sync_dry_run(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
+    // 1. Resolve Path if it contains [UUID:xxxx] pattern
+    let resolve_path = |path_str: &str| -> Result<PathBuf, String> {
+        if path_str.starts_with("[UUID:") {
+            if let Some(end_idx) = path_str.find(']') {
+                let uuid_part = &path_str[6..end_idx];
+                let sub_path = &path_str[end_idx + 1..];
+                
+                let monitor = DiskMonitor::new();
+                let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+                
+                let volume = volumes.into_iter().find(|v| {
+                    v.disk_uuid.as_deref() == Some(uuid_part)
+                }).ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
+                
+                let clean_sub_path = sub_path.trim_start_matches('/');
+                return Ok(volume.mount_point.join(clean_sub_path));
+            }
+        }
+        Ok(PathBuf::from(path_str))
+    };
+
+    let source = resolve_path(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
     // Validate all inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
     input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
@@ -380,6 +403,38 @@ async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncResult, String> {
+    // 1. Resolve Path if it contains [UUID:xxxx] pattern
+    let resolve_path = |path_str: &str| -> Result<PathBuf, String> {
+        if path_str.starts_with("[UUID:") {
+            if let Some(end_idx) = path_str.find(']') {
+                let uuid_part = &path_str[6..end_idx];
+                let sub_path = &path_str[end_idx + 1..];
+                
+                // UUID Resolution
+                let monitor = DiskMonitor::new();
+                let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+                
+                let volume = volumes.into_iter().find(|v| {
+                    v.disk_uuid.as_deref() == Some(uuid_part)
+                }).ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
+                
+                // Construct full path
+                // Remove leading slash from sub_path if present to avoid absolute path override in join
+                let clean_sub_path = sub_path.trim_start_matches('/');
+                return Ok(volume.mount_point.join(clean_sub_path));
+            }
+        }
+        Ok(PathBuf::from(path_str))
+    };
+
+    let source = resolve_path(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    // Target usually is local, but for completeness or future proofing, we could check target too.
+    // However, usually target is a fixed backup location. Let's keep it simple for now, 
+    // BUT the user might select a UUID target too. Let's apply it to both if safe.
+    // actually, source is passed as PathBuf. 
+    // If it comes from frontend as string "[UUID:...", Tauri might fail to convert to PathBuf if it contained invalid chars?
+    // No, standard paths allowed chars.
+    
     // Validate all inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
     input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
@@ -530,6 +585,29 @@ async fn start_watch(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    // 1. Resolve Path if it contains [UUID:xxxx] pattern
+    let resolve_path = |path_str: &str| -> Result<PathBuf, String> {
+        if path_str.starts_with("[UUID:") {
+            if let Some(end_idx) = path_str.find(']') {
+                let uuid_part = &path_str[6..end_idx];
+                let sub_path = &path_str[end_idx + 1..];
+                
+                let monitor = DiskMonitor::new();
+                let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+                
+                let volume = volumes.into_iter().find(|v| {
+                    v.disk_uuid.as_deref() == Some(uuid_part)
+                }).ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
+                
+                let clean_sub_path = sub_path.trim_start_matches('/');
+                return Ok(volume.mount_point.join(clean_sub_path));
+            }
+        }
+        Ok(PathBuf::from(path_str))
+    };
+
+    let source_path = resolve_path(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
     // Validate inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
     input_validation::validate_path_argument(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
