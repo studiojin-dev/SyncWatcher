@@ -49,7 +49,15 @@
       "cancelConfirm": "정말로 작업을 취소하시겠습니까?",
       "cancelled": "작업이 취소되었습니다.",
       "dryRun": "모의 실행",
-      "noTasks": "구성된 동기화 작업이 없습니다"
+      "noTasks": "구성된 동기화 작업이 없습니다",
+      "sourceType": "소스 유형",
+      "sourceTypePath": "디렉토리 경로",
+      "sourceTypeUuid": "볼륨 UUID",
+      "selectVolume": "볼륨 선택",
+      "subPath": "하위 경로",
+      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "volumeNotMounted": "볼륨이 마운트되지 않음",
+      "uuidCopied": "UUID가 클립보드에 복사되었습니다"
     },
     "activityLog": {
       "title": "활동 로그",

@@ -332,6 +332,24 @@ fn get_removable_volumes() -> Result<Vec<system_integration::VolumeInfo>, String
     monitor.get_removable_volumes().map_err(|e| e.to_string())
 }
 
+/// Disk UUID로 현재 마운트된 볼륨의 경로를 찾습니다.
+/// SD 카드 포맷 후 이름이 변경되어도 동일한 디바이스를 찾을 수 있습니다.
+#[tauri::command]
+fn resolve_path_by_uuid(disk_uuid: String) -> Result<std::path::PathBuf, String> {
+    let monitor = DiskMonitor::new();
+    let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+
+    for volume in volumes {
+        if let Some(ref uuid) = volume.disk_uuid {
+            if uuid == &disk_uuid {
+                return Ok(volume.mount_point);
+            }
+        }
+    }
+
+    Err(format!("볼륨을 찾을 수 없습니다. UUID: {}", disk_uuid))
+}
+
 /// Removable 디스크를 언마운트합니다.
 #[tauri::command]
 async fn unmount_volume(
@@ -628,6 +646,7 @@ pub fn run() {
             sync_dry_run,
             list_volumes,
             get_removable_volumes,
+            resolve_path_by_uuid,
             unmount_volume,
             start_sync,
             list_sync_tasks,

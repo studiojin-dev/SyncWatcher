@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc } from '@tabler/icons-react';
-import { MultiSelect } from '@mantine/core';
+import { MultiSelect, Select } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open, ask } from '@tauri-apps/plugin-dialog';
@@ -13,6 +13,17 @@ import { useToast } from '../components/ui/Toast';
 import YamlEditorModal from '../components/ui/YamlEditorModal';
 import TaskLogsModal from '../components/features/TaskLogsModal';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
+
+/** Volume information from backend */
+interface VolumeInfo {
+    name: string;
+    mount_point: string;
+    total_bytes: number;
+    available_bytes: number;
+    is_removable: boolean;
+    volume_uuid?: string;
+    disk_uuid?: string;
+}
 
 /**
  * Sync Tasks View - Manage sync tasks
@@ -66,8 +77,28 @@ function SyncTasksView() {
     // Dry Run state
     const [dryRunning, setDryRunning] = useState<string | null>(null);
 
+    // UUID source selection state
+    const [sourceType, setSourceType] = useState<'path' | 'uuid'>('path');
+    const [sourceUuid, setSourceUuid] = useState<string>('');
+    const [sourceSubPath, setSourceSubPath] = useState<string>('');
+    const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
+    const [loadingVolumes, setLoadingVolumes] = useState(false);
+
     // Cancel confirmation state
     const [cancelConfirm, setCancelConfirm] = useState<{ type: 'sync' | 'dryRun'; taskId: string } | null>(null);
+
+    // 볼륨 목록 로드
+    const loadVolumes = async () => {
+        try {
+            setLoadingVolumes(true);
+            const result = await invoke<VolumeInfo[]>('get_removable_volumes');
+            setVolumes(result);
+        } catch (err) {
+            console.error('Failed to load volumes:', err);
+        } finally {
+            setLoadingVolumes(false);
+        }
+    };
 
     useEffect(() => {
         if (editingTask) {
@@ -77,6 +108,10 @@ function SyncTasksView() {
             setDeleteMissing(editingTask.deleteMissing || false);
             setWatchMode(editingTask.watchMode || false);
             setAutoUnmount(editingTask.autoUnmount || false);
+            // UUID 관련 상태 복원
+            setSourceType(editingTask.sourceType || 'path');
+            setSourceUuid(editingTask.sourceUuid || '');
+            setSourceSubPath(editingTask.sourceSubPath || '');
         } else {
             setSelectedSets([]);
             setSourcePath('');
@@ -84,8 +119,19 @@ function SyncTasksView() {
             setDeleteMissing(false);
             setWatchMode(false);
             setAutoUnmount(false);
+            // UUID 관련 상태 초기화
+            setSourceType('path');
+            setSourceUuid('');
+            setSourceSubPath('');
         }
     }, [editingTask, showForm]);
+
+    // 폼이 열릴 때 볼륨 목록 로드
+    useEffect(() => {
+        if (showForm) {
+            loadVolumes();
+        }
+    }, [showForm]);
 
     const browseDirectory = async (type: 'source' | 'target') => {
         try {
@@ -115,16 +161,28 @@ function SyncTasksView() {
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const formData = new FormData(e.currentTarget);
+
+        // UUID 모드일 때 source 경로 결정
+        let finalSource = sourcePath || formData.get('source') as string;
+        if (sourceType === 'uuid' && sourceUuid) {
+            // UUID 모드에서는 placeholder 값 저장 (실제 경로는 동기화 시 resolve)
+            finalSource = `[UUID:${sourceUuid}]${sourceSubPath}`;
+        }
+
         const taskData = {
             name: formData.get('name') as string,
-            source: sourcePath || formData.get('source') as string,
+            source: finalSource,
             target: targetPath || formData.get('target') as string,
             enabled: true,
-            deleteMissing: watchMode ? false : deleteMissing, // 감시 모드에서는 deleteMissing 비활성화
+            deleteMissing: watchMode ? false : deleteMissing,
             checksumMode: formData.get('checksumMode') === 'on',
             exclusionSets: selectedSets,
             watchMode: watchMode,
             autoUnmount: autoUnmount,
+            // UUID 관련 필드
+            sourceType: sourceType,
+            sourceUuid: sourceType === 'uuid' ? sourceUuid : undefined,
+            sourceSubPath: sourceType === 'uuid' ? sourceSubPath : undefined,
         };
 
         if (editingTask) {
@@ -301,24 +359,106 @@ function SyncTasksView() {
                                     <label className="block text-sm font-bold mb-1 uppercase font-mono">
                                         {t('syncTasks.source')}
                                     </label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            name="source"
-                                            value={sourcePath}
-                                            onChange={(e) => setSourcePath(e.target.value)}
-                                            required
-                                            className="neo-input font-mono text-sm flex-1"
-                                            placeholder="/path/to/source"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => browseDirectory('source')}
-                                            className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
-                                            title="Browse..."
-                                        >
-                                            <IconFolder size={18} />
-                                        </button>
+
+                                    {/* 소스 타입 선택 */}
+                                    <div className="flex gap-4 mb-2">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="sourceType"
+                                                checked={sourceType === 'path'}
+                                                onChange={() => setSourceType('path')}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="text-sm font-mono">📁 {t('syncTasks.sourceTypePath', { defaultValue: '디렉토리 경로' })}</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="sourceType"
+                                                checked={sourceType === 'uuid'}
+                                                onChange={() => setSourceType('uuid')}
+                                                className="w-4 h-4"
+                                            />
+                                            <span className="text-sm font-mono">💾 {t('syncTasks.sourceTypeUuid', { defaultValue: '볼륨 UUID' })}</span>
+                                        </label>
                                     </div>
+
+                                    {/* 경로 모드 */}
+                                    {sourceType === 'path' && (
+                                        <div className="flex gap-2">
+                                            <input
+                                                name="source"
+                                                value={sourcePath}
+                                                onChange={(e) => setSourcePath(e.target.value)}
+                                                required={sourceType === 'path'}
+                                                className="neo-input font-mono text-sm flex-1"
+                                                placeholder="/path/to/source"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => browseDirectory('source')}
+                                                className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
+                                                title="Browse..."
+                                            >
+                                                <IconFolder size={18} />
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* UUID 모드 */}
+                                    {sourceType === 'uuid' && (
+                                        <div className="space-y-2">
+                                            <Select
+                                                placeholder={loadingVolumes ? '로딩 중...' : t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' })}
+                                                data={volumes.map(v => ({
+                                                    value: v.disk_uuid || '',
+                                                    label: `${v.name} (${(v.total_bytes / 1024 / 1024 / 1024).toFixed(1)} GB)`,
+                                                    disabled: !v.disk_uuid,
+                                                }))}
+                                                value={sourceUuid}
+                                                onChange={(value) => {
+                                                    setSourceUuid(value || '');
+                                                    // 선택된 볼륨의 마운트 포인트를 sourcePath에도 저장
+                                                    const vol = volumes.find(v => v.disk_uuid === value);
+                                                    if (vol) {
+                                                        setSourcePath(vol.mount_point);
+                                                    }
+                                                }}
+                                                searchable
+                                                required={sourceType === 'uuid'}
+                                                styles={{
+                                                    input: {
+                                                        border: '3px solid var(--border-main)',
+                                                        borderRadius: 0,
+                                                        fontFamily: 'var(--font-mono)',
+                                                    },
+                                                    dropdown: {
+                                                        border: '3px solid var(--border-main)',
+                                                        borderRadius: 0,
+                                                        boxShadow: '4px 4px 0 0 black',
+                                                    }
+                                                }}
+                                            />
+                                            {sourceUuid && (
+                                                <div className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-secondary)] p-2 border-2 border-dashed border-[var(--border-main)]">
+                                                    <span className="font-bold">UUID:</span> {sourceUuid}
+                                                </div>
+                                            )}
+                                            <div>
+                                                <label className="block text-xs font-bold mb-1 uppercase font-mono text-[var(--text-secondary)]">
+                                                    {t('syncTasks.subPath', { defaultValue: '하위 경로' })}
+                                                </label>
+                                                <input
+                                                    name="sourceSubPath"
+                                                    value={sourceSubPath}
+                                                    onChange={(e) => setSourceSubPath(e.target.value)}
+                                                    className="neo-input font-mono text-sm"
+                                                    placeholder={t('syncTasks.subPathPlaceholder', { defaultValue: '/DCIM/100MSDCF' })}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold mb-1 uppercase font-mono">

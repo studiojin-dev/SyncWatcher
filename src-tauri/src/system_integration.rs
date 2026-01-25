@@ -28,6 +28,10 @@ pub struct VolumeInfo {
     pub total_bytes: u64,
     pub available_bytes: u64,
     pub is_removable: bool,
+    /// 파일시스템 UUID (포맷 시 변경될 수 있음)
+    pub volume_uuid: Option<String>,
+    /// 파티션 UUID (포맷 후에도 유지됨, SD 카드 식별에 권장)
+    pub disk_uuid: Option<String>,
 }
 
 pub struct DiskMonitor;
@@ -41,6 +45,44 @@ impl Default for DiskMonitor {
 impl DiskMonitor {
     pub fn new() -> Self {
         Self
+    }
+
+    /// 마운트 포인트로부터 Volume UUID와 Disk/Partition UUID를 획득합니다.
+    /// `diskutil info <mount_point>` 명령을 파싱합니다.
+    fn get_volume_uuid(mount_point: &Path) -> (Option<String>, Option<String>) {
+        use std::process::Command;
+
+        let output = Command::new("diskutil")
+            .arg("info")
+            .arg(mount_point)
+            .output();
+
+        let Ok(output) = output else {
+            return (None, None);
+        };
+
+        if !output.status.success() {
+            return (None, None);
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut volume_uuid = None;
+        let mut disk_uuid = None;
+
+        for line in stdout.lines() {
+            let line = line.trim();
+            if line.starts_with("Volume UUID:") {
+                volume_uuid = line
+                    .strip_prefix("Volume UUID:")
+                    .map(|s| s.trim().to_string());
+            } else if line.starts_with("Disk / Partition UUID:") {
+                disk_uuid = line
+                    .strip_prefix("Disk / Partition UUID:")
+                    .map(|s| s.trim().to_string());
+            }
+        }
+
+        (volume_uuid, disk_uuid)
     }
 
     pub fn list_volumes(&self) -> Result<Vec<VolumeInfo>> {
@@ -62,6 +104,7 @@ impl DiskMonitor {
                             (get_disk_space(&path), get_available_space(&path))
                         {
                             let is_removable = Self::is_removable_volume(&path);
+                            let (volume_uuid, disk_uuid) = Self::get_volume_uuid(&path);
 
                             volumes.push(VolumeInfo {
                                 name,
@@ -70,6 +113,8 @@ impl DiskMonitor {
                                 total_bytes: total,
                                 available_bytes: available,
                                 is_removable,
+                                volume_uuid,
+                                disk_uuid,
                             });
                         }
                     }

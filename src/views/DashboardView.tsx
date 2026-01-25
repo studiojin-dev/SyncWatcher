@@ -10,6 +10,10 @@ interface VolumeInfo {
     total_bytes: number;
     available_bytes: number;
     is_removable: boolean;
+    /** 파일시스템 UUID (포맷 시 변경될 수 있음) */
+    volume_uuid?: string;
+    /** 파티션 UUID (포맷 후에도 유지됨, SD 카드 식별에 권장) */
+    disk_uuid?: string;
 }
 
 /**

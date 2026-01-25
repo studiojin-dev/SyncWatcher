@@ -49,7 +49,15 @@
       "cancelConfirm": "¿Está seguro de que desea cancelar la operación?",
       "cancelled": "Operación cancelada.",
       "dryRun": "Simulacro",
-      "noTasks": "No hay tareas de sincronización configuradas"
+      "noTasks": "No hay tareas de sincronización configuradas",
+      "sourceType": "Tipo de Origen",
+      "sourceTypePath": "Ruta de Directorio",
+      "sourceTypeUuid": "UUID de Volumen",
+      "selectVolume": "Seleccionar Volumen",
+      "subPath": "Subruta",
+      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "volumeNotMounted": "Volumen no montado",
+      "uuidCopied": "UUID copiado al portapapeles"
     },
     "activityLog": {
       "title": "Registro de Actividad",

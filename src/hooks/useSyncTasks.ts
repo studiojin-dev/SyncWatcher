@@ -16,6 +16,12 @@ export interface SyncTask {
     watchMode?: boolean;
     /** 복사 후 자동 unmount (removable 디스크) */
     autoUnmount?: boolean;
+    /** 소스 타입: 'path' (기본) 또는 'uuid' */
+    sourceType?: 'path' | 'uuid';
+    /** UUID 기반 소스일 때 사용할 Disk UUID */
+    sourceUuid?: string;
+    /** UUID 볼륨 내 하위 경로 (예: /DCIM/100MSDCF) */
+    sourceSubPath?: string;
 }
 
 export function useSyncTasks() {

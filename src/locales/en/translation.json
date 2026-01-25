@@ -46,7 +46,15 @@
       "cancelConfirm": "Are you sure you want to cancel the operation?",
       "cancelled": "Operation cancelled.",
       "dryRun": "Dry Run",
-      "noTasks": "No sync tasks configured"
+      "noTasks": "No sync tasks configured",
+      "sourceType": "Source Type",
+      "sourceTypePath": "Directory Path",
+      "sourceTypeUuid": "Volume UUID",
+      "selectVolume": "Select Volume",
+      "subPath": "Sub Path",
+      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "volumeNotMounted": "Volume not mounted",
+      "uuidCopied": "UUID copied to clipboard"
     },
     "activityLog": {
       "title": "Activity Log",

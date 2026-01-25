@@ -49,7 +49,15 @@
       "cancelConfirm": "您确定要取消操作吗？",
       "cancelled": "操作已取消。",
       "dryRun": "模拟运行",
-      "noTasks": "未配置同步任务"
+      "noTasks": "未配置同步任务",
+      "sourceType": "源类型",
+      "sourceTypePath": "目录路径",
+      "sourceTypeUuid": "卷 UUID",
+      "selectVolume": "选择卷",
+      "subPath": "子路径",
+      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "volumeNotMounted": "卷未挂载",
+      "uuidCopied": "UUID 已复制到剪贴板"
     },
     "activityLog": {
       "title": "活动日志",

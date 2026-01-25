@@ -49,7 +49,15 @@
       "cancelConfirm": "操作をキャンセルしてもよろしいですか？",
       "cancelled": "操作がキャンセルされました。",
       "dryRun": "ドライラン",
-      "noTasks": "同期タスクが設定されていません"
+      "noTasks": "同期タスクが設定されていません",
+      "sourceType": "ソースのタイプ",
+      "sourceTypePath": "ディレクトリパス",
+      "sourceTypeUuid": "ボリューム UUID",
+      "selectVolume": "ボリュームを選択",
+      "subPath": "サブパス",
+      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "volumeNotMounted": "ボリュームがマウントされていません",
+      "uuidCopied": "UUIDをクリップボードにコピーしました"
     },
     "activityLog": {
       "title": "アクティビティログ",
