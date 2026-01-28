@@ -98,11 +98,28 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             </nav>
 
             {/* Footer */}
-            <div className="p-4 border-t-4 border-[var(--border-main)] bg-[var(--bg-secondary)]">
-                <div className="neo-box p-3 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest">
+            <div className="p-4 border-t-4 border-[var(--border-main)] bg-[var(--bg-secondary)] space-y-3">
+                {/* Registration Status */}
+                <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--bg-primary)] border-2 border-[var(--border-main)] shadow-[3px_3px_0_0_var(--shadow-color)]">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[var(--accent-error)]">
+                            {t('about.unregistered')}
+                        </span>
+                        <a
+                            href="https://studiojin.lemonsqueezy.com/checkout/buy/syncwatcher"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] font-black uppercase tracking-tighter bg-black text-[var(--accent-warning)] px-2 py-0.5 hover:bg-[var(--accent-warning)] hover:text-black transition-colors"
+                        >
+                            {t('about.purchaseLicense')}
+                        </a>
+                    </div>
+                </div>
+
+                <div className="neo-box p-2 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest border-2 border-[var(--border-main)]">
                     v{import.meta.env.PACKAGE_VERSION || '0.1.0'}
-                    <span className="mx-2">•</span>
-                    AGPL-3.0
+                    <span className="mx-2 text-[var(--border-main)]">•</span>
+                    {t('about.licenseType')}
                 </div>
             </div>
         </aside>

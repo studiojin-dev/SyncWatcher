@@ -1,4 +1,4 @@
-# SyncWatcher (in development)
+# SyncWatcher (Source-Available)
 
 macOS-native file synchronization utility with automatic SD card/USB detection and real-time backup capabilities.
 
@@ -44,7 +44,7 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 
 ### � Compliance & Metadata
 
-- **About/License UI**: Built-in viewer for Open Source Licenses (AGPL 3.0 + Commercial).
+- **About/License UI**: Built-in viewer for licenses and registration status.
 - **Build-time Collection**: Automated generation of `oss-licenses.json` for compliance.
 
 ## Tech Stack
@@ -104,23 +104,20 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 ## License
 
-This project is **Dual Licensed**:
+This project is **Source-Available** software:
 
-| License | Use Case |
-|---------|----------|
-| [AGPL-3.0](./LICENSE-AGPL-3.0.txt) | Open source, personal, research, non-commercial |
-| [Commercial](./LICENSE-COMMERCIAL.md) | Commercial/proprietary use |
+| Component            | License                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| [Source Code](./LICENSE) | [Polyform Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) |
+| Binary Distribution  | Proprietary EULA (Unlimited Evaluation)                                                 |
 
 ### 💼 Commercial Use
 
-SyncWatcher is available as a commercial product at [studiojin.dev](https://studiojin.dev).
+SyncWatcher is available as a commercial product at [studiojin.dev](https://studiojin.dev). For commercial use, including internal company use or for-profit activities, a commercial license must be purchased.
 
-### Open Source Use
+### Non-commercial Use
 
-Under AGPL-3.0, you may freely use, modify, and distribute this software as long as:
-
-- All modifications are also released under AGPL-3.0
-- Source code is made available to users
+Under the Polyform Noncommercial 1.0.0 license, you may freely use, modify, and distribute this software for personal study, research, and other non-commercial purposes. Any commercial application or redistribution for profit is strictly prohibited without a separate agreement.
 
 ## Acknowledgments
 

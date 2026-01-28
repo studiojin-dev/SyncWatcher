@@ -134,8 +134,11 @@
       "developer": "개발자",
       "license": "라이선스",
       "openSourceLibraries": "오픈 소스 라이브러리",
-      "viewLicenses": "오픈소스 라이선스 보기",
-      "viewOnGithub": "GitHub에서 보기"
+      "viewLicenses": "라이선스 보기",
+      "viewOnGithub": "GitHub에서 보기",
+      "unregistered": "미등록 버전",
+      "purchaseLicense": "라이선스 구매",
+      "licenseType": "Polyform NC 1.0.0"
     },
     "common": {
       "confirm": "확인",
