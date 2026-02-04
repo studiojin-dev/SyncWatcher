@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface ExclusionSet {
     id: string;
@@ -83,11 +83,11 @@ export function useExclusionSets() {
         setSets(DEFAULT_SETS);
     };
 
-    const getPatternsForSets = (setIds: string[]): string[] => {
+    const getPatternsForSets = useCallback((setIds: string[]): string[] => {
         return sets
             .filter(s => setIds.includes(s.id))
             .flatMap(s => s.patterns);
-    };
+    }, [sets]);
 
     return {
         sets,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc } from '@tabler/icons-react';
 import { MultiSelect, Select } from '@mantine/core';
@@ -31,7 +31,7 @@ interface VolumeInfo {
  */
 function SyncTasksView() {
     const { t } = useTranslation();
-    const { tasks, addTask, updateTask, deleteTask, error, reload } = useSyncTasks();
+    const { tasks, addTask, updateTask, deleteTask, error, reload, loaded } = useSyncTasks();
     const { sets, getPatternsForSets } = useExclusionSets();
     const { showToast } = useToast();
     const [showForm, setShowForm] = useState(false);
@@ -43,9 +43,9 @@ function SyncTasksView() {
     // 상태 스토어 연동
     const { statuses, setLastLog } = useSyncTaskStatusStore();
 
-    // sync-progress 이벤트 리스닝
+    // sync-progress 및 watch-event 이벤트 리스닝
     useEffect(() => {
-        const unlisten = listen<{ taskId?: string; message?: string; current?: number; total?: number }>('sync-progress', (event) => {
+        const unlistenProgress = listen<{ taskId?: string; message?: string; current?: number; total?: number }>('sync-progress', (event) => {
             if (event.payload.taskId) {
                 setLastLog(event.payload.taskId, {
                     message: event.payload.message || 'Syncing...',
@@ -54,10 +54,54 @@ function SyncTasksView() {
                 });
             }
         });
+
+        const unlistenWatch = listen<{ task_id: string; event_type: string; paths: string[] }>('watch-event', (event) => {
+            const { task_id } = event.payload;
+            const task = tasks.find(t => t.id === task_id);
+            if (task && task.enabled && task.watchMode) {
+                // 이미 동기화 중이 아닐 때만 실행
+                if (syncing !== task_id) {
+                    console.log(`Watch event for ${task_id}, starting sync...`);
+                    handleSync(task);
+                }
+            }
+        });
+
         return () => {
-            unlisten.then(fn => fn());
+            unlistenProgress.then(fn => fn());
+            unlistenWatch.then(fn => fn());
         };
-    }, [setLastLog]);
+    }, [tasks, syncing, setLastLog]);
+
+    // 시작 시 Watch Mode인 태스크들 감시 시작 및 종료 시 중지
+    useEffect(() => {
+        if (!loaded) return;
+
+        const startWatchers = async () => {
+            const watchingTasks = tasks.filter(t => t.enabled && t.watchMode);
+            for (const task of watchingTasks) {
+                try {
+                    await invoke('start_watch', {
+                        taskId: task.id,
+                        sourcePath: task.source
+                    });
+                    console.log(`Started watcher for task: ${task.name}`);
+                } catch (err) {
+                    console.error(`Failed to start watcher for ${task.name}:`, err);
+                }
+            }
+        };
+
+        startWatchers();
+
+        return () => {
+            // 모든 감시 중지 (백엔드에서 stop_all 구현되어 있음)
+            // 개별적으로 멈추고 싶다면 get_watching_tasks 등을 활용
+            tasks.filter(t => t.watchMode).forEach(task => {
+                invoke('stop_watch', { taskId: task.id }).catch(console.error);
+            });
+        };
+    }, [loaded]); // 컴포넌트 마운트/언마운트 시에만 실행 (tasks 변경 시에도 재시작할지 고민 필요)
 
     // Changing the logic: adding state for selected sets in form
     const [selectedSets, setSelectedSets] = useState<string[]>([]);
@@ -197,7 +241,7 @@ function SyncTasksView() {
         setEditingTask(null);
     };
 
-    const handleSync = async (task: SyncTask) => {
+    const handleSync = useCallback(async (task: SyncTask) => {
         if (syncing === task.id) {
             // 이미 실행 중이면 취소 확인 모달 표시
             setCancelConfirm({ type: 'sync', taskId: task.id });
@@ -209,6 +253,15 @@ function SyncTasksView() {
         try {
             setSyncing(task.id);
             showToast(t('syncTasks.startSync') + ': ' + task.name, 'info');
+
+            // Watch Mode 시 감시 시작 (이미 시작되어 있을 수 있지만 안전하게 다시 호출)
+            if (task.watchMode) {
+                await invoke('start_watch', {
+                    taskId: task.id,
+                    sourcePath: task.source
+                });
+            }
+
             await invoke('start_sync', {
                 taskId: task.id,
                 source: task.source,
@@ -218,14 +271,27 @@ function SyncTasksView() {
                 verifyAfterCopy: true,
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
             });
+
             showToast(t('sync.syncComplete'), 'success');
+
+            // 동기화 성공 후 autoUnmount 처리
+            if (task.autoUnmount) {
+                try {
+                    await invoke('unmount_volume', { path: task.source });
+                    showToast(t('syncTasks.unmountSuccess', { defaultValue: '볼륨이 안전하게 제거되었습니다.' }), 'success');
+                } catch (unmountErr) {
+                    console.error('Auto unmount failed:', unmountErr);
+                    // unmount 실패는 동기화 실패는 아니므로 경고만 표시
+                    showToast(t('syncTasks.unmountFailed', { defaultValue: '볼륨 제거 실패' }), 'warning');
+                }
+            }
         } catch (err) {
             console.error('Sync failed:', err);
             showToast(String(err), 'error');
         } finally {
             setSyncing(null);
         }
-    };
+    }, [syncing, tasks, showToast, t, getPatternsForSets]);
 
     const handleDryRun = async (task: SyncTask) => {
         if (dryRunning === task.id) {
