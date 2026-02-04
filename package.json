@@ -2,9 +2,9 @@
   "name": "syncwatcher",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kimjj81/SyncWatcher.git"
+    "url": "https://github.com/studiojin-dev/SyncWatcher.git"
   },
-  "license": "AGPL-3.0-or-later",
+  "license": "Source-Available",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

@@ -71,7 +71,7 @@ function AboutView() {
 
             <div className="flex justify-between items-center">
               <span className="font-bold text-[var(--text-secondary)]">{t('about.license')}</span>
-              <span className="font-mono font-bold">AGPL 3.0 + Commercial</span>
+              <span className="font-mono font-bold">{t('about.licenseType')}</span>
             </div>
 
             <a

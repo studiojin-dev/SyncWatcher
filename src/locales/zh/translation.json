@@ -135,7 +135,8 @@
       "license": "许可证",
       "openSourceLibraries": "开源库",
       "viewLicenses": "查看开源许可证",
-      "viewOnGithub": "在 GitHub 上查看"
+      "viewOnGithub": "在 GitHub 上查看",
+      "licenseType": "Polyform NC 1.0.0"
     },
     "common": {
       "confirm": "确认",
