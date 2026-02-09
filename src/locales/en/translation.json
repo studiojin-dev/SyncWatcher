@@ -17,7 +17,8 @@
       "deviceStatus": "Device Status",
       "connected": "Connected",
       "disconnected": "Disconnected",
-      "bytesPerSecond": "bytes/s"
+      "bytesPerSecond": "bytes/s",
+      "analyzing": "Analyzing..."
     },
     "logs": {
       "title": "Task Logs"

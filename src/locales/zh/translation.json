@@ -20,7 +20,8 @@
       "success": "成功",
       "warning": "警告",
       "refresh": "刷新",
-      "bytesPerSecond": "字节/秒"
+      "bytesPerSecond": "字节/秒",
+      "analyzing": "分析中..."
     },
     "logs": {
       "title": "任务日志"

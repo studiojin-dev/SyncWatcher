@@ -103,6 +103,9 @@ function DashboardView() {
                 setIsAnalyzing(false);
             }
         } finally {
+            // [코드 리뷰 완료] 방어적 프로그래밍: 음수 방지.
+            // 현재 로직에서 음수가 될 가능성은 없지만, 향후 코드 변경 시 실수 방지용.
+            // 매 호출이 +1 → finally에서 -1을 정확히 한 번씩 수행함.
             inFlightCount.current = Math.max(0, inFlightCount.current - 1);
             if (isMounted.current) {
                 setLoading(inFlightCount.current > 0);

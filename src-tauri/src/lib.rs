@@ -1144,57 +1144,65 @@ pub fn run() {
             // /Volumes 디렉토리 감시 시작 (볼륨 마운트/언마운트 감지)
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
-                use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
-                use std::sync::mpsc::channel;
-                use std::time::Duration as StdDuration;
+                use std::panic::catch_unwind;
 
-                let (tx, rx) = channel();
-                let config = Config::default()
-                    .with_poll_interval(StdDuration::from_secs(2));
+                let result = catch_unwind(|| {
+                    use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+                    use std::sync::mpsc::channel;
+                    use std::time::Duration as StdDuration;
 
-                let mut watcher: RecommendedWatcher = match notify::Watcher::new(tx, config) {
-                    Ok(w) => w,
-                    Err(e) => {
-                        eprintln!("[VolumesWatcher] Failed to create watcher: {}", e);
+                    let (tx, rx) = channel();
+                    let config = Config::default()
+                        .with_poll_interval(StdDuration::from_secs(2));
+
+                    let mut watcher: RecommendedWatcher = match notify::Watcher::new(tx, config) {
+                        Ok(w) => w,
+                        Err(e) => {
+                            eprintln!("[VolumesWatcher] Failed to create watcher: {}", e);
+                            return;
+                        }
+                    };
+
+                    if let Err(e) = watcher.watch(
+                        std::path::Path::new("/Volumes"),
+                        RecursiveMode::NonRecursive,
+                    ) {
+                        eprintln!("[VolumesWatcher] Failed to watch /Volumes: {}", e);
                         return;
                     }
-                };
 
-                if let Err(e) = watcher.watch(
-                    std::path::Path::new("/Volumes"),
-                    RecursiveMode::NonRecursive,
-                ) {
-                    eprintln!("[VolumesWatcher] Failed to watch /Volumes: {}", e);
-                    return;
-                }
+                    println!("[VolumesWatcher] Started watching /Volumes");
 
-                println!("[VolumesWatcher] Started watching /Volumes");
+                    // 이벤트 디바운싱을 위한 마지막 emit 시간
+                    let mut last_emit: Option<std::time::Instant> = None;
+                    let debounce_duration = StdDuration::from_millis(500);
 
-                // 이벤트 디바운싱을 위한 마지막 emit 시간
-                let mut last_emit: Option<std::time::Instant> = None;
-                let debounce_duration = StdDuration::from_millis(500);
-
-                loop {
-                    match rx.recv() {
-                        Ok(Ok(_event)) => {
-                            // 디바운스: 500ms 내 중복 이벤트 무시
-                            let should_emit = last_emit
-                                .map(|last| last.elapsed() >= debounce_duration)
-                                .unwrap_or(true);
-                            if should_emit {
-                                last_emit = Some(std::time::Instant::now());
-                                println!("[VolumesWatcher] Detected volume change, emitting event");
-                                let _ = app_handle.emit("volumes-changed", ());
+                    loop {
+                        match rx.recv() {
+                            Ok(Ok(_event)) => {
+                                // 디바운스: 500ms 내 중복 이벤트 무시
+                                let should_emit = last_emit
+                                    .map(|last| last.elapsed() >= debounce_duration)
+                                    .unwrap_or(true);
+                                if should_emit {
+                                    last_emit = Some(std::time::Instant::now());
+                                    println!("[VolumesWatcher] Detected volume change, emitting event");
+                                    let _ = app_handle.emit("volumes-changed", ());
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("[VolumesWatcher] Watch error: {}", e);
+                            }
+                            Err(_) => {
+                                // 채널 닫힘 - 종료
+                                break;
                             }
                         }
-                        Ok(Err(e)) => {
-                            eprintln!("[VolumesWatcher] Watch error: {}", e);
-                        }
-                        Err(_) => {
-                            // 채널 닫힘 - 종료
-                            break;
-                        }
                     }
+                });
+
+                if let Err(panic_info) = result {
+                    eprintln!("[VolumesWatcher] Thread panicked: {:?}", panic_info);
                 }
             });
 

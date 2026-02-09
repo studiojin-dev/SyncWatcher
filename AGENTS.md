@@ -9,6 +9,11 @@ This file defines HOW the agent works.
 WHAT to build is defined in SPECS (see `doc/`).
 WHY decisions were made is defined in ADRs (see `doc/adr/`).
 
+## Platform
+
+- **Target Platform**: macOS only (Apple Silicon and Intel)
+- No Windows or Linux support planned
+
 ## Core Rules
 
 - Prefer correctness and clarity over cleverness

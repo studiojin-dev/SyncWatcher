@@ -20,7 +20,8 @@
       "success": "Éxito",
       "warning": "Advertencia",
       "refresh": "Actualizar",
-      "bytesPerSecond": "bytes/s"
+      "bytesPerSecond": "bytes/s",
+      "analyzing": "Analizando..."
     },
     "logs": {
       "title": "Registros de Tarea"

@@ -20,7 +20,8 @@
       "success": "성공",
       "warning": "경고",
       "refresh": "새로고침",
-      "bytesPerSecond": "바이트/초"
+      "bytesPerSecond": "바이트/초",
+      "analyzing": "분석중..."
     },
     "logs": {
       "title": "작업 로그"

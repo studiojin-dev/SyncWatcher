@@ -20,7 +20,8 @@
       "bytesPerSecond": "バイト/秒",
       "success": "成功",
       "warning": "警告",
-      "refresh": "更新"
+      "refresh": "更新",
+      "analyzing": "分析中..."
     },
     "logs": {
       "title": "タスクログ"
