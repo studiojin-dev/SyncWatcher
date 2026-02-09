@@ -1144,9 +1144,9 @@ pub fn run() {
             // /Volumes 디렉토리 감시 시작 (볼륨 마운트/언마운트 감지)
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
-                use std::panic::catch_unwind;
+                use std::panic::{catch_unwind, AssertUnwindSafe};
 
-                let result = catch_unwind(|| {
+                let result = catch_unwind(AssertUnwindSafe(|| {
                     use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
                     use std::sync::mpsc::channel;
                     use std::time::Duration as StdDuration;
@@ -1199,10 +1199,17 @@ pub fn run() {
                             }
                         }
                     }
-                });
+                }));
 
-                if let Err(panic_info) = result {
-                    eprintln!("[VolumesWatcher] Thread panicked: {:?}", panic_info);
+                if let Err(e) = result {
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "Unknown panic".to_string()
+                    };
+                    eprintln!("[VolumesWatcher] Thread panicked: {}", msg);
                 }
             });
 
