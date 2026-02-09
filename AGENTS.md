@@ -1,6 +1,66 @@
-# AGENTS.md - SyncWatcher Developer Guide
+# AGENTS.md - SyncWatcher
 
-This guide helps agentic coding agents work effectively in the SyncWatcher codebase (Tauri + React + TypeScript).
+This repository uses AI coding agents.
+If rules are missing or unclear, the agent must ask before proceeding.
+
+## Purpose & Scope
+
+This file defines HOW the agent works.
+WHAT to build is defined in SPECS (see `doc/`).
+WHY decisions were made is defined in ADRs (see `doc/adr/`).
+
+## Core Rules
+
+- Prefer correctness and clarity over cleverness
+- Do not introduce new dependencies or services unless explicitly requested
+- Avoid large refactors unless explicitly requested
+- Preserve existing public behavior by default
+
+## Plan Then Act
+
+For non-trivial tasks:
+
+1. Restate the goal in one sentence
+2. Propose a short plan
+3. (TDD, when possible) Red: write a failing test or a clear reproduction
+4. (TDD, when possible) Green: make the minimal change to pass
+5. (TDD, when possible) Blue: refactor for clarity and maintainability
+6. Summarize what changed and why
+
+## Documentation Rule (MUST)
+
+Consult authoritative documentation when tasks involve:
+
+- specific APIs, options, or signatures
+- version-dependent or "latest" behavior
+- deployment, auth, cloud, or security concerns
+- production reliability or performance
+
+If documentation is required and unavailable, ask for it or state uncertainty.
+
+## ADR Rule (MUST)
+
+Architectural or design decisions with trade-offs MUST be recorded as ADRs
+(e.g. in `doc/adr/`).
+The agent MUST NOT override existing ADRs without updating them first.
+If a change introduces new constraints or non-obvious choices, stop and request an ADR.
+
+## Verification
+
+Do not claim correctness without describing how to verify it
+(tests, build, or realistic checks).
+
+## Repository Hygiene
+
+If a .gitignore file does not exist, create one before adding
+environment-, build-, or tool-specific files.
+
+## Stop and Ask
+
+Ask before proceeding if requirements are unclear,
+changes are breaking, or behavior depends on docs or decisions.
+
+---
 
 ## Build & Development Commands
 
@@ -12,21 +72,29 @@ npm run dev              # Start dev server (Vite + Tauri, port 1420)
 npm run build           # TypeScript compile + Vite build
 npm run preview         # Preview production build
 
+# Linting
+npm run lint            # ESLint with auto-fix
+npm run lint:check      # ESLint check only (no auto-fix)
+
+# Testing
+npm run test            # Run Vitest
+npm run test:ui         # Vitest with UI
+npm run test:coverage   # Vitest with coverage
+
 # Tauri CLI (via npm script)
 npm run tauri <command> # e.g., npm run tauri dev, npm run tauri build
 ```
 
 ## Documents
 
-place documents in "doc" directory.
+Place documents in `doc/` directory.
 
 ## Testing
 
-**No testing framework is currently configured.** When adding tests:
-
-- Consider Vitest for unit/integration tests (Vite-native)
-- Consider React Testing Library for component tests
-- Run single test: `npm test -- <test-file>` (once configured)
+- **Framework**: Vitest with React Testing Library
+- **Run tests**: `npm run test` or `npm run test:ui`
+- **Single test**: `npm test -- <test-file>`
+- **Coverage**: `npm run test:coverage`
 
 ## TypeScript Configuration
 
@@ -117,33 +185,17 @@ fn command_name(param: &str) -> String {
 
 ### CSS & Styling
 
-- Tailwind CSS v4.1.18 available but not actively used (using CSS modules via App.css)
+- **Tailwind CSS v4** with Vite plugin
 - Dark mode support via `@media (prefers-color-scheme: dark)`
-- CSS in `App.css` or component-specific `.css` files
-- Tailwind integration: Add classes directly in JSX if using Tailwind utilities
-
-## Project Structure
-
-```
-src/
-├── main.tsx          # React root (ReactDOM.createRoot)
-├── App.tsx           # Main component
-├── App.css           # Styles
-└── vite-env.d.ts     # Vite type definitions
-
-src-tauri/
-├── src/
-│   ├── main.rs       # Entry point
-│   └── lib.rs        # Tauri commands & app builder
-├── Cargo.toml        # Rust dependencies
-└── tauri.conf.json   # Tauri configuration
-```
+- Component-specific CSS in `src/styles/`
 
 ## Key Configuration Files
 
-- **package.json**: Scripts, dependencies (React 18.3, Tauri v2, Vite 6)
+- **package.json**: Scripts, dependencies (React 18.3, Tauri v2, Vite 6, Zustand)
 - **tsconfig.json**: TypeScript strict mode, ES2020
 - **vite.config.ts**: Vite + React plugin, Tauri dev server config (port 1420)
+- **vitest.config.ts**: Vitest configuration with happy-dom
+- **.eslintrc.json**: ESLint rules with TypeScript support
 - **Cargo.toml**: Rust dependencies (tauri v2, serde)
 
 ## Development Notes
@@ -155,10 +207,7 @@ src-tauri/
 
 ## Future Conventions (To Be Established)
 
-- **Linting**: Consider ESLint when codebase grows
 - **Formatting**: Consider Prettier for consistent formatting
-- **Testing**: Establish test framework (Vitest recommended)
-- **State management**: For complex state, consider Context API or Zustand
 - **API calls**: Centralize Tauri command invocations in a dedicated module
 
 ## Tauri-Specific Guidelines
@@ -188,4 +237,4 @@ src-tauri/
 - Tauri docs: <https://tauri.app/develop/>
 - React docs: <https://react.dev/>
 - Vite docs: <https://vitejs.dev/>
-- Tailwind CSS v4: <https://tailwindcss.com/blog/tailwindcss-v4-alpha>
+- Tailwind CSS v4: <https://tailwindcss.com/docs/installation/using-vite>
