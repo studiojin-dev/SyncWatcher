@@ -192,7 +192,9 @@
       "smbDisconnected": "SMB 已断开",
       "permissionDenied": "权限被拒绝",
       "fileNotFound": "文件未找到",
-      "networkError": "网络错误"
+      "networkError": "网络错误",
+      "watchStartFailed": "启动监控失败",
+      "watchStopFailed": "停止监控失败"
     }
   }
 }

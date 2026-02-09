@@ -331,7 +331,7 @@ function SyncTasksView() {
                 return next;
             });
         }
-    }, [ask, showToast, t, updateTask, watchTogglePendingIds]);
+    }, [showToast, t, updateTask, watchTogglePendingIds]);
 
     const handleDryRun = async (task: SyncTask) => {
         if (dryRunning === task.id) {

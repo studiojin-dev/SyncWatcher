@@ -192,7 +192,9 @@
       "smbDisconnected": "SMB 切断",
       "permissionDenied": "アクセス拒否",
       "fileNotFound": "ファイルが見つかりません",
-      "networkError": "ネットワークエラー"
+      "networkError": "ネットワークエラー",
+      "watchStartFailed": "監視の開始に失敗しました",
+      "watchStopFailed": "監視の停止に失敗しました"
     }
   }
 }

@@ -194,7 +194,9 @@
       "smbDisconnected": "SMB 연결 끊김",
       "permissionDenied": "권한 거부됨",
       "fileNotFound": "파일을 찾을 수 없음",
-      "networkError": "네트워크 오류"
+      "networkError": "네트워크 오류",
+      "watchStartFailed": "감시 시작 실패",
+      "watchStopFailed": "감시 중지 실패"
     }
   }
 }

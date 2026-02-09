@@ -192,7 +192,9 @@
       "smbDisconnected": "SMB Desconectado",
       "permissionDenied": "Permiso Denegado",
       "fileNotFound": "Archivo No Encontrado",
-      "networkError": "Error de Red"
+      "networkError": "Error de Red",
+      "watchStartFailed": "Error al iniciar vigilancia",
+      "watchStopFailed": "Error al detener vigilancia"
     }
   }
 }

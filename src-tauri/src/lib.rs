@@ -5,6 +5,7 @@ pub mod license;
 pub mod path_validation;
 pub mod watcher;
 pub mod input_validation;
+pub mod error_codes;
 
 #[cfg(test)]
 mod lib_tests;
@@ -456,6 +457,11 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     };
 
     if !acquire_sync_slot(&task.id, &state).await {
+        state.log_manager.log(
+            "warning",
+            "Sync skipped: task already syncing",
+            Some(task.id.clone()),
+        );
         return;
     }
 
@@ -525,7 +531,7 @@ async fn start_watch_internal(
                 });
             }
         })
-        .map_err(|e| format!("감시 시작 실패: {}", e))?;
+        .map_err(|e| format!("{}:{}", error_codes::ERR_WATCH_START_FAILED, e))?;
 
     state.log_manager.log(
         "info",
@@ -611,7 +617,7 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
             let mut manager = state.watcher_manager.write().await;
             manager
                 .stop_watching(task_id)
-                .map_err(|e| format!("감시 중지 실패: {}", e))
+                .map_err(|e| format!("{}:{}", error_codes::ERR_WATCH_STOP_FAILED, e))
         };
 
         match stop_result {
@@ -950,7 +956,7 @@ async fn stop_watch(
 
     let mut manager = state.watcher_manager.write().await;
     manager.stop_watching(&task_id)
-        .map_err(|e| format!("감시 중지 실패: {}", e))?;
+        .map_err(|e| format!("{}:{}", error_codes::ERR_WATCH_STOP_FAILED, e))?;
     
     state.log_manager.log("info", "Watch stopped", Some(task_id.clone()));
     emit_runtime_watch_state(&app, &task_id, false, None);

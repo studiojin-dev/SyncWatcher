@@ -191,7 +191,9 @@
       "smbDisconnected": "SMB Disconnected",
       "permissionDenied": "Permission Denied",
       "fileNotFound": "File Not Found",
-      "networkError": "Network Error"
+      "networkError": "Network Error",
+      "watchStartFailed": "Failed to start watch",
+      "watchStopFailed": "Failed to stop watch"
     }
   }
 }
