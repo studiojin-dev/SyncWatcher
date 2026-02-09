@@ -37,6 +37,7 @@ serde_yaml = "0.9.34"
 chrono = "0.4"
 tokio-util = "0.7"
 tauri-plugin-notification = "2"
+tauri-plugin-window-state = "2"
 plist = "1.8.0"
 
 [dev-dependencies]
@@ -45,4 +46,3 @@ tempfile = "3.10"
 [[bin]]
 name = "sync-cli"
 path = "src/bin/sync-cli.rs"
-

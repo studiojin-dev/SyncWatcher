@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, PhysicalSize, Size, WebviewWindow};
 
 use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
 use system_integration::{DiskMonitor};
@@ -706,6 +706,73 @@ async fn send_notification(
     Ok(())
 }
 
+fn adjust_window_if_mostly_offscreen(window: &WebviewWindow) -> tauri::Result<()> {
+    let window_position = window.outer_position()?;
+    let window_size = window.outer_size()?;
+    let monitors = window.available_monitors()?;
+
+    if monitors.is_empty() || window_size.width == 0 || window_size.height == 0 {
+        return Ok(());
+    }
+
+    let window_left = i64::from(window_position.x);
+    let window_top = i64::from(window_position.y);
+    let window_right = window_left + i64::from(window_size.width);
+    let window_bottom = window_top + i64::from(window_size.height);
+    let window_area = u64::from(window_size.width) * u64::from(window_size.height);
+
+    let mut max_visible_area: u64 = 0;
+    let mut position_inside_any_work_area = false;
+
+    for monitor in &monitors {
+        let work_area = monitor.work_area();
+        let area_left = i64::from(work_area.position.x);
+        let area_top = i64::from(work_area.position.y);
+        let area_right = area_left + i64::from(work_area.size.width);
+        let area_bottom = area_top + i64::from(work_area.size.height);
+
+        if window_left >= area_left
+            && window_left < area_right
+            && window_top >= area_top
+            && window_top < area_bottom
+        {
+            position_inside_any_work_area = true;
+        }
+
+        let visible_width = (window_right.min(area_right) - window_left.max(area_left)).max(0);
+        let visible_height = (window_bottom.min(area_bottom) - window_top.max(area_top)).max(0);
+        let visible_area = (visible_width as u64) * (visible_height as u64);
+
+        if visible_area > max_visible_area {
+            max_visible_area = visible_area;
+        }
+    }
+
+    let visible_ratio = max_visible_area as f64 / window_area as f64;
+    let should_reposition = !position_inside_any_work_area || visible_ratio < 0.5;
+
+    if !should_reposition {
+        return Ok(());
+    }
+
+    let target_monitor = window
+        .current_monitor()?
+        .or(window.primary_monitor()?)
+        .or_else(|| monitors.first().cloned());
+
+    if let Some(monitor) = target_monitor {
+        let new_width = ((monitor.work_area().size.width as f64) * 0.4).round() as u32;
+        let new_height = ((monitor.work_area().size.height as f64) * 0.7).round() as u32;
+        window.set_size(Size::Physical(PhysicalSize::new(
+            new_width.max(320),
+            new_height.max(200),
+        )))?;
+        window.center()?;
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -713,6 +780,16 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .setup(|app| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    let _ = adjust_window_if_mostly_offscreen(&main_window);
+                });
+            }
+            Ok(())
+        })
         .manage(AppState {
             log_manager: Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
