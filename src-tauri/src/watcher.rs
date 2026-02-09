@@ -79,9 +79,23 @@ impl WatcherManager {
 
         watcher.watch(&source_path, RecursiveMode::Recursive)?;
 
-        // 디바운싱 처리를 위한 스레드 생성 (with cancellation support)
+        // 디바운싱 처리를 위한 스레드 생성 (with cancellation support & panic handling)
         let thread_handle = std::thread::spawn(move || {
-            run_debounce_loop(rx, Duration::from_millis(500), token_clone, on_change);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_debounce_loop(rx, Duration::from_millis(500), token_clone, on_change);
+            }));
+            
+            if let Err(e) = result {
+                // Log panic details to stderr as we can't easily access LogManager here
+                let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                    format!("Watcher thread panicked: {}", s)
+                } else if let Some(s) = e.downcast_ref::<String>() {
+                    format!("Watcher thread panicked: {}", s)
+                } else {
+                    "Watcher thread panicked with unknown error".to_string()
+                };
+                eprintln!("[Critical] {}", msg);
+            }
         });
 
         self.watchers.insert(task_id.clone(), TaskWatcher {
