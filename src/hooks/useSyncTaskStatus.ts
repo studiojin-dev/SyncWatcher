@@ -18,6 +18,8 @@ export interface TaskStatus {
 interface SyncTaskStatusStore {
     /** 각 Task의 상태 맵 */
     statuses: Map<string, TaskStatus>;
+    /** 런타임에서 감시 중인 Task ID 집합 */
+    watchingTaskIds: Set<string>;
 
     /** 상태 업데이트 */
     setStatus: (taskId: string, status: TaskStatus['status']) => void;
@@ -31,6 +33,12 @@ interface SyncTaskStatusStore {
     /** 상태 조회 */
     getStatus: (taskId: string) => TaskStatus | undefined;
 
+    /** 감시 상태 업데이트 */
+    setWatching: (taskId: string, watching: boolean) => void;
+
+    /** 감시 상태 일괄 업데이트 */
+    setWatchingTasks: (taskIds: string[]) => void;
+
     /** 상태 초기화 */
     clearStatus: (taskId: string) => void;
 }
@@ -41,6 +49,7 @@ interface SyncTaskStatusStore {
  */
 export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => ({
     statuses: new Map<string, TaskStatus>(),
+    watchingTaskIds: new Set<string>(),
 
     setStatus: (taskId, status) => {
         set((state) => {
@@ -71,6 +80,22 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
 
     getStatus: (taskId) => {
         return get().statuses.get(taskId);
+    },
+
+    setWatching: (taskId, watching) => {
+        set((state) => {
+            const nextWatching = new Set(state.watchingTaskIds);
+            if (watching) {
+                nextWatching.add(taskId);
+            } else {
+                nextWatching.delete(taskId);
+            }
+            return { watchingTaskIds: nextWatching };
+        });
+    },
+
+    setWatchingTasks: (taskIds) => {
+        set({ watchingTaskIds: new Set(taskIds) });
     },
 
     clearStatus: (taskId) => {

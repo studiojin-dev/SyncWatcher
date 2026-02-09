@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useYamlStore } from './useYamlStore';
 
 export interface SyncTask {
@@ -6,10 +6,8 @@ export interface SyncTask {
     name: string;
     source: string;
     target: string;
-    enabled: boolean;
     deleteMissing: boolean;
     checksumMode: boolean;
-    watching?: boolean;
     verifyAfterCopy?: boolean;
     exclusionSets?: string[];
     /** 감시 모드 - 소스 디렉토리 변경 시 자동 복사 */
@@ -24,38 +22,73 @@ export interface SyncTask {
     sourceSubPath?: string;
 }
 
+interface PersistedSyncTask extends SyncTask {
+    // Legacy fields that can still exist in old YAML files.
+    enabled?: boolean;
+    watching?: boolean;
+}
+
+function normalizeTask(task: PersistedSyncTask): SyncTask {
+    return {
+        id: task.id,
+        name: task.name,
+        source: task.source,
+        target: task.target,
+        deleteMissing: task.deleteMissing ?? false,
+        checksumMode: task.checksumMode ?? false,
+        verifyAfterCopy: task.verifyAfterCopy ?? true,
+        exclusionSets: task.exclusionSets ?? [],
+        watchMode: task.watchMode ?? false,
+        autoUnmount: task.autoUnmount ?? false,
+        sourceType: task.sourceType,
+        sourceUuid: task.sourceUuid,
+        sourceSubPath: task.sourceSubPath,
+    };
+}
+
 export function useSyncTasks() {
-    const { data: tasks, saveData: saveTasks, loaded, error, reload } = useYamlStore<SyncTask[]>({
+    const { data: storedTasks, saveData: saveTasks, loaded, error, reload } = useYamlStore<PersistedSyncTask[]>({
         fileName: 'tasks.yaml',
         defaultData: [],
     });
 
-    const addTask = useCallback((task: Omit<SyncTask, 'id'>) => {
+    const migrationCheckedRef = useRef(false);
+    const tasks = useMemo(() => storedTasks.map(normalizeTask), [storedTasks]);
+
+    useEffect(() => {
+        if (!loaded || migrationCheckedRef.current) {
+            return;
+        }
+
+        migrationCheckedRef.current = true;
+        const hasLegacyFields = storedTasks.some((task) => 'enabled' in task || 'watching' in task);
+        if (!hasLegacyFields) {
+            return;
+        }
+
+        void saveTasks(tasks);
+    }, [loaded, storedTasks, tasks, saveTasks]);
+
+    const addTask = useCallback(async (task: Omit<SyncTask, 'id'>) => {
         const newTask: SyncTask = {
             ...task,
             id: crypto.randomUUID(),
         };
-        saveTasks([...tasks, newTask]);
+
+        await saveTasks([...tasks, newTask]);
         return newTask;
     }, [tasks, saveTasks]);
 
-    const updateTask = useCallback((id: string, updates: Partial<SyncTask>) => {
+    const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
         const newTasks = tasks.map((t) =>
             t.id === id ? { ...t, ...updates } : t
         );
-        saveTasks(newTasks);
+        await saveTasks(newTasks);
     }, [tasks, saveTasks]);
 
-    const deleteTask = useCallback((id: string) => {
-        saveTasks(tasks.filter((t) => t.id !== id));
+    const deleteTask = useCallback(async (id: string) => {
+        await saveTasks(tasks.filter((t) => t.id !== id));
     }, [tasks, saveTasks]);
-
-    const toggleTask = useCallback((id: string) => {
-        const task = tasks.find((t) => t.id === id);
-        if (task) {
-            updateTask(id, { enabled: !task.enabled });
-        }
-    }, [tasks, updateTask]);
 
     return {
         tasks,
@@ -63,7 +96,6 @@ export function useSyncTasks() {
         addTask,
         updateTask,
         deleteTask,
-        toggleTask,
         error,
         reload,
     };

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread;
+use std::time::Duration;
 use anyhow::Result;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher, EventKind};
 use tokio_util::sync::CancellationToken;
@@ -62,7 +63,7 @@ impl WatcherManager {
             if let Ok(event) = res {
                 // 실제 파일 변경 이벤트만 처리
                 match event.kind {
-                    EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+                    EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
                         // Use try_send for backpressure handling
                         if let Ok(tx) = tx.lock() {
                             if let Err(_) = tx.try_send(event) {
@@ -80,63 +81,7 @@ impl WatcherManager {
 
         // 디바운싱 처리를 위한 스레드 생성 (with cancellation support)
         let thread_handle = std::thread::spawn(move || {
-            use std::time::Duration;
-
-            let debounce_time = Duration::from_millis(500);
-            let mut paths = std::collections::HashSet::new();
-            loop {
-                // Check for cancellation
-                if token_clone.is_cancelled() {
-                    break;
-                }
-
-                // 첫 이벤트 대기
-                let first_event = match rx.recv_timeout(debounce_time) {
-                    Ok(e) => e,
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue, // No events, check cancellation again
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break, // 채널 닫힘
-                };
-
-                // 첫 이벤트 처리
-                for path in first_event.paths {
-                    paths.insert(path);
-                }
-                let mut kind = first_event.kind;
-
-                // 디바운싱 루프: 추가 이벤트 수집
-                loop {
-                    // Check for cancellation between events
-                    if token_clone.is_cancelled() {
-                        return;
-                    }
-
-                    match rx.recv_timeout(debounce_time) {
-                        Ok(event) => {
-                            for path in event.paths {
-                                paths.insert(path);
-                            }
-                            // 이벤트 종류 업데이트 (단순화: 마지막 이벤트 기준)
-                            // 실제로는 Create/Remove 등이 섞일 수 있으나,
-                            // 동기화 트리거 목적상 '변경됨' 사실이 중요함.
-                            kind = event.kind;
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            // 타임아웃: 수집된 이벤트 처리 및 루프 종료
-                            if !paths.is_empty() {
-                                let collected_paths: Vec<PathBuf> = paths.drain().collect();
-                                let synthetic_event = Event {
-                                    kind: kind.clone(), // 마지막 이벤트 종류 사용
-                                    paths: collected_paths,
-                                    attrs: Default::default(),
-                                };
-                                on_change(synthetic_event);
-                            }
-                            break; // 안쪽 루프 탈출, 다시 첫 이벤트 대기
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return, // 스레드 종료
-                    }
-                }
-            }
+            run_debounce_loop(rx, Duration::from_millis(500), token_clone, on_change);
         });
 
         self.watchers.insert(task_id.clone(), TaskWatcher {
@@ -195,50 +140,118 @@ impl Drop for WatcherManager {
     }
 }
 
+fn run_debounce_loop<F>(
+    rx: std::sync::mpsc::Receiver<Event>,
+    debounce_time: Duration,
+    cancellation_token: CancellationToken,
+    on_change: F,
+) where
+    F: Fn(Event),
+{
+    let mut paths = std::collections::HashSet::new();
+
+    loop {
+        // Check for cancellation
+        if cancellation_token.is_cancelled() {
+            break;
+        }
+
+        // 첫 이벤트 대기
+        let first_event = match rx.recv_timeout(debounce_time) {
+            Ok(e) => e,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue, // No events, check cancellation again
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break, // 채널 닫힘
+        };
+
+        // 첫 이벤트 처리
+        for path in first_event.paths {
+            paths.insert(path);
+        }
+        let mut kind = first_event.kind;
+
+        // 디바운싱 루프: 추가 이벤트 수집
+        loop {
+            // Check for cancellation between events
+            if cancellation_token.is_cancelled() {
+                return;
+            }
+
+            match rx.recv_timeout(debounce_time) {
+                Ok(event) => {
+                    for path in event.paths {
+                        paths.insert(path);
+                    }
+                    // 이벤트 종류 업데이트 (단순화: 마지막 이벤트 기준)
+                    // 실제로는 Create/Remove 등이 섞일 수 있으나,
+                    // 동기화 트리거 목적상 '변경됨' 사실이 중요함.
+                    kind = event.kind;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // 타임아웃: 수집된 이벤트 처리 및 루프 종료
+                    if !paths.is_empty() {
+                        let collected_paths: Vec<PathBuf> = paths.drain().collect();
+                        let synthetic_event = Event {
+                            kind: kind.clone(), // 마지막 이벤트 종류 사용
+                            paths: collected_paths,
+                            attrs: Default::default(),
+                        };
+                        on_change(synthetic_event);
+                    }
+                    break; // 안쪽 루프 탈출, 다시 첫 이벤트 대기
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return, // 스레드 종료
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::sync::mpsc;
     use std::time::Duration;
-    use tempfile::tempdir;
 
     #[test]
     fn test_watcher_debouncing() {
-        // 임시 디렉토리 생성
-        let dir = tempdir().unwrap();
-        let dir_path = dir.path().to_path_buf();
-        let (tx, rx) = mpsc::channel();
+        let (input_tx, input_rx) = mpsc::channel();
+        let (output_tx, output_rx) = mpsc::channel();
+        let cancellation_token = CancellationToken::new();
+        let token_clone = cancellation_token.clone();
 
-        let mut manager = WatcherManager::new();
-        let task_id = "test_debounce".to_string();
+        let handle = std::thread::spawn(move || {
+            run_debounce_loop(
+                input_rx,
+                Duration::from_millis(100),
+                token_clone,
+                move |event| {
+                    output_tx.send(event).unwrap();
+                },
+            );
+        });
 
-        // 감시 시작
-        manager.start_watching(task_id.clone(), dir_path.clone(), move |event| {
-            tx.send(event).unwrap();
-        }).unwrap();
-
-        // 파일 5개를 100ms 간격으로 생성 (총 500ms 미만 간격이므로 하나로 묶여야 함)
-        // Debounce 설정이 500ms이므로, 100ms 간격이면 계속 타임아웃이 연장됨.
         for i in 0..5 {
-            let file_path = dir_path.join(format!("file_{}.txt", i));
-            fs::write(file_path, "content").unwrap();
-            std::thread::sleep(Duration::from_millis(50)); 
+            let event = Event {
+                kind: EventKind::Modify(notify::event::ModifyKind::Any),
+                paths: vec![PathBuf::from(format!("/tmp/debounce_{i}.txt"))],
+                attrs: Default::default(),
+            };
+            input_tx.send(event).unwrap();
+            std::thread::sleep(Duration::from_millis(20));
         }
 
-        // Debounce 시간(500ms) + 여유 시간 대기 후 이벤트 수신 확인
-        // 첫 번째 이벤트 수신
-        let event = rx.recv_timeout(Duration::from_secs(2)).expect("Should receive debounced event");
-        
-        println!("Received event with {} paths", event.paths.len());
+        let event = output_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("Should receive debounced event");
 
-        // 추가 이벤트가 없어야 함 (하나로 묶였으므로)
-        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "Should not receive more events");
+        assert_eq!(event.paths.len(), 5);
+        assert!(
+            output_rx.recv_timeout(Duration::from_millis(200)).is_err(),
+            "Should not receive more events"
+        );
 
-        // 생성된 파일들이 경로에 포함되어 있는지 확인
-        assert!(!event.paths.is_empty());
-        
-        manager.stop_watching(&task_id).unwrap();
+        cancellation_token.cancel();
+        drop(input_tx);
+        handle.join().unwrap();
     }
 
     #[test]
@@ -293,5 +306,3 @@ impl WatchEvent {
         }
     }
 }
-
-

@@ -35,10 +35,11 @@ vi.mock('react-i18next', () => ({
 
 // Mock fetch
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+vi.stubGlobal('fetch', mockFetch);
 
 // Mock alert
-global.alert = vi.fn();
+const mockAlert = vi.fn();
+vi.stubGlobal('alert', mockAlert);
 
 describe('AboutView', () => {
   beforeEach(() => {
@@ -138,7 +139,7 @@ describe('AboutView', () => {
     const viewButton = screen.getByText(/View Licenses/i);
     await userEvent.click(viewButton);
 
-    expect(global.alert).toHaveBeenCalledWith(
+    expect(mockAlert).toHaveBeenCalledWith(
       expect.stringContaining('Open Source Licenses are available')
     );
 

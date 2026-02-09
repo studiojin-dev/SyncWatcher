@@ -34,9 +34,18 @@
       "enabled": "Enabled",
       "deleteMissing": "Delete Missing",
       "deleteMissingWarning": "Warning: Files deleted in source will be deleted in target.",
+      "deleteRiskTitle": "Delete Missing Warning",
+      "deleteRiskWatchEnable": "Watch mode is about to run with Delete Missing enabled. Files removed from source can also be deleted in target during sync.",
+      "deleteRiskManualSync": "Manual sync will run with Delete Missing enabled. Files missing in source can be deleted in target.",
+      "deleteRiskProceed": "Do you want to continue?",
       "checksumMode": "Checksum Mode",
       "watchMode": "Watch Mode",
-      "watchModeDesc": "Monitors source directory and auto-syncs on changes. 'Delete Missing' is disabled.",
+      "watchModeDesc": "Monitors source directory and auto-syncs on changes.",
+      "watchToggleOn": "Enable Watch",
+      "watchToggleOff": "Disable Watch",
+      "watchStarting": "Starting watch...",
+      "watchStopping": "Stopping watch...",
+      "watchToggleFailed": "Failed to update watch state in time.",
       "autoUnmount": "Auto Unmount",
       "save": "Save",
       "cancel": "Cancel",
@@ -80,6 +89,16 @@
       "verifyAfterCopy": "Verify After Copy",
       "saveSettings": "Save Settings",
       "resetDefaults": "Reset to Defaults"
+    },
+    "startup": {
+      "title": "Starting SyncWatcher",
+      "description": "Loading configuration and applying runtime state...",
+      "step": {
+        "settings": "Settings",
+        "tasks": "Sync Tasks",
+        "exclusionSets": "Exclusion Sets",
+        "runtime": "Runtime Apply"
+      }
     },
     "sync": {
       "phase": {

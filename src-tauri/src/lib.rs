@@ -11,7 +11,7 @@ mod lib_tests;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -121,12 +121,515 @@ impl SyncProgressState {
     }
 }
 
+#[derive(Clone)]
 pub struct AppState {
-    pub log_manager: Arc<LogManager>,
+    log_manager: Arc<LogManager>,
     /// 현재 실행 중인 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
-    pub cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// 파일 시스템 감시 매니저
-    pub watcher_manager: Arc<RwLock<WatcherManager>>,
+    watcher_manager: Arc<RwLock<WatcherManager>>,
+    /// 프론트엔드에서 전달된 최신 런타임 설정
+    runtime_config: Arc<RwLock<RuntimeConfigPayload>>,
+    /// 현재 동기화 실행 중인 태스크 집합 (중복 실행 방지)
+    syncing_tasks: Arc<RwLock<HashSet<String>>>,
+    /// 런타임이 관리 중인 watcher source 추적 (task_id -> source)
+    runtime_watch_sources: Arc<RwLock<HashMap<String, String>>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeConfigPayload {
+    #[serde(default)]
+    tasks: Vec<RuntimeSyncTask>,
+    #[serde(default)]
+    exclusion_sets: Vec<RuntimeExclusionSet>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeSyncTask {
+    id: String,
+    name: String,
+    source: String,
+    target: String,
+    #[serde(default)]
+    delete_missing: bool,
+    #[serde(default)]
+    checksum_mode: bool,
+    #[serde(default)]
+    watch_mode: bool,
+    #[serde(default)]
+    auto_unmount: bool,
+    #[serde(default = "default_verify_after_copy")]
+    verify_after_copy: bool,
+    #[serde(default)]
+    exclusion_sets: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeExclusionSet {
+    id: String,
+    name: String,
+    #[serde(default)]
+    patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeState {
+    watching_tasks: Vec<String>,
+    syncing_tasks: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeWatchStateEvent {
+    task_id: String,
+    watching: bool,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeSyncStateEvent {
+    task_id: String,
+    syncing: bool,
+    reason: Option<String>,
+}
+
+fn default_verify_after_copy() -> bool {
+    true
+}
+
+fn emit_runtime_watch_state(app: &tauri::AppHandle, task_id: &str, watching: bool, reason: Option<String>) {
+    let event = RuntimeWatchStateEvent {
+        task_id: task_id.to_string(),
+        watching,
+        reason,
+    };
+    let _ = app.emit("runtime-watch-state", &event);
+}
+
+fn emit_runtime_sync_state(app: &tauri::AppHandle, task_id: &str, syncing: bool, reason: Option<String>) {
+    let event = RuntimeSyncStateEvent {
+        task_id: task_id.to_string(),
+        syncing,
+        reason,
+    };
+    let _ = app.emit("runtime-sync-state", &event);
+}
+
+fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
+    if path_str.starts_with("[UUID:") {
+        if let Some(end_idx) = path_str.find(']') {
+            let uuid_part = &path_str[6..end_idx];
+            let sub_path = &path_str[end_idx + 1..];
+
+            let monitor = DiskMonitor::new();
+            let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+
+            let volume = volumes
+                .into_iter()
+                .find(|v| v.disk_uuid.as_deref() == Some(uuid_part))
+                .ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
+
+            let clean_sub_path = sub_path.trim_start_matches('/');
+            return Ok(volume.mount_point.join(clean_sub_path));
+        }
+    }
+    Ok(PathBuf::from(path_str))
+}
+
+fn resolve_runtime_exclude_patterns(task: &RuntimeSyncTask, sets: &[RuntimeExclusionSet]) -> Vec<String> {
+    if task.exclusion_sets.is_empty() {
+        return Vec::new();
+    }
+
+    let selected: HashSet<&str> = task.exclusion_sets.iter().map(String::as_str).collect();
+    sets.iter()
+        .filter(|set| selected.contains(set.id.as_str()))
+        .flat_map(|set| set.patterns.clone())
+        .collect()
+}
+
+fn runtime_desired_watch_sources(tasks: &[RuntimeSyncTask]) -> HashMap<String, String> {
+    tasks
+        .iter()
+        .filter(|task| task.watch_mode)
+        .map(|task| (task.id.clone(), task.source.clone()))
+        .collect()
+}
+
+fn runtime_find_watch_task<'a>(tasks: &'a [RuntimeSyncTask], task_id: &str) -> Option<&'a RuntimeSyncTask> {
+    tasks
+        .iter()
+        .find(|task| task.id == task_id && task.watch_mode)
+}
+
+fn runtime_delete_missing_for_watch_sync(task: &RuntimeSyncTask) -> bool {
+    task.delete_missing
+}
+
+async fn acquire_sync_slot(task_id: &str, state: &AppState) -> bool {
+    let mut syncing = state.syncing_tasks.write().await;
+    syncing.insert(task_id.to_string())
+}
+
+async fn release_sync_slot(task_id: &str, state: &AppState) {
+    let mut syncing = state.syncing_tasks.write().await;
+    syncing.remove(task_id);
+}
+
+async fn runtime_get_state_internal(state: &AppState) -> RuntimeState {
+    let watching_tasks = {
+        let manager = state.watcher_manager.read().await;
+        manager.get_watching_tasks()
+    };
+    let syncing_tasks = {
+        let syncing = state.syncing_tasks.read().await;
+        syncing.iter().cloned().collect()
+    };
+
+    RuntimeState {
+        watching_tasks,
+        syncing_tasks,
+    }
+}
+
+async fn execute_sync_internal(
+    task_id: String,
+    source: PathBuf,
+    target: PathBuf,
+    delete_missing: bool,
+    checksum_mode: bool,
+    verify_after_copy: bool,
+    exclude_patterns: Vec<String>,
+    app: tauri::AppHandle,
+    state: AppState,
+    sync_slot_pre_acquired: bool,
+) -> Result<SyncResult, String> {
+    if !sync_slot_pre_acquired && !acquire_sync_slot(&task_id, &state).await {
+        return Err("Task is already syncing".to_string());
+    }
+
+    let sync_result = async {
+        let source = resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
+        // Validate all inputs
+        input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
+        // 취소 토큰 생성 및 등록
+        let cancel_token = CancellationToken::new();
+        {
+            let mut tokens = state.cancel_tokens.write().await;
+            tokens.insert(task_id.clone(), cancel_token.clone());
+        }
+
+        state.log_manager.log("info", "Sync started", Some(task_id.clone()));
+
+        let engine = SyncEngine::new(source, target);
+        let options = SyncOptions {
+            delete_missing,
+            checksum_mode,
+            preserve_permissions: true,
+            preserve_times: true,
+            verify_after_copy,
+            exclude_patterns,
+        };
+
+        // 동기화 실행 (취소 토큰과 함께)
+        let task_id_clone = task_id.clone();
+        let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
+        let app_clone = app.clone();
+
+        #[derive(serde::Serialize, Clone)]
+        struct ProgressEvent {
+            #[serde(rename = "taskId")]
+            task_id: String,
+            message: String,
+            current: u64,
+            total: u64,
+        }
+
+        let progress_state = SyncProgressState::new();
+        let log_manager = state.log_manager.clone();
+        let task_id_for_log = task_id.clone();
+        let app_for_log = app.clone(); // For log events
+
+        // Create clones for the closure
+        let progress_state_closure = progress_state.clone();
+        let log_manager_closure = log_manager.clone();
+
+        let result = tokio::select! {
+            res = engine.sync_files(&options, move |progress| {
+                 // 1. Detailed Logging: Batching
+                if let Some(current) = &progress.current_file {
+                    if progress_state_closure.should_update_file(current) {
+                        let now = chrono::Utc::now().to_rfc3339();
+                        let entry = logging::LogEntry {
+                            id: now.clone(),
+                            timestamp: now,
+                            level: "info".to_string(),
+                            message: format!("Syncing: {}", current),
+                            task_id: Some(task_id_for_log.clone()),
+                        };
+
+                        if let Some(batch) = progress_state_closure.add_log(entry) {
+                             log_manager_closure.log_batch(batch, Some(task_id_for_log.clone()), Some(&app_for_log));
+                        }
+                    }
+                }
+
+                 // 2. UI Throttling: 100ms
+                let should_emit = progress_state_closure.should_emit_progress();
+
+                if should_emit || progress.processed_files == progress.total_files {
+                     let event = ProgressEvent {
+                        task_id: task_id_for_event.clone(),
+                        message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
+                        current: progress.processed_files,
+                        total: progress.total_files,
+                    };
+                    let _ = app_clone.emit("sync-progress", &event);
+                }
+            }) => {
+                // Flush remaining logs on completion
+                if let Some(batch) = progress_state.flush_logs() {
+                    log_manager.log_batch(batch, Some(task_id.clone()), Some(&app));
+                }
+                res
+            },
+            _ = cancel_token.cancelled() => {
+                 // Flush logs on cancel too
+                if let Some(batch) = progress_state.flush_logs() {
+                    log_manager.log_batch(batch, Some(task_id.clone()), Some(&app));
+                }
+                Err(anyhow::anyhow!("Operation cancelled by user"))
+            }
+        };
+
+        // 취소 토큰 정리
+        {
+            let mut tokens = state.cancel_tokens.write().await;
+            tokens.remove(&task_id_clone);
+        }
+
+        match &result {
+            Ok(res) => {
+                 let msg = format!(
+                    "Sync completed.\nCopied: {} files\nDeleted: {} files\nData transferred: {}",
+                    format_number(res.files_copied),
+                    format_number(res.files_deleted),
+                    format_bytes(res.bytes_copied)
+                );
+                state.log_manager.log("success", &msg, Some(task_id.clone()));
+            }
+            Err(e) => {
+                let msg = format!("Sync failed: {:#}", e);
+                state.log_manager.log("error", &msg, Some(task_id.clone()));
+            }
+        }
+
+        result.map_err(|e| format!("{:#}", e))
+    }
+    .await;
+
+    release_sync_slot(&task_id, &state).await;
+    sync_result
+}
+
+async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppState) {
+    let runtime_config = {
+        let config = state.runtime_config.read().await;
+        config.clone()
+    };
+
+    let task = runtime_find_watch_task(&runtime_config.tasks, &task_id).cloned();
+
+    let Some(task) = task else {
+        return;
+    };
+
+    if !acquire_sync_slot(&task.id, &state).await {
+        return;
+    }
+
+    emit_runtime_sync_state(&app, &task.id, true, None);
+
+    let exclude_patterns = resolve_runtime_exclude_patterns(&task, &runtime_config.exclusion_sets);
+    let result = execute_sync_internal(
+        task.id.clone(),
+        PathBuf::from(task.source.clone()),
+        PathBuf::from(task.target.clone()),
+        runtime_delete_missing_for_watch_sync(&task),
+        task.checksum_mode,
+        task.verify_after_copy,
+        exclude_patterns,
+        app.clone(),
+        state.clone(),
+        true,
+    )
+    .await;
+
+    if result.is_ok() && task.auto_unmount {
+        if let Ok(source_path) = resolve_path_with_uuid(&task.source) {
+            if let Err(err) = DiskMonitor::unmount_volume(&source_path) {
+                state.log_manager.log(
+                    "warning",
+                    &format!("Auto unmount failed: {}", err),
+                    Some(task.id.clone()),
+                );
+            }
+        }
+    }
+
+    let reason = result.err();
+    emit_runtime_sync_state(&app, &task.id, false, reason);
+}
+
+async fn start_watch_internal(
+    task_id: String,
+    source_path: PathBuf,
+    app: tauri::AppHandle,
+    state: AppState,
+    runtime_owned: bool,
+) -> Result<PathBuf, String> {
+    let source_path = resolve_path_with_uuid(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
+    // Validate inputs
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
+    let task_id_clone = task_id.clone();
+    let app_clone = app.clone();
+    let state_clone = state.clone();
+
+    let mut manager = state.watcher_manager.write().await;
+    manager
+        .start_watching(task_id.clone(), source_path.clone(), move |event| {
+            // 변경 감지 시 프론트엔드에 이벤트 전송
+            let watch_event = WatchEvent::from_notify_event(task_id_clone.clone(), &event);
+            let _ = app_clone.emit("watch-event", &watch_event);
+
+            if runtime_owned {
+                let app_for_sync = app_clone.clone();
+                let state_for_sync = state_clone.clone();
+                let task_id_for_sync = task_id_clone.clone();
+                tauri::async_runtime::spawn(async move {
+                    runtime_sync_task(task_id_for_sync, app_for_sync, state_for_sync).await;
+                });
+            }
+        })
+        .map_err(|e| format!("감시 시작 실패: {}", e))?;
+
+    state.log_manager.log(
+        "info",
+        &format!("Watch started: {}", source_path.display()),
+        Some(task_id),
+    );
+
+    Ok(source_path)
+}
+
+async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> Result<(), String> {
+    let runtime_config = {
+        let config = state.runtime_config.read().await;
+        config.clone()
+    };
+
+    // Validate payload before applying runtime changes.
+    for task in &runtime_config.tasks {
+        input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(&task.source).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(&task.target).map_err(|e| e.to_string())?;
+    }
+    for set in &runtime_config.exclusion_sets {
+        input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
+    }
+
+    let desired = runtime_desired_watch_sources(&runtime_config.tasks);
+
+    let watching_now: HashSet<String> = {
+        let manager = state.watcher_manager.read().await;
+        manager.get_watching_tasks().into_iter().collect()
+    };
+
+    let managed_sources = {
+        let sources = state.runtime_watch_sources.read().await;
+        sources.clone()
+    };
+
+    // Start or restart desired watchers.
+    for (task_id, source) in &desired {
+        let source_changed = managed_sources
+            .get(task_id)
+            .map(|existing| existing != source)
+            .unwrap_or(false);
+        let is_managed = managed_sources.contains_key(task_id);
+        let is_watching = watching_now.contains(task_id);
+
+        if !is_managed || !is_watching || source_changed {
+            match start_watch_internal(
+                task_id.clone(),
+                PathBuf::from(source),
+                app.clone(),
+                state.clone(),
+                true,
+            )
+            .await
+            {
+                Ok(_) => {
+                    {
+                        let mut sources = state.runtime_watch_sources.write().await;
+                        sources.insert(task_id.clone(), source.clone());
+                    }
+                    emit_runtime_watch_state(&app, task_id, true, None);
+                }
+                Err(err) => {
+                    {
+                        let mut sources = state.runtime_watch_sources.write().await;
+                        sources.remove(task_id);
+                    }
+                    emit_runtime_watch_state(&app, task_id, false, Some(err));
+                }
+            }
+        }
+    }
+
+    // Stop watchers no longer managed by runtime config.
+    for task_id in managed_sources.keys() {
+        if desired.contains_key(task_id) {
+            continue;
+        }
+
+        let stop_result = {
+            let mut manager = state.watcher_manager.write().await;
+            manager
+                .stop_watching(task_id)
+                .map_err(|e| format!("감시 중지 실패: {}", e))
+        };
+
+        match stop_result {
+            Ok(()) => {
+                state.log_manager.log("info", "Watch stopped", Some(task_id.clone()));
+                {
+                    let mut sources = state.runtime_watch_sources.write().await;
+                    sources.remove(task_id);
+                }
+                emit_runtime_watch_state(&app, task_id, false, None);
+            }
+            Err(err) => {
+                emit_runtime_watch_state(&app, task_id, true, Some(err));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -283,28 +786,8 @@ async fn sync_dry_run(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
-    // 1. Resolve Path if it contains [UUID:xxxx] pattern
-    let resolve_path = |path_str: &str| -> Result<PathBuf, String> {
-        if path_str.starts_with("[UUID:") {
-            if let Some(end_idx) = path_str.find(']') {
-                let uuid_part = &path_str[6..end_idx];
-                let sub_path = &path_str[end_idx + 1..];
-                
-                let monitor = DiskMonitor::new();
-                let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
-                
-                let volume = volumes.into_iter().find(|v| {
-                    v.disk_uuid.as_deref() == Some(uuid_part)
-                }).ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
-                
-                let clean_sub_path = sub_path.trim_start_matches('/');
-                return Ok(volume.mount_point.join(clean_sub_path));
-            }
-        }
-        Ok(PathBuf::from(path_str))
-    };
-
-    let source = resolve_path(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let source = resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
 
     // Validate all inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -403,157 +886,19 @@ async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncResult, String> {
-    // 1. Resolve Path if it contains [UUID:xxxx] pattern
-    let resolve_path = |path_str: &str| -> Result<PathBuf, String> {
-        if path_str.starts_with("[UUID:") {
-            if let Some(end_idx) = path_str.find(']') {
-                let uuid_part = &path_str[6..end_idx];
-                let sub_path = &path_str[end_idx + 1..];
-                
-                // UUID Resolution
-                let monitor = DiskMonitor::new();
-                let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
-                
-                let volume = volumes.into_iter().find(|v| {
-                    v.disk_uuid.as_deref() == Some(uuid_part)
-                }).ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
-                
-                // Construct full path
-                // Remove leading slash from sub_path if present to avoid absolute path override in join
-                let clean_sub_path = sub_path.trim_start_matches('/');
-                return Ok(volume.mount_point.join(clean_sub_path));
-            }
-        }
-        Ok(PathBuf::from(path_str))
-    };
-
-    let source = resolve_path(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    // Target usually is local, but for completeness or future proofing, we could check target too.
-    // However, usually target is a fixed backup location. Let's keep it simple for now, 
-    // BUT the user might select a UUID target too. Let's apply it to both if safe.
-    // actually, source is passed as PathBuf. 
-    // If it comes from frontend as string "[UUID:...", Tauri might fail to convert to PathBuf if it contained invalid chars?
-    // No, standard paths allowed chars.
-    
-    // Validate all inputs
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
-
-    // 취소 토큰 생성 및 등록
-    let cancel_token = CancellationToken::new();
-    {
-        let mut tokens = state.cancel_tokens.write().await;
-        tokens.insert(task_id.clone(), cancel_token.clone());
-    }
-
-    state.log_manager.log("info", "Sync started", Some(task_id.clone()));
-
-    let engine = SyncEngine::new(source, target);
-    let options = SyncOptions {
+    execute_sync_internal(
+        task_id,
+        source,
+        target,
         delete_missing,
         checksum_mode,
-        preserve_permissions: true,
-        preserve_times: true,
         verify_after_copy,
         exclude_patterns,
-    };
-
-    // 동기화 실행 (취소 토큰과 함께)
-    let task_id_clone = task_id.clone();
-    let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
-    let app_clone = app.clone();
-
-    #[derive(serde::Serialize, Clone)]
-    struct ProgressEvent {
-        #[serde(rename = "taskId")]
-        task_id: String,
-        message: String,
-        current: u64,
-        total: u64,
-    }
-
-    let progress_state = SyncProgressState::new();
-    let log_manager = state.log_manager.clone();
-    let task_id_for_log = task_id.clone();
-    let app_for_log = app.clone(); // For log events
-
-    // Create clones for the closure
-    let progress_state_closure = progress_state.clone();
-    let log_manager_closure = log_manager.clone();
-
-    let result = tokio::select! {
-        res = engine.sync_files(&options, move |progress| {
-             // 1. Detailed Logging: Batching
-            if let Some(current) = &progress.current_file {
-                if progress_state_closure.should_update_file(current) {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    let entry = logging::LogEntry {
-                        id: now.clone(),
-                        timestamp: now,
-                        level: "info".to_string(),
-                        message: format!("Syncing: {}", current),
-                        task_id: Some(task_id_for_log.clone()),
-                    };
-                    
-                    if let Some(batch) = progress_state_closure.add_log(entry) {
-                         log_manager_closure.log_batch(batch, Some(task_id_for_log.clone()), Some(&app_for_log));
-                    }
-                }
-            }
-
-             // 2. UI Throttling: 100ms
-            let should_emit = progress_state_closure.should_emit_progress();
-
-            if should_emit || progress.processed_files == progress.total_files {
-                 let event = ProgressEvent {
-                    task_id: task_id_for_event.clone(),
-                    message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
-                    current: progress.processed_files,
-                    total: progress.total_files,
-                };
-                let _ = app_clone.emit("sync-progress", &event);
-            }
-        }) => {
-            // Flush remaining logs on completion
-            if let Some(batch) = progress_state.flush_logs() {
-                log_manager.log_batch(batch, Some(task_id.clone()), Some(&app));
-            }
-            res
-        },
-        _ = cancel_token.cancelled() => {
-             // Flush logs on cancel too
-            if let Some(batch) = progress_state.flush_logs() {
-                log_manager.log_batch(batch, Some(task_id.clone()), Some(&app));
-            }
-            Err(anyhow::anyhow!("Operation cancelled by user"))
-        }
-    };
-
-    // 취소 토큰 정리
-    {
-        let mut tokens = state.cancel_tokens.write().await;
-        tokens.remove(&task_id_clone);
-    }
-
-    match &result {
-        Ok(res) => {
-             let msg = format!(
-                "Sync completed.\nCopied: {} files\nDeleted: {} files\nData transferred: {}",
-                format_number(res.files_copied), 
-                format_number(res.files_deleted), 
-                format_bytes(res.bytes_copied)
-            );
-            state.log_manager.log("success", &msg, Some(task_id));
-        }
-        Err(e) => {
-            let msg = format!("Sync failed: {:#}", e);
-            state.log_manager.log("error", &msg, Some(task_id));
-        }
-    }
-
-    result.map_err(|e| format!("{:#}", e))
+        app,
+        state.inner().clone(),
+        false,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -585,49 +930,9 @@ async fn start_watch(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    // 1. Resolve Path if it contains [UUID:xxxx] pattern
-    let resolve_path = |path_str: &str| -> Result<PathBuf, String> {
-        if path_str.starts_with("[UUID:") {
-            if let Some(end_idx) = path_str.find(']') {
-                let uuid_part = &path_str[6..end_idx];
-                let sub_path = &path_str[end_idx + 1..];
-                
-                let monitor = DiskMonitor::new();
-                let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
-                
-                let volume = volumes.into_iter().find(|v| {
-                    v.disk_uuid.as_deref() == Some(uuid_part)
-                }).ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
-                
-                let clean_sub_path = sub_path.trim_start_matches('/');
-                return Ok(volume.mount_point.join(clean_sub_path));
-            }
-        }
-        Ok(PathBuf::from(path_str))
-    };
-
-    let source_path = resolve_path(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-
-    // Validate inputs
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-
-    let task_id_clone = task_id.clone();
-    let app_clone = app.clone();
-    
-    let mut manager = state.watcher_manager.write().await;
-    manager.start_watching(task_id.clone(), source_path.clone(), move |event| {
-        // 변경 감지 시 프론트엔드에 이벤트 전송
-        let watch_event = WatchEvent::from_notify_event(task_id_clone.clone(), &event);
-        let _ = app_clone.emit("watch-event", &watch_event);
-    }).map_err(|e| format!("감시 시작 실패: {}", e))?;
-    
-    state.log_manager.log(
-        "info", 
-        &format!("Watch started: {}", source_path.display()), 
-        Some(task_id)
-    );
-    
+    let started_task_id = task_id.clone();
+    let _ = start_watch_internal(task_id, source_path, app.clone(), state.inner().clone(), false).await?;
+    emit_runtime_watch_state(&app, &started_task_id, true, None);
     Ok(())
 }
 
@@ -635,13 +940,20 @@ async fn start_watch(
 #[tauri::command]
 async fn stop_watch(
     task_id: String,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    {
+        let mut sources = state.runtime_watch_sources.write().await;
+        sources.remove(&task_id);
+    }
+
     let mut manager = state.watcher_manager.write().await;
     manager.stop_watching(&task_id)
         .map_err(|e| format!("감시 중지 실패: {}", e))?;
     
-    state.log_manager.log("info", "Watch stopped", Some(task_id));
+    state.log_manager.log("info", "Watch stopped", Some(task_id.clone()));
+    emit_runtime_watch_state(&app, &task_id, false, None);
     Ok(())
 }
 
@@ -652,6 +964,39 @@ async fn get_watching_tasks(
 ) -> Result<Vec<String>, String> {
     let manager = state.watcher_manager.read().await;
     Ok(manager.get_watching_tasks())
+}
+
+#[tauri::command]
+async fn runtime_set_config(
+    payload: RuntimeConfigPayload,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<RuntimeState, String> {
+    // Task/exclusion payload validation
+    for task in &payload.tasks {
+        input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(&task.source).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(&task.target).map_err(|e| e.to_string())?;
+    }
+
+    for set in &payload.exclusion_sets {
+        input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
+    }
+
+    {
+        let mut config = state.runtime_config.write().await;
+        *config = payload;
+    }
+
+    reconcile_runtime_watchers(app, state.inner().clone()).await?;
+    Ok(runtime_get_state_internal(state.inner()).await)
+}
+
+#[tauri::command]
+async fn runtime_get_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<RuntimeState, String> {
+    Ok(runtime_get_state_internal(state.inner()).await)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -794,6 +1139,9 @@ pub fn run() {
             log_manager: Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
+            runtime_config: Arc::new(RwLock::new(RuntimeConfigPayload::default())),
+            syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
+            runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -810,6 +1158,8 @@ pub fn run() {
             start_watch,
             stop_watch,
             get_watching_tasks,
+            runtime_set_config,
+            runtime_get_state,
             get_app_config_dir,
             join_paths,
             read_yaml_file,

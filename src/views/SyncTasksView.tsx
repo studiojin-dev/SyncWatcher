@@ -3,10 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc } from '@tabler/icons-react';
 import { MultiSelect, Select } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { open, ask } from '@tauri-apps/plugin-dialog';
-import { useSyncTasks, SyncTask } from '../hooks/useSyncTasks';
-import { useExclusionSets } from '../hooks/useExclusionSets';
+import { SyncTask } from '../hooks/useSyncTasks';
+import { useSyncTasksContext } from '../context/SyncTasksContext';
+import { useExclusionSetsContext } from '../context/ExclusionSetsContext';
 import { useSyncTaskStatusStore } from '../hooks/useSyncTaskStatus';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
 import { useToast } from '../components/ui/Toast';
@@ -25,14 +25,38 @@ interface VolumeInfo {
     disk_uuid?: string;
 }
 
+const WATCH_STATE_TIMEOUT_MS = 3000;
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return String(error);
+}
+
+async function waitForWatchState(taskId: string, watching: boolean, timeoutMs: number = WATCH_STATE_TIMEOUT_MS): Promise<boolean> {
+    const start = Date.now();
+
+    while (Date.now() - start < timeoutMs) {
+        const current = useSyncTaskStatusStore.getState().watchingTaskIds.has(taskId);
+        if (current === watching) {
+            return true;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+
+    return useSyncTaskStatusStore.getState().watchingTaskIds.has(taskId) === watching;
+}
+
 /**
  * Sync Tasks View - Manage sync tasks
  * CRUD operations with localStorage persistence
  */
 function SyncTasksView() {
     const { t } = useTranslation();
-    const { tasks, addTask, updateTask, deleteTask, error, reload, loaded } = useSyncTasks();
-    const { sets, getPatternsForSets } = useExclusionSets();
+    const { tasks, addTask, updateTask, deleteTask, error, reload } = useSyncTasksContext();
+    const { sets, getPatternsForSets } = useExclusionSetsContext();
     const { showToast } = useToast();
     const [showForm, setShowForm] = useState(false);
     const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
@@ -41,67 +65,7 @@ function SyncTasksView() {
     const [logsTask, setLogsTask] = useState<SyncTask | null>(null);
 
     // 상태 스토어 연동
-    const { statuses, setLastLog } = useSyncTaskStatusStore();
-
-    // sync-progress 및 watch-event 이벤트 리스닝
-    useEffect(() => {
-        const unlistenProgress = listen<{ taskId?: string; message?: string; current?: number; total?: number }>('sync-progress', (event) => {
-            if (event.payload.taskId) {
-                setLastLog(event.payload.taskId, {
-                    message: event.payload.message || 'Syncing...',
-                    timestamp: new Date().toLocaleTimeString(),
-                    level: 'info',
-                });
-            }
-        });
-
-        const unlistenWatch = listen<{ task_id: string; event_type: string; paths: string[] }>('watch-event', (event) => {
-            const { task_id } = event.payload;
-            const task = tasks.find(t => t.id === task_id);
-            if (task && task.enabled && task.watchMode) {
-                // 이미 동기화 중이 아닐 때만 실행
-                if (syncing !== task_id) {
-                    console.log(`Watch event for ${task_id}, starting sync...`);
-                    handleSync(task);
-                }
-            }
-        });
-
-        return () => {
-            unlistenProgress.then(fn => fn());
-            unlistenWatch.then(fn => fn());
-        };
-    }, [tasks, syncing, setLastLog]);
-
-    // 시작 시 Watch Mode인 태스크들 감시 시작 및 종료 시 중지
-    useEffect(() => {
-        if (!loaded) return;
-
-        const startWatchers = async () => {
-            const watchingTasks = tasks.filter(t => t.enabled && t.watchMode);
-            for (const task of watchingTasks) {
-                try {
-                    await invoke('start_watch', {
-                        taskId: task.id,
-                        sourcePath: task.source
-                    });
-                    console.log(`Started watcher for task: ${task.name}`);
-                } catch (err) {
-                    console.error(`Failed to start watcher for ${task.name}:`, err);
-                }
-            }
-        };
-
-        startWatchers();
-
-        return () => {
-            // 모든 감시 중지 (백엔드에서 stop_all 구현되어 있음)
-            // 개별적으로 멈추고 싶다면 get_watching_tasks 등을 활용
-            tasks.filter(t => t.watchMode).forEach(task => {
-                invoke('stop_watch', { taskId: task.id }).catch(console.error);
-            });
-        };
-    }, [loaded]); // 컴포넌트 마운트/언마운트 시에만 실행 (tasks 변경 시에도 재시작할지 고민 필요)
+    const { statuses, watchingTaskIds } = useSyncTaskStatusStore();
 
     // Changing the logic: adding state for selected sets in form
     const [selectedSets, setSelectedSets] = useState<string[]>([]);
@@ -120,6 +84,7 @@ function SyncTasksView() {
 
     // Dry Run state
     const [dryRunning, setDryRunning] = useState<string | null>(null);
+    const [watchTogglePendingIds, setWatchTogglePendingIds] = useState<Set<string>>(new Set());
 
     // UUID source selection state
     const [sourceType, setSourceType] = useState<'path' | 'uuid'>('path');
@@ -198,11 +163,7 @@ function SyncTasksView() {
         }
     };
 
-
-
-
-
-    const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const formData = new FormData(e.currentTarget);
 
@@ -217,8 +178,7 @@ function SyncTasksView() {
             name: formData.get('name') as string,
             source: finalSource,
             target: targetPath || formData.get('target') as string,
-            enabled: true,
-            deleteMissing: watchMode ? false : deleteMissing,
+            deleteMissing,
             checksumMode: formData.get('checksumMode') === 'on',
             exclusionSets: selectedSets,
             watchMode: watchMode,
@@ -229,16 +189,33 @@ function SyncTasksView() {
             sourceSubPath: sourceType === 'uuid' ? sourceSubPath : undefined,
         };
 
-        if (editingTask) {
-            updateTask(editingTask.id, taskData);
-            showToast(t('syncTasks.editTask') + ': ' + taskData.name, 'success');
-        } else {
-            addTask(taskData);
-            showToast(t('syncTasks.addTask') + ': ' + taskData.name, 'success');
+        if (taskData.watchMode && taskData.deleteMissing) {
+            const confirmed = await ask(
+                `${t('syncTasks.deleteRiskWatchEnable')}\n\n${t('syncTasks.deleteRiskProceed')}`,
+                {
+                    title: t('syncTasks.deleteRiskTitle'),
+                    kind: 'warning',
+                }
+            );
+            if (!confirmed) {
+                return;
+            }
         }
 
-        setShowForm(false);
-        setEditingTask(null);
+        try {
+            if (editingTask) {
+                await updateTask(editingTask.id, taskData);
+                showToast(t('syncTasks.editTask') + ': ' + taskData.name, 'success');
+            } else {
+                await addTask(taskData);
+                showToast(t('syncTasks.addTask') + ': ' + taskData.name, 'success');
+            }
+
+            setShowForm(false);
+            setEditingTask(null);
+        } catch (error) {
+            showToast(getErrorMessage(error), 'error');
+        }
     };
 
     const handleSync = useCallback(async (task: SyncTask) => {
@@ -250,17 +227,23 @@ function SyncTasksView() {
 
         if (syncing) return; // 다른 태스크가 실행 중이면 무시
 
+        if (task.deleteMissing) {
+            const confirmed = await ask(
+                `${t('syncTasks.deleteRiskManualSync')}\n\n${t('syncTasks.deleteRiskProceed')}`,
+                {
+                    title: t('syncTasks.deleteRiskTitle'),
+                    kind: 'warning',
+                }
+            );
+
+            if (!confirmed) {
+                return;
+            }
+        }
+
         try {
             setSyncing(task.id);
             showToast(t('syncTasks.startSync') + ': ' + task.name, 'info');
-
-            // Watch Mode 시 감시 시작 (이미 시작되어 있을 수 있지만 안전하게 다시 호출)
-            if (task.watchMode) {
-                await invoke('start_watch', {
-                    taskId: task.id,
-                    sourcePath: task.source
-                });
-            }
 
             await invoke('start_sync', {
                 taskId: task.id,
@@ -287,11 +270,68 @@ function SyncTasksView() {
             }
         } catch (err) {
             console.error('Sync failed:', err);
-            showToast(String(err), 'error');
+            showToast(getErrorMessage(err), 'error');
         } finally {
             setSyncing(null);
         }
-    }, [syncing, tasks, showToast, t, getPatternsForSets]);
+    }, [syncing, showToast, t, getPatternsForSets]);
+
+    const handleToggleWatchMode = useCallback(async (task: SyncTask) => {
+        if (watchTogglePendingIds.has(task.id)) {
+            return;
+        }
+
+        const previousWatchMode = task.watchMode ?? false;
+        const nextWatchMode = !previousWatchMode;
+
+        if (nextWatchMode && task.deleteMissing) {
+            const confirmed = await ask(
+                `${t('syncTasks.deleteRiskWatchEnable')}\n\n${t('syncTasks.deleteRiskProceed')}`,
+                {
+                    title: t('syncTasks.deleteRiskTitle'),
+                    kind: 'warning',
+                }
+            );
+
+            if (!confirmed) {
+                return;
+            }
+        }
+
+        setWatchTogglePendingIds((prev) => {
+            const next = new Set(prev);
+            next.add(task.id);
+            return next;
+        });
+
+        try {
+            await updateTask(task.id, { watchMode: nextWatchMode });
+            const reflected = await waitForWatchState(task.id, nextWatchMode);
+
+            if (!reflected) {
+                await updateTask(task.id, { watchMode: previousWatchMode });
+                showToast(t('syncTasks.watchToggleFailed'), 'error');
+                return;
+            }
+
+            showToast(nextWatchMode ? t('syncTasks.watchStarting') : t('syncTasks.watchStopping'), 'success');
+        } catch (error) {
+            try {
+                await updateTask(task.id, { watchMode: previousWatchMode });
+            } catch (rollbackError) {
+                console.error('Watch toggle rollback failed:', rollbackError);
+            }
+
+            console.error('Watch toggle failed:', error);
+            showToast(getErrorMessage(error), 'error');
+        } finally {
+            setWatchTogglePendingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(task.id);
+                return next;
+            });
+        }
+    }, [ask, showToast, t, updateTask, watchTogglePendingIds]);
 
     const handleDryRun = async (task: SyncTask) => {
         if (dryRunning === task.id) {
@@ -331,8 +371,12 @@ function SyncTasksView() {
         );
 
         if (confirmed) {
-            deleteTask(task.id);
-            showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
+            try {
+                await deleteTask(task.id);
+                showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
+            } catch (error) {
+                showToast(getErrorMessage(error), 'error');
+            }
         }
     };
 
@@ -599,22 +643,17 @@ function SyncTasksView() {
                                                 checked={watchMode}
                                                 onChange={(e) => {
                                                     setWatchMode(e.target.checked);
-                                                    if (e.target.checked) {
-                                                        // 감시 모드 활성화 시 deleteMissing 해제
-                                                        setDeleteMissing(false);
-                                                        setShowDeleteWarning(false);
-                                                    }
                                                 }}
                                                 className="peer sr-only"
                                             />
                                             <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-success)] transition-colors"></div>
                                             <div className="absolute inset-0 hidden peer-checked:flex items-center justify-center text-white pointer-events-none">✓</div>
                                         </div>
-                                        <span className="font-bold text-sm uppercase">{t('syncTasks.watchMode', { defaultValue: '감시 모드' })}</span>
+                                        <span className="font-bold text-sm uppercase">{t('syncTasks.watchMode')}</span>
                                     </label>
                                     {watchMode && (
                                         <div className="ml-8 p-2 bg-[var(--accent-success)]/10 border-2 border-[var(--accent-success)] text-sm text-[var(--text-primary)] font-mono">
-                                            ℹ️ {t('syncTasks.watchModeDesc', { defaultValue: '소스 디렉토리를 감시하고 변경 시 자동 복사합니다. Delete Missing은 비활성화됩니다.' })}
+                                            ℹ️ {t('syncTasks.watchModeDesc')}
                                         </div>
                                     )}
 
@@ -699,7 +738,7 @@ function SyncTasksView() {
             <div className="grid gap-6">
                 {tasks.map((task, index) => (
                     <CardAnimation key={task.id} index={index}>
-                        <div className={`neo-box p-5 relative transition-opacity ${task.enabled ? 'opacity-100' : 'opacity-60 bg-[var(--bg-secondary)]'}`}>
+                        <div className="neo-box p-5 relative transition-opacity">
                             <div className="flex flex-col md:flex-row justify-between items-start gap-4">
                                 <div className="min-w-0 flex-1 w-full"> {/* min-w-0 ensures truncation works */}
                                     <div className="flex items-center gap-3 mb-2">
@@ -763,6 +802,21 @@ function SyncTasksView() {
                                             ) : (
                                                 <IconPlayerPlay size={20} stroke={2} />
                                             )}
+                                        </button>
+                                        <button
+                                            className={`p-2 border-2 border-[var(--border-main)] transition-all ${watchTogglePendingIds.has(task.id)
+                                                ? 'opacity-60 cursor-not-allowed'
+                                                : watchingTaskIds.has(task.id)
+                                                    ? 'bg-[var(--accent-success)] text-white'
+                                                    : 'hover:bg-[var(--bg-tertiary)]'
+                                                }`}
+                                            onClick={() => handleToggleWatchMode(task)}
+                                            disabled={watchTogglePendingIds.has(task.id)}
+                                            title={(task.watchMode ?? false)
+                                                ? t('syncTasks.watchToggleOff')
+                                                : t('syncTasks.watchToggleOn')}
+                                        >
+                                            <IconEye size={20} stroke={2} />
                                         </button>
                                         <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
                                         <button

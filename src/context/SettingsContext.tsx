@@ -5,8 +5,6 @@ export interface Settings {
     language: string;
     theme: 'light' | 'dark' | 'system';
     notifications: boolean;
-    /** 앱 시작 시 감시 모드가 활성화된 Task 자동 시작 */
-    autoWatchStart: boolean;
     stateLocation: string;
     maxLogLines: number;
 }
@@ -15,7 +13,6 @@ const defaultSettings: Settings = {
     language: 'en',
     theme: 'system',
     notifications: true,
-    autoWatchStart: false,
     stateLocation: '',
     maxLogLines: 10000,
 };

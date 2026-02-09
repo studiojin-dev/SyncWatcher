@@ -37,9 +37,18 @@
       "enabled": "有効",
       "deleteMissing": "欠落ファイルを削除",
       "deleteMissingWarning": "警告：ソースで削除されたファイルはターゲットでも削除されます。",
+      "deleteRiskTitle": "欠落ファイル削除の警告",
+      "deleteRiskWatchEnable": "「欠落ファイルを削除」が有効なまま監視モードを有効化しようとしています。同期時にソースから消えたファイルがターゲットでも削除される可能性があります。",
+      "deleteRiskManualSync": "「欠落ファイルを削除」が有効な状態で手動同期を実行します。ソースにないファイルがターゲットで削除される可能性があります。",
+      "deleteRiskProceed": "このまま続行しますか？",
       "checksumMode": "チェックサムモード",
       "watchMode": "監視モード",
-      "watchModeDesc": "ソースディレクトリを監視し、変更時に自動同期します。「欠落を削除」は無効になります。",
+      "watchModeDesc": "ソースディレクトリを監視し、変更時に自動同期します。",
+      "watchToggleOn": "監視を有効化",
+      "watchToggleOff": "監視を無効化",
+      "watchStarting": "監視を開始しています...",
+      "watchStopping": "監視を停止しています...",
+      "watchToggleFailed": "監視状態の反映がタイムアウトしました。",
       "autoUnmount": "自動アンマウント",
       "save": "保存",
       "cancel": "キャンセル",
@@ -83,6 +92,16 @@
       "verifyAfterCopy": "コピー後の検証",
       "saveSettings": "設定を保存",
       "resetDefaults": "初期設定に戻す"
+    },
+    "startup": {
+      "title": "SyncWatcher を起動中",
+      "description": "設定を読み込み、ランタイム状態を適用しています...",
+      "step": {
+        "settings": "設定",
+        "tasks": "同期タスク",
+        "exclusionSets": "除外セット",
+        "runtime": "ランタイム適用"
+      }
     },
     "sync": {
       "phase": {

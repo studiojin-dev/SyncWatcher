@@ -1,11 +1,46 @@
 #[cfg(test)]
 mod integration_tests {
-    use crate::{get_app_version, join_paths, AppState};
+    use crate::{
+        get_app_version,
+        join_paths,
+        runtime_delete_missing_for_watch_sync,
+        runtime_desired_watch_sources,
+        runtime_find_watch_task,
+        runtime_get_state_internal,
+        AppState,
+        RuntimeSyncTask,
+    };
     use crate::logging::LogManager;
     use crate::watcher::WatcherManager;
     use std::sync::Arc;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tokio::sync::RwLock;
+
+    fn build_runtime_task(id: &str, source: &str, watch_mode: bool, delete_missing: bool) -> RuntimeSyncTask {
+        RuntimeSyncTask {
+            id: id.to_string(),
+            name: format!("task-{id}"),
+            source: source.to_string(),
+            target: "/tmp/target".to_string(),
+            delete_missing,
+            checksum_mode: false,
+            watch_mode,
+            auto_unmount: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+        }
+    }
+
+    fn build_app_state() -> AppState {
+        AppState {
+            log_manager: Arc::new(LogManager::new(100)),
+            cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
+            runtime_config: Arc::new(RwLock::new(Default::default())),
+            syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
+            runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
 
     #[test]
     fn test_get_app_version_command() {
@@ -50,17 +85,69 @@ mod integration_tests {
     #[test]
     fn test_app_state_initialization() {
         // Test that AppState can be created
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let log_manager = LogManager::new(100);
-        let state = AppState {
-            log_manager: Arc::new(log_manager),
-            cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
-            watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
-        };
+        let state = build_app_state();
 
         // Verify log_manager is accessible by checking logs count
         let logs = state.log_manager.get_logs(None);
         assert_eq!(logs.len(), 0);
+    }
+
+    #[test]
+    fn test_runtime_desired_watch_sources_uses_watch_mode_only() {
+        let tasks = vec![
+            build_runtime_task("a", "/src/a", true, false),
+            build_runtime_task("b", "/src/b", false, false),
+            build_runtime_task("c", "/src/c", true, true),
+        ];
+
+        let desired = runtime_desired_watch_sources(&tasks);
+        assert_eq!(desired.len(), 2);
+        assert_eq!(desired.get("a"), Some(&"/src/a".to_string()));
+        assert_eq!(desired.get("c"), Some(&"/src/c".to_string()));
+        assert!(!desired.contains_key("b"));
+    }
+
+    #[test]
+    fn test_runtime_find_watch_task_filters_non_watch_tasks() {
+        let tasks = vec![
+            build_runtime_task("watch-off", "/src/off", false, false),
+            build_runtime_task("watch-on", "/src/on", true, false),
+        ];
+
+        assert!(runtime_find_watch_task(&tasks, "watch-off").is_none());
+        assert!(runtime_find_watch_task(&tasks, "watch-on").is_some());
+        assert!(runtime_find_watch_task(&tasks, "missing").is_none());
+    }
+
+    #[test]
+    fn test_runtime_delete_missing_for_watch_sync_preserves_task_setting() {
+        let delete_on = build_runtime_task("on", "/src/on", true, true);
+        let delete_off = build_runtime_task("off", "/src/off", true, false);
+
+        assert!(runtime_delete_missing_for_watch_sync(&delete_on));
+        assert!(!runtime_delete_missing_for_watch_sync(&delete_off));
+    }
+
+    #[test]
+    fn test_runtime_get_state_internal_returns_syncing_tasks() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let state = build_app_state();
+
+        rt.block_on(async {
+            {
+                let mut syncing = state.syncing_tasks.write().await;
+                syncing.insert("task-1".to_string());
+                syncing.insert("task-2".to_string());
+            }
+
+            let runtime_state = runtime_get_state_internal(&state).await;
+            let syncing: HashSet<String> = runtime_state.syncing_tasks.into_iter().collect();
+
+            assert!(runtime_state.watching_tasks.is_empty());
+            assert!(syncing.contains("task-1"));
+            assert!(syncing.contains("task-2"));
+            assert_eq!(syncing.len(), 2);
+        });
     }
 
     #[test]

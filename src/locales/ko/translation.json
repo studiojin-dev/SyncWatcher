@@ -37,9 +37,18 @@
       "enabled": "활성",
       "deleteMissing": "누락된 항목 삭제",
       "deleteMissingWarning": "주의: 원본에서 삭제된 파일이 대상에서도 삭제됩니다.",
+      "deleteRiskTitle": "누락된 항목 삭제 경고",
+      "deleteRiskWatchEnable": "누락된 항목 삭제가 켜진 상태에서 감시 모드를 활성화하려고 합니다. 동기화 시 원본에서 사라진 파일이 대상에서도 삭제될 수 있습니다.",
+      "deleteRiskManualSync": "누락된 항목 삭제가 켜진 상태로 수동 동기화를 실행합니다. 원본에 없는 파일이 대상에서 삭제될 수 있습니다.",
+      "deleteRiskProceed": "계속 진행하시겠습니까?",
       "checksumMode": "체크섬 모드",
       "watchMode": "감시 모드",
-      "watchModeDesc": "소스 디렉토리를 감시하고 변경 시 자동 동기화합니다. '누락된 항목 삭제'는 비활성화됩니다.",
+      "watchModeDesc": "소스 디렉토리를 감시하고 변경 시 자동 동기화합니다.",
+      "watchToggleOn": "감시 켜기",
+      "watchToggleOff": "감시 끄기",
+      "watchStarting": "감시 시작 중...",
+      "watchStopping": "감시 중지 중...",
+      "watchToggleFailed": "감시 상태 반영이 지연되어 변경에 실패했습니다.",
       "autoUnmount": "자동 Unmount",
       "save": "저장",
       "cancel": "취소",
@@ -83,6 +92,16 @@
       "verifyAfterCopy": "복사 후 검증",
       "saveSettings": "설정 저장",
       "resetDefaults": "기본값으로 재설정"
+    },
+    "startup": {
+      "title": "SyncWatcher 시작 중",
+      "description": "설정을 불러오고 런타임 상태를 적용하고 있습니다...",
+      "step": {
+        "settings": "설정",
+        "tasks": "동기화 작업",
+        "exclusionSets": "제외 세트",
+        "runtime": "런타임 적용"
+      }
     },
     "sync": {
       "phase": {

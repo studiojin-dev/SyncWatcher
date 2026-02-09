@@ -37,9 +37,18 @@
       "enabled": "启用",
       "deleteMissing": "删除缺失项",
       "deleteMissingWarning": "警告：源中删除的文件将在目标中被删除。",
+      "deleteRiskTitle": "删除缺失项警告",
+      "deleteRiskWatchEnable": "即将以“删除缺失项”开启监控模式。同步时，源目录中消失的文件可能也会在目标目录被删除。",
+      "deleteRiskManualSync": "即将以“删除缺失项”执行手动同步。源目录中不存在的文件可能会在目标目录被删除。",
+      "deleteRiskProceed": "是否继续？",
       "checksumMode": "校验和模式",
       "watchMode": "监控模式",
-      "watchModeDesc": "监控源目录并在更改时自动同步。'删除缺失'已禁用。",
+      "watchModeDesc": "监控源目录并在更改时自动同步。",
+      "watchToggleOn": "开启监控",
+      "watchToggleOff": "关闭监控",
+      "watchStarting": "正在启动监控...",
+      "watchStopping": "正在停止监控...",
+      "watchToggleFailed": "监控状态更新超时，切换失败。",
       "autoUnmount": "自动卸载",
       "save": "保存",
       "cancel": "取消",
@@ -83,6 +92,16 @@
       "verifyAfterCopy": "复制后验证",
       "saveSettings": "保存设置",
       "resetDefaults": "恢复默认值"
+    },
+    "startup": {
+      "title": "正在启动 SyncWatcher",
+      "description": "正在加载配置并应用运行时状态...",
+      "step": {
+        "settings": "设置",
+        "tasks": "同步任务",
+        "exclusionSets": "排除集合",
+        "runtime": "应用运行时"
+      }
     },
     "sync": {
       "phase": {

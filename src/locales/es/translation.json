@@ -37,9 +37,18 @@
       "enabled": "Habilitado",
       "deleteMissing": "Eliminar Faltantes",
       "deleteMissingWarning": "Advertencia: Los archivos eliminados en el origen se eliminarán en el destino.",
+      "deleteRiskTitle": "Advertencia de eliminación",
+      "deleteRiskWatchEnable": "Vas a activar el modo vigilancia con \"Eliminar faltantes\" habilitado. Durante la sincronización, los archivos eliminados del origen también podrían eliminarse del destino.",
+      "deleteRiskManualSync": "La sincronización manual se ejecutará con \"Eliminar faltantes\" habilitado. Los archivos que no existan en el origen podrían eliminarse del destino.",
+      "deleteRiskProceed": "¿Desea continuar?",
       "checksumMode": "Modo Checksum",
       "watchMode": "Modo Vigilancia",
-      "watchModeDesc": "Supervisa el directorio de origen y sincroniza automáticamente los cambios. 'Eliminar faltantes' está desactivado.",
+      "watchModeDesc": "Supervisa el directorio de origen y sincroniza automáticamente los cambios.",
+      "watchToggleOn": "Activar vigilancia",
+      "watchToggleOff": "Desactivar vigilancia",
+      "watchStarting": "Iniciando vigilancia...",
+      "watchStopping": "Deteniendo vigilancia...",
+      "watchToggleFailed": "No se pudo reflejar el estado de vigilancia a tiempo.",
       "autoUnmount": "Auto Desmontar",
       "save": "Guardar",
       "cancel": "Cancelar",
@@ -83,6 +92,16 @@
       "verifyAfterCopy": "Verificar después de copiar",
       "saveSettings": "Guardar Configuración",
       "resetDefaults": "Restablecer Valores"
+    },
+    "startup": {
+      "title": "Iniciando SyncWatcher",
+      "description": "Cargando configuración y aplicando el estado de runtime...",
+      "step": {
+        "settings": "Configuración",
+        "tasks": "Tareas de Sincronización",
+        "exclusionSets": "Conjuntos de Exclusión",
+        "runtime": "Aplicación de Runtime"
+      }
     },
     "sync": {
       "phase": {

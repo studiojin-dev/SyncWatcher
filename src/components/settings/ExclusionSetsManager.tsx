@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { IconPlus, IconTrash, IconEdit, IconX, IconCheck } from '@tabler/icons-react';
-import { useExclusionSets, ExclusionSet } from '../../hooks/useExclusionSets';
+import { ExclusionSet } from '../../hooks/useExclusionSets';
+import { useExclusionSetsContext } from '../../context/ExclusionSetsContext';
 
 
 export function ExclusionSetsManager() {
-    const { sets, addSet, updateSet, deleteSet } = useExclusionSets();
+    const { sets, addSet, updateSet, deleteSet } = useExclusionSetsContext();
     const [editingId, setEditingId] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
 
