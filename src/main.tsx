@@ -1,11 +1,13 @@
-import React from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import { MantineProvider, createTheme } from '@mantine/core';
 import '@mantine/core/styles.css';
-import App from './App';
 import './styles/design-system.css';
 import './index.css';
 import './i18n';
+import InitialBootOverlay from './components/ui/InitialBootOverlay';
+
+const App = lazy(() => import('./App'));
 
 // Mantine theme customization to match design system
 const theme = createTheme({
@@ -32,9 +34,11 @@ const theme = createTheme({
 });
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
-  <React.StrictMode>
+  <StrictMode>
     <MantineProvider theme={theme}>
-      <App />
+      <Suspense fallback={<InitialBootOverlay />}>
+        <App />
+      </Suspense>
     </MantineProvider>
-  </React.StrictMode>,
+  </StrictMode>,
 );
