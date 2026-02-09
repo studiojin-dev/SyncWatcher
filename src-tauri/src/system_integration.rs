@@ -88,6 +88,10 @@ impl DiskMonitor {
         (None, None)
     }
 
+    /// 볼륨 목록을 조회합니다.
+    /// 
+    /// 성능 최적화: statvfs 시스템 콜로 용량을 조회합니다.
+    /// UUID는 diskutil info를 호출하여 조회합니다 (볼륨 식별에 필요).
     pub fn list_volumes(&self) -> Result<Vec<VolumeInfo>> {
         let mut volumes = Vec::new();
 
@@ -103,10 +107,12 @@ impl DiskMonitor {
                             .unwrap_or("Unknown")
                             .to_string();
 
+                        // statvfs 시스템 콜로 용량 조회 (매우 빠름)
                         if let (Ok(total), Ok(available)) =
                             (get_disk_space(&path), get_available_space(&path))
                         {
                             let is_removable = Self::is_removable_volume(&path);
+                            // UUID는 볼륨 식별에 필요하므로 조회
                             let (volume_uuid, disk_uuid) = Self::get_volume_uuid(&path);
 
                             volumes.push(VolumeInfo {

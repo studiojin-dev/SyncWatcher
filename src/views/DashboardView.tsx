@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { IconRefresh } from '@tabler/icons-react';
 import VolumeCard from '../components/VolumeCard';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
@@ -17,68 +18,133 @@ interface VolumeInfo {
     disk_uuid?: string;
 }
 
-/** 모듈 레벨 볼륨 캐시 - 탭 전환 시 즉시 표시용 */
-let volumeCache: VolumeInfo[] | null = null;
+const CACHE_KEY = 'syncwatcher:volumes';
+/** 폴링 간격: 1분 (60,000ms) */
+const POLL_INTERVAL_MS = 60 * 1000;
+
+/**
+ * LocalStorage에서 캐시된 볼륨 데이터를 로드합니다.
+ * 캐시는 만료되지 않습니다 (이벤트 또는 폴링으로 업데이트).
+ */
+function loadCachedVolumes(): VolumeInfo[] {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) {
+                console.debug('[DashboardView] Loaded cached volumes', { count: parsed.length });
+                return parsed;
+            }
+        }
+    } catch (err) {
+        console.warn('[DashboardView] Failed to load cached volumes', err);
+    }
+    return [];
+}
+
+/**
+ * 볼륨 데이터를 LocalStorage에 캐시합니다.
+ */
+function saveCachedVolumes(volumes: VolumeInfo[]): void {
+    try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(volumes));
+        console.debug('[DashboardView] Saved volumes to cache', { count: volumes.length });
+    } catch (err) {
+        console.warn('[DashboardView] Failed to save volumes to cache', err);
+    }
+}
 
 /**
  * Dashboard View - Main view showing connected volumes
- * Bento Grid layout for volume cards with staggered animation
  * 
- * 캐시된 볼륨 데이터가 있으면 즉시 표시하고, 백그라운드에서 새로고침합니다.
+ * - 캐시된 데이터를 즉시 표시
+ * - 마운트 시 백그라운드에서 새로고침
+ * - 1분마다 자동 업데이트 (폴링)
+ * - 백엔드에서 volumes-changed 이벤트 수신 시 업데이트
  */
 function DashboardView() {
     const { t } = useTranslation();
-    // 캐시된 데이터로 초기화하여 즉시 표시
-    const [volumes, setVolumes] = useState<VolumeInfo[]>(volumeCache ?? []);
-    // 캐시가 있으면 로딩 상태 false로 시작
-    const [loading, setLoading] = useState(volumeCache === null);
+    const [volumes, setVolumes] = useState<VolumeInfo[]>(() => loadCachedVolumes());
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // 캐시가 없으면 "분석중" 표시
+    const [isAnalyzing, setIsAnalyzing] = useState(() => volumes.length === 0);
     const isMounted = useRef(true);
+    const requestSeq = useRef(0);
+    const inFlightCount = useRef(0);
 
-    const loadVolumes = useCallback(async (isBackground = false) => {
+    const loadVolumes = useCallback(async () => {
         const startTime = performance.now();
+        const requestId = ++requestSeq.current;
         try {
-            // 백그라운드 로드가 아닐 때만 로딩 표시
-            if (!isBackground) {
-                setLoading(true);
-            } else {
-                // 백그라운드 로드일 때도 스피너 표시
-                setLoading(true);
-            }
+            inFlightCount.current += 1;
+            setLoading(true);
             setError(null);
 
-            console.debug('[DashboardView] loadVolumes started', { isBackground, hasCachedData: volumeCache !== null });
+            console.debug('[DashboardView] loadVolumes started', { requestId, inFlight: inFlightCount.current });
 
             const result = await invoke<VolumeInfo[]>('list_volumes');
 
-            if (isMounted.current) {
+            if (isMounted.current && requestId === requestSeq.current) {
                 setVolumes(result);
-                volumeCache = result; // 캐시 업데이트
+                setIsAnalyzing(false);
+                saveCachedVolumes(result);
                 console.debug('[DashboardView] loadVolumes completed', {
+                    requestId,
                     volumeCount: result.length,
                     durationMs: Math.round(performance.now() - startTime)
                 });
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
-            console.error('[DashboardView] loadVolumes failed', { error: errorMessage });
-            if (isMounted.current) {
+            console.error('[DashboardView] loadVolumes failed', { requestId, error: errorMessage });
+            if (isMounted.current && requestId === requestSeq.current) {
                 setError(errorMessage);
+                setIsAnalyzing(false);
             }
         } finally {
+            inFlightCount.current = Math.max(0, inFlightCount.current - 1);
             if (isMounted.current) {
-                setLoading(false);
+                setLoading(inFlightCount.current > 0);
             }
         }
     }, []);
 
     useEffect(() => {
         isMounted.current = true;
-        // 캐시가 있으면 백그라운드 로드, 없으면 일반 로드
-        loadVolumes(volumeCache !== null);
+
+        // 1. 마운트 시 즉시 (50ms 딜레이) 볼륨 로드
+        const timeoutId = setTimeout(() => {
+            if (isMounted.current) {
+                loadVolumes();
+            }
+        }, 50);
+
+        // 2. 백엔드에서 volumes-changed 이벤트 수신
+        const unlistenPromise = listen('volumes-changed', () => {
+            console.debug('[DashboardView] Received volumes-changed event');
+            if (isMounted.current) {
+                loadVolumes();
+            }
+        });
+
+        // 3. 1분마다 폴링 (폴백)
+        const intervalId = setInterval(() => {
+            if (isMounted.current) {
+                console.debug('[DashboardView] Polling volumes');
+                loadVolumes();
+            }
+        }, POLL_INTERVAL_MS);
 
         return () => {
             isMounted.current = false;
+            clearTimeout(timeoutId);
+            clearInterval(intervalId);
+            unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((err) => {
+                    console.warn('[DashboardView] Failed to unlisten volumes-changed', err);
+                });
         };
     }, [loadVolumes]);
 
@@ -90,12 +156,19 @@ function DashboardView() {
                         <h1 className="text-3xl font-heading font-black uppercase">
                             {t('dashboard.title')}
                         </h1>
-                        {loading && (
-                            <IconRefresh
-                                size={24}
-                                className="animate-spin text-[var(--accent-main)]"
-                                aria-label={t('common.loading')}
-                            />
+                        {(loading || isAnalyzing) && (
+                            <div className="flex items-center gap-2">
+                                <IconRefresh
+                                    size={24}
+                                    className="animate-spin text-[var(--accent-main)]"
+                                    aria-label={t('common.loading')}
+                                />
+                                {isAnalyzing && (
+                                    <span className="text-sm font-mono text-[var(--text-secondary)] uppercase">
+                                        {t('dashboard.analyzing', '분석중...')}
+                                    </span>
+                                )}
+                            </div>
                         )}
                     </div>
                     <p className="text-[var(--text-secondary)] font-mono text-sm border-l-4 border-[var(--accent-main)] pl-3">
@@ -112,17 +185,17 @@ function DashboardView() {
                     <p className="font-bold">ERROR: {error}</p>
                     <button
                         className="bg-white border-2 border-black px-4 py-2 font-bold shadow-[2px_2px_0_0_#000] active:translate-y-1 active:shadow-none transition-all"
-                        onClick={() => loadVolumes(false)}
+                        onClick={loadVolumes}
                     >
                         {t('common.retry')}
                     </button>
                 </div>
             )}
 
-            {/* 캐시가 없고 로딩 중일 때만 전체 화면 로딩 표시 */}
-            {loading && volumes.length === 0 ? (
+            {/* 캐시도 없고 분석중일 때만 전체 화면 로딩 표시 */}
+            {isAnalyzing && volumes.length === 0 ? (
                 <div className="text-center py-12 font-mono animate-pulse">
-                    LOADING_SYSTEM_MODULES...
+                    ANALYZING_VOLUMES...
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-8">

@@ -9,8 +9,8 @@ import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
-
-const DashboardView = lazy(() => import('./views/DashboardView'));
+// DashboardView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
+import DashboardView from './views/DashboardView';
 const SyncTasksView = lazy(() => import('./views/SyncTasksView'));
 const ActivityLogView = lazy(() => import('./views/ActivityLogView'));
 const SettingsView = lazy(() => import('./views/SettingsView'));
