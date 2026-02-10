@@ -4,7 +4,8 @@ mod integration_tests {
     use crate::watcher::WatcherManager;
     use crate::{
         compute_volume_mount_diff, get_app_version, join_paths, progress_phase_to_log_category,
-        runtime_delete_missing_for_watch_sync, runtime_desired_watch_sources,
+        runtime_delete_missing_for_watch_sync, runtime_desired_watch_sources, DataUnitSystem,
+        format_bytes_with_unit,
         runtime_find_watch_task, runtime_get_state_internal, AppState, RuntimeSyncTask,
     };
     use std::collections::{HashMap, HashSet};
@@ -181,6 +182,26 @@ mod integration_tests {
 
         assert_eq!(mounted, vec!["/Volumes/USB_NEW".to_string()]);
         assert_eq!(unmounted, vec!["/Volumes/USB_OLD".to_string()]);
+    }
+
+    #[test]
+    fn test_format_bytes_with_unit_systems() {
+        assert_eq!(
+            format_bytes_with_unit(1024, DataUnitSystem::Binary),
+            "1.00 KiB"
+        );
+        assert_eq!(
+            format_bytes_with_unit(1_073_741_824, DataUnitSystem::Binary),
+            "1.00 GiB"
+        );
+        assert_eq!(
+            format_bytes_with_unit(1000, DataUnitSystem::Decimal),
+            "1.00 KB"
+        );
+        assert_eq!(
+            format_bytes_with_unit(1_000_000_000, DataUnitSystem::Decimal),
+            "1.00 GB"
+        );
     }
 
     #[test]

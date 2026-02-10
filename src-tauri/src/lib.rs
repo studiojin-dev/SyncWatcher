@@ -147,6 +147,15 @@ struct RuntimeConfigPayload {
     tasks: Vec<RuntimeSyncTask>,
     #[serde(default)]
     exclusion_sets: Vec<RuntimeExclusionSet>,
+    #[serde(default)]
+    settings: RuntimeSettings,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeSettings {
+    #[serde(default = "default_data_unit_system")]
+    data_unit_system: DataUnitSystem,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -204,6 +213,10 @@ struct RuntimeSyncStateEvent {
 
 fn default_verify_after_copy() -> bool {
     true
+}
+
+fn default_data_unit_system() -> DataUnitSystem {
+    DataUnitSystem::Binary
 }
 
 pub(crate) fn progress_phase_to_log_category(
@@ -488,11 +501,12 @@ async fn execute_sync_internal(
 
         match &result {
             Ok(res) => {
+                let unit_system = state.runtime_config.read().await.settings.data_unit_system;
                 let msg = format!(
                     "Sync completed.\nCopied: {} files\nDeleted: {} files\nData transferred: {}",
                     format_number(res.files_copied),
                     format_number(res.files_deleted),
-                    format_bytes(res.bytes_copied)
+                    format_bytes_with_unit(res.bytes_copied, unit_system)
                 );
                 state.log_manager.log_with_category(
                     "success",
@@ -905,11 +919,12 @@ async fn sync_dry_run(
 
     match engine.dry_run(&options).await {
         Ok(result) => {
+            let unit_system = state.runtime_config.read().await.settings.data_unit_system;
             let msg = format!(
                 "Dry run completed.\nTo copy: {} files\nTo delete: {} files\nTotal size: {}",
                 format_number(result.files_to_copy as u64),
                 format_number(result.files_to_delete as u64),
-                format_bytes(result.bytes_to_copy)
+                format_bytes_with_unit(result.bytes_to_copy, unit_system)
             );
             state.log_manager.log("success", &msg, Some(task_id));
             Ok(result)
@@ -1112,14 +1127,32 @@ pub struct SyncTask {
     pub enabled: bool,
 }
 
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DataUnitSystem {
+    #[default]
+    Binary,
+    Decimal,
+}
+
 pub fn format_bytes(bytes: u64) -> String {
-    const UNIT: u64 = 1024;
-    if bytes < UNIT {
+    format_bytes_with_unit(bytes, DataUnitSystem::Binary)
+}
+
+pub fn format_bytes_with_unit(bytes: u64, unit_system: DataUnitSystem) -> String {
+    let (base, units): (f64, &[&str]) = match unit_system {
+        DataUnitSystem::Binary => (1024.0, &["B", "KiB", "MiB", "GiB", "TiB", "PiB"]),
+        DataUnitSystem::Decimal => (1000.0, &["B", "KB", "MB", "GB", "TB", "PB"]),
+    };
+
+    if bytes < base as u64 {
         return format!("{} B", format_number(bytes));
     }
-    let exp = (bytes as f64).ln() / (UNIT as f64).ln();
-    let pre = "KMGTPE".chars().nth(exp as usize - 1).unwrap_or('?');
-    format!("{:.2} {}B", bytes as f64 / UNIT.pow(exp as u32) as f64, pre)
+
+    let exp = ((bytes as f64).ln() / base.ln()).floor() as usize;
+    let unit_index = exp.min(units.len() - 1);
+    let value = bytes as f64 / base.powi(unit_index as i32);
+    format!("{value:.2} {}", units[unit_index])
 }
 
 pub fn format_number(n: u64) -> String {

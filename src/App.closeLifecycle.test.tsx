@@ -38,6 +38,7 @@ vi.mock('./hooks/useSettings', () => ({
     settings: {
       language: 'en',
       theme: 'system',
+      dataUnitSystem: 'binary',
       notifications: runtimeState.notifications,
       stateLocation: '',
       maxLogLines: 10000,

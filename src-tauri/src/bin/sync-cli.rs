@@ -59,11 +59,11 @@ async fn main() -> anyhow::Result<()> {
                     };
                     let total_label = vol
                         .total_bytes
-                        .map(|bytes| format!("{:.2} GB", bytes as f64 / 1_000_000_000.0))
+                        .map(format_bytes)
                         .unwrap_or_else(|| "N/A - Network".to_string());
                     let avail_label = vol
                         .available_bytes
-                        .map(|bytes| format!("{:.2} GB", bytes as f64 / 1_000_000_000.0))
+                        .map(format_bytes)
                         .unwrap_or_else(|| "N/A - Network".to_string());
 
                     println!(

@@ -20,11 +20,12 @@
       "dashboard",
       "storage",
       "macos",
-      "volume-discovery"
+      "volume-discovery",
+      "units"
     ],
     "status": "Accepted",
     "date": "2026-02-09",
-    "tldr": "Replace /Volumes directory scanning with getmntinfo_r_np mount-table enumeration and treat network mounts as capacity-unavailable.",
+    "tldr": "Replace /Volumes scanning with getmntinfo_r_np mount-table enumeration, keep network mounts capacity-unavailable, and standardize app-wide data-unit formatting.",
     "path": "doc/adr/ADR-20260209-0001-VFS-mount-table-volume-enumeration.md"
   }
 ]

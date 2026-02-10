@@ -13,6 +13,14 @@ vi.mock('react-i18next', () => ({
   })),
 }));
 
+vi.mock('../hooks/useSettings', () => ({
+  useSettings: () => ({
+    settings: {
+      dataUnitSystem: 'binary',
+    },
+  }),
+}));
+
 describe('VolumeCard', () => {
   it('renders free and total capacity for local volume', () => {
     render(
@@ -20,8 +28,8 @@ describe('VolumeCard', () => {
         volume={{
           name: 'USB',
           mount_point: '/Volumes/USB',
-          total_bytes: 100 * 1000 * 1000,
-          available_bytes: 40 * 1000 * 1000,
+          total_bytes: 100 * 1024 * 1024,
+          available_bytes: 40 * 1024 * 1024,
           is_network: false,
           is_removable: true,
         }}
@@ -30,7 +38,7 @@ describe('VolumeCard', () => {
 
     expect(screen.getByText('/Volumes/USB')).toBeInTheDocument();
     expect(screen.getByText(/FREE/)).toBeInTheDocument();
-    expect(screen.getByText(/\/ 100 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/\/ 100 MiB/)).toBeInTheDocument();
   });
 
   it('renders network N/A label when capacity is unavailable', () => {

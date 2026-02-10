@@ -63,6 +63,7 @@ describe('useSettings', () => {
     expect(result.current.settings).toEqual({
       language: 'en',
       theme: 'system',
+      dataUnitSystem: 'binary',
       notifications: true,
       stateLocation: '',
       maxLogLines: 10000,
@@ -89,6 +90,7 @@ describe('useSettings', () => {
 
     expect(result.current.settings.language).toBe('ko');
     expect(result.current.settings.theme).toBe('dark');
+    expect(result.current.settings.dataUnitSystem).toBe('binary');
     expect(result.current.settings.notifications).toBe(false);
   });
 

@@ -1,5 +1,6 @@
 import { SyncTask } from '../hooks/useSyncTasks';
 import { ExclusionSet } from '../hooks/useExclusionSets';
+import { DataUnitSystem } from '../utils/formatBytes';
 
 export interface RuntimeSyncTask {
     id: string;
@@ -23,6 +24,11 @@ export interface RuntimeExclusionSet {
 export interface RuntimeConfigPayload {
     tasks: RuntimeSyncTask[];
     exclusionSets: RuntimeExclusionSet[];
+    settings: RuntimeSettingsPayload;
+}
+
+export interface RuntimeSettingsPayload {
+    dataUnitSystem: DataUnitSystem;
 }
 
 export interface RuntimeState {

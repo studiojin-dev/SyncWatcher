@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { IconDeviceDesktop, IconUsb } from '@tabler/icons-react';
+import { useSettings } from '../hooks/useSettings';
+import { formatBytes } from '../utils/formatBytes';
 
 interface VolumeInfo {
     name: string;
@@ -15,23 +17,12 @@ interface VolumeCardProps {
 }
 
 /**
- * Format bytes to human-readable string
- */
-function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    // macOS Finder/Disk Utility convention: decimal units (base 1000)
-    const k = 1000;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
-
-/**
  * Volume Card component - Ghost glass aesthetic
  * Shows volume name, mount point, free/total space
  */
 function VolumeCard({ volume }: VolumeCardProps) {
     const { t } = useTranslation();
+    const { settings } = useSettings();
     const hasCapacity = typeof volume.total_bytes === 'number'
         && typeof volume.available_bytes === 'number';
     const totalBytes = volume.total_bytes ?? 0;
@@ -80,10 +71,10 @@ function VolumeCard({ volume }: VolumeCardProps) {
             {hasCapacity ? (
                 <div className="flex justify-between items-center font-mono text-xs font-bold">
                     <span className="bg-[var(--accent-success)] text-black px-2 py-1 border-2 border-[var(--border-main)] shadow-[2px_2px_0_0_#000]">
-                        {formatBytes(availableBytes)} FREE
+                        {formatBytes(availableBytes, settings.dataUnitSystem)} FREE
                     </span>
                     <span className="text-[var(--text-secondary)]">
-                        / {formatBytes(totalBytes)}
+                        / {formatBytes(totalBytes, settings.dataUnitSystem)}
                     </span>
                 </div>
             ) : (

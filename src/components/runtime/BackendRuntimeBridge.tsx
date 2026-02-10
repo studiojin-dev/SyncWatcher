@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useSyncTasksContext } from '../../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../../context/ExclusionSetsContext';
+import { useSettings } from '../../hooks/useSettings';
 import { useSyncTaskStatusStore } from '../../hooks/useSyncTaskStatus';
 import { useToast } from '../ui/Toast';
 import {
@@ -46,15 +47,19 @@ function applyRuntimeSnapshotToStore(state: RuntimeState) {
 function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBridgeProps) {
     const { tasks, loaded: tasksLoaded } = useSyncTasksContext();
     const { sets, loaded: setsLoaded } = useExclusionSetsContext();
+    const { settings, loaded: settingsLoaded } = useSettings();
     const { showToast } = useToast();
-    const ready = tasksLoaded && setsLoaded;
+    const ready = tasksLoaded && setsLoaded && settingsLoaded;
     const watchingTasksRef = useRef<Set<string>>(new Set());
     const initialSyncResolvedRef = useRef(false);
 
     const payload = useMemo<RuntimeConfigPayload>(() => ({
         tasks: tasks.map(toRuntimeTask),
         exclusionSets: sets.map(toRuntimeExclusionSet),
-    }), [tasks, sets]);
+        settings: {
+            dataUnitSystem: settings.dataUnitSystem,
+        },
+    }), [tasks, sets, settings.dataUnitSystem]);
 
     useEffect(() => {
         const unlistenProgress = listen<SyncProgressEvent>('sync-progress', (event) => {

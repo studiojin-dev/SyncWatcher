@@ -3,6 +3,7 @@ import { Switch, Select } from '@mantine/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
 import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
+import { DataUnitSystem } from '../utils/formatBytes';
 
 const languages = [
     { value: 'en', label: 'English' },
@@ -23,6 +24,10 @@ function SettingsView() {
         { value: 'system', label: t('settings.themeSystem') },
         { value: 'light', label: t('settings.themeLight') },
         { value: 'dark', label: t('settings.themeDark') },
+    ];
+    const dataUnitSystems = [
+        { value: 'binary', label: t('settings.unitBinary') },
+        { value: 'decimal', label: t('settings.unitDecimal') },
     ];
 
     if (!loaded) {
@@ -114,6 +119,35 @@ function SettingsView() {
                                         borderRadius: 0,
                                         boxShadow: '4px 4px 0 0 black',
                                     }
+                                }}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-bold mb-2 uppercase font-mono">
+                                {t('settings.dataUnit')}
+                            </label>
+                            <Select
+                                value={settings.dataUnitSystem}
+                                onChange={(value) => value && updateSettings({
+                                    dataUnitSystem: value as DataUnitSystem,
+                                })}
+                                data={dataUnitSystems}
+                                styles={{
+                                    input: {
+                                        background: 'var(--bg-primary)',
+                                        color: 'var(--text-primary)',
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        fontFamily: 'var(--font-heading)',
+                                        fontWeight: 'bold',
+                                        minHeight: '42px',
+                                    },
+                                    dropdown: {
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        boxShadow: '4px 4px 0 0 black',
+                                    },
                                 }}
                             />
                         </div>

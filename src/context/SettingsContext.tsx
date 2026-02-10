@@ -1,9 +1,11 @@
 import { createContext, useState, useCallback, useEffect, ReactNode, useContext } from 'react';
 import i18n from '../i18n';
+import { DataUnitSystem } from '../utils/formatBytes';
 
 export interface Settings {
     language: string;
     theme: 'light' | 'dark' | 'system';
+    dataUnitSystem: DataUnitSystem;
     notifications: boolean;
     stateLocation: string;
     maxLogLines: number;
@@ -13,6 +15,7 @@ export interface Settings {
 const defaultSettings: Settings = {
     language: 'en',
     theme: 'system',
+    dataUnitSystem: 'binary',
     notifications: true,
     stateLocation: '',
     maxLogLines: 10000,

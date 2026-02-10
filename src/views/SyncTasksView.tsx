@@ -8,11 +8,13 @@ import { SyncTask } from '../hooks/useSyncTasks';
 import { useSyncTasksContext } from '../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../context/ExclusionSetsContext';
 import { useSyncTaskStatusStore } from '../hooks/useSyncTaskStatus';
+import { useSettings } from '../hooks/useSettings';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
 import { useToast } from '../components/ui/Toast';
 import YamlEditorModal from '../components/ui/YamlEditorModal';
 import TaskLogsModal from '../components/features/TaskLogsModal';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
+import { formatBytes } from '../utils/formatBytes';
 
 /** Volume information from backend */
 interface VolumeInfo {
@@ -58,6 +60,7 @@ function SyncTasksView() {
     const { t } = useTranslation();
     const { tasks, addTask, updateTask, deleteTask, error, reload } = useSyncTasksContext();
     const { sets, getPatternsForSets } = useExclusionSetsContext();
+    const { settings } = useSettings();
     const { showToast } = useToast();
     const [showForm, setShowForm] = useState(false);
     const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
@@ -101,8 +104,8 @@ function SyncTasksView() {
         if (typeof volume.total_bytes !== 'number') {
             return t('dashboard.networkCapacityUnavailable', { defaultValue: 'N/A - 네트워크 연결' });
         }
-        return `${(volume.total_bytes / 1_000_000_000).toFixed(1)} GB`;
-    }, [t]);
+        return formatBytes(volume.total_bytes, settings.dataUnitSystem);
+    }, [settings.dataUnitSystem, t]);
 
     // 볼륨 목록 로드
     const loadVolumes = async () => {
