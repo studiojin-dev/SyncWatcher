@@ -3,7 +3,6 @@ import { Switch, Select } from '@mantine/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
 import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const languages = [
     { value: 'en', label: 'English' },
@@ -13,12 +12,6 @@ const languages = [
     { value: 'es', label: 'Español' },
 ];
 
-const themes = [
-    { value: 'system', label: 'System' },
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
-];
-
 /**
  * Settings View - App configuration
  * Language, theme, notifications, sync options
@@ -26,6 +19,11 @@ const themes = [
 function SettingsView() {
     const { t } = useTranslation();
     const { settings, updateSettings, resetSettings, loaded } = useSettings();
+    const themes = [
+        { value: 'system', label: t('settings.themeSystem') },
+        { value: 'light', label: t('settings.themeLight') },
+        { value: 'dark', label: t('settings.themeDark') },
+    ];
 
     if (!loaded) {
         return (
@@ -46,15 +44,6 @@ function SettingsView() {
         }
     };
 
-    const handleHideToTray = async () => {
-        try {
-            const window = getCurrentWindow();
-            await window.hide();
-        } catch (err) {
-            console.error('Failed to hide window:', err);
-        }
-    };
-
     return (
         <div className="fade-in max-w-3xl">
             <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
@@ -70,7 +59,7 @@ function SettingsView() {
                 {/* Visual Settings Section */}
                 <section>
                     <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-main)]">
-                        Display
+                        {t('settings.sectionDisplay')}
                     </h2>
                     <div className="neo-box p-6 space-y-6">
                         {/* Language */}
@@ -134,26 +123,26 @@ function SettingsView() {
                 {/* System Settings Section */}
                 <section>
                     <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-warning)]">
-                        System
+                        {t('settings.sectionSystem')}
                     </h2>
                     <div className="neo-box p-6 space-y-6">
                         {/* State Location */}
                         <div>
                             <label className="block text-sm font-bold mb-2 uppercase font-mono">
-                                State Location
+                                {t('settings.stateLocation')}
                             </label>
                             <div className="flex gap-2">
                                 <input
                                     value={settings.stateLocation}
                                     onChange={(e) => updateSettings({ stateLocation: e.target.value })}
                                     className="neo-input flex-1 font-mono text-sm"
-                                    placeholder="Default: Tauri AppData"
+                                    placeholder={t('settings.stateLocationPlaceholder')}
                                 />
                                 <button
                                     onClick={() => handleBrowseFolder('stateLocation')}
                                     className="px-4 font-bold uppercase border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
                                 >
-                                    Browse
+                                    {t('common.browse')}
                                 </button>
                             </div>
                         </div>
@@ -161,7 +150,7 @@ function SettingsView() {
                         {/* Max Log Lines */}
                         <div>
                             <label className="block text-sm font-bold mb-2 uppercase font-mono">
-                                Max Log Lines
+                                {t('settings.maxLogLines')}
                             </label>
                             <input
                                 type="number"
@@ -180,20 +169,43 @@ function SettingsView() {
                 {/* Behavior Section */}
                 <section>
                     <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-success)]">
-                        Behavior
+                        {t('settings.sectionBehavior')}
                     </h2>
                     <div className="neo-box p-6 space-y-4">
                         <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
                             <div>
-                                <div className="font-bold">Hide to Tray</div>
-                                <div className="text-xs text-[var(--text-secondary)]">Run in background without dock icon</div>
+                                <div className="font-bold">{t('settings.closeAction')}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">
+                                    {t('settings.closeActionDesc')}
+                                </div>
                             </div>
-                            <button
-                                onClick={handleHideToTray}
-                                className="px-4 py-1 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] font-bold text-sm uppercase"
-                            >
-                                HIDE
-                            </button>
+                            <Select
+                                value={settings.closeAction}
+                                onChange={(value) => value && updateSettings({
+                                    closeAction: value as 'quit' | 'background',
+                                })}
+                                data={[
+                                    { value: 'quit', label: t('settings.closeActionQuit') },
+                                    { value: 'background', label: t('settings.closeActionBackground') },
+                                ]}
+                                styles={{
+                                    input: {
+                                        background: 'var(--bg-primary)',
+                                        color: 'var(--text-primary)',
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        fontFamily: 'var(--font-heading)',
+                                        fontWeight: 'bold',
+                                        minHeight: '42px',
+                                        minWidth: '220px',
+                                    },
+                                    dropdown: {
+                                        border: '3px solid var(--border-main)',
+                                        borderRadius: 0,
+                                        boxShadow: '4px 4px 0 0 black',
+                                    },
+                                }}
+                            />
                         </div>
 
                         <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">

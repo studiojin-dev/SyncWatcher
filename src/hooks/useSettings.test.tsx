@@ -66,6 +66,7 @@ describe('useSettings', () => {
       notifications: true,
       stateLocation: '',
       maxLogLines: 10000,
+      closeAction: 'quit',
     });
   });
 

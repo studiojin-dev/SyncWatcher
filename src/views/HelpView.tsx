@@ -25,6 +25,16 @@ function HelpView() {
       ],
     },
     {
+      icon: IconRefresh,
+      title: t('help.backgroundMode.title'),
+      description: t('help.backgroundMode.description'),
+      features: [
+        t('help.backgroundMode.closeAction'),
+        t('help.backgroundMode.trayOpen'),
+        t('help.backgroundMode.trayQuit'),
+      ],
+    },
+    {
       icon: IconShield,
       title: t('help.security.title'),
       description: t('help.security.description'),

@@ -1,6 +1,14 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "app": {
+      "quitConfirmTitle": "Confirm Quit",
+      "quitConfirmMessage": "There are tasks with Watch Mode enabled or currently syncing. Are you sure you want to quit?",
+      "quitConfirmMessageStateUnknown": "Sync state could not be verified. To avoid interrupting active work, are you sure you want to quit?",
+      "backgroundNotification": "SyncWatcher is running in the background.",
+      "backgroundIntroMessage": "SyncWatcher can keep running in the background when you close the window. You can change this in Settings > Behavior.",
+      "loadingView": "Loading view..."
+    },
     "nav": {
       "dashboard": "Volumes",
       "syncTasks": "Sync Tasks",
@@ -87,6 +95,19 @@
       "language": "Language",
       "darkMode": "Dark Mode",
       "systemTheme": "System Theme",
+      "themeSystem": "System",
+      "themeLight": "Light",
+      "themeDark": "Dark",
+      "sectionDisplay": "Display",
+      "sectionSystem": "System",
+      "sectionBehavior": "Behavior",
+      "stateLocation": "State Location",
+      "stateLocationPlaceholder": "Default: Tauri AppData",
+      "maxLogLines": "Max Log Lines",
+      "closeAction": "Close Action",
+      "closeActionDesc": "Choose what happens when closing the app",
+      "closeActionQuit": "Quit",
+      "closeActionBackground": "Run in Background",
       "notifications": "Notifications",
       "deleteConfirmation": "Delete Confirmation",
       "verifyAfterCopy": "Verify After Copy",
@@ -135,6 +156,13 @@
         "autoDetection": "Automatically detects file changes in source directory",
         "realTime": "Initiates sync immediately when files are modified"
       },
+      "backgroundMode": {
+        "title": "Background Mode",
+        "description": "Keep watchers and runtime active even when the main window closes",
+        "closeAction": "Configure Close Action to either quit or run in background",
+        "trayOpen": "Use tray menu 'SyncWatcher 열기' to reopen the main window",
+        "trayQuit": "Use tray menu '끝내기' to perform a full app exit"
+      },
       "security": {
         "title": "Data Integrity",
         "description": "Ensure your data remains safe and consistent",
@@ -170,6 +198,7 @@
       "add": "Add",
       "close": "Close",
       "ok": "OK",
+      "browse": "Browse",
       "loading": "Loading...",
       "error": "Error",
       "success": "Success",

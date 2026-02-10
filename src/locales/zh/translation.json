@@ -1,6 +1,14 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "app": {
+      "quitConfirmTitle": "确认退出",
+      "quitConfirmMessage": "存在已启用 Watch Mode 的任务或正在同步的任务。确定要退出吗？",
+      "quitConfirmMessageStateUnknown": "当前无法确认同步状态。为避免中断正在进行的任务，确定要退出吗？",
+      "backgroundNotification": "SyncWatcher 正在后台运行。",
+      "backgroundIntroMessage": "关闭窗口后，SyncWatcher 仍可在后台运行。可在 设置 > 行为 中修改关闭动作。",
+      "loadingView": "正在加载视图..."
+    },
     "nav": {
       "dashboard": "卷",
       "syncTasks": "同步任务",
@@ -90,6 +98,19 @@
       "language": "语言",
       "darkMode": "深色模式",
       "systemTheme": "系统主题",
+      "themeSystem": "系统",
+      "themeLight": "浅色",
+      "themeDark": "深色",
+      "sectionDisplay": "显示",
+      "sectionSystem": "系统",
+      "sectionBehavior": "行为",
+      "stateLocation": "状态存储位置",
+      "stateLocationPlaceholder": "默认: Tauri AppData",
+      "maxLogLines": "最大日志行数",
+      "closeAction": "关闭动作",
+      "closeActionDesc": "选择关闭应用时的行为",
+      "closeActionQuit": "退出应用",
+      "closeActionBackground": "后台运行",
       "notifications": "通知",
       "deleteConfirmation": "删除“确认”",
       "verifyAfterCopy": "复制后验证",
@@ -138,6 +159,13 @@
         "autoDetection": "自动检测源目录中的文件更改",
         "realTime": "文件修改时立即启动同步"
       },
+      "backgroundMode": {
+        "title": "后台模式",
+        "description": "关闭主窗口后仍保持监控与运行时任务继续执行",
+        "closeAction": "可在 设置 > 行为 中选择“退出”或“后台运行”",
+        "trayOpen": "使用托盘菜单“SyncWatcher 열기”重新显示主窗口",
+        "trayQuit": "托盘菜单“끝내기”始终执行完全退出"
+      },
       "security": {
         "title": "数据完整性",
         "description": "确保您的数据保持安全和一致",
@@ -171,6 +199,7 @@
       "add": "添加",
       "close": "关闭",
       "ok": "确定",
+      "browse": "浏览",
       "loading": "加载中...",
       "error": "错误",
       "success": "成功",

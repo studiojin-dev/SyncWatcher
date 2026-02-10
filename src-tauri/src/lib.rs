@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tauri::{Emitter, Manager, PhysicalSize, Size, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewWindow};
 
 use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
 use system_integration::{DiskMonitor};
@@ -1057,6 +1057,51 @@ async fn send_notification(
     Ok(())
 }
 
+#[tauri::command]
+async fn hide_to_background(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
+fn restore_main_window_from_tray(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        eprintln!("[Tray] Main window not found");
+        return;
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(err) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
+            eprintln!("[Tray] Failed to set activation policy: {}", err);
+        }
+    }
+
+    if let Err(err) = window.show() {
+        eprintln!("[Tray] Failed to show main window: {}", err);
+    }
+    if let Err(err) = window.unminimize() {
+        eprintln!("[Tray] Failed to unminimize main window: {}", err);
+    }
+    if let Err(err) = window.set_focus() {
+        eprintln!("[Tray] Failed to focus main window: {}", err);
+    }
+}
+
 fn adjust_window_if_mostly_offscreen(window: &WebviewWindow) -> tauri::Result<()> {
     let window_position = window.outer_position()?;
     let window_size = window.outer_size()?;
@@ -1126,7 +1171,7 @@ fn adjust_window_if_mostly_offscreen(window: &WebviewWindow) -> tauri::Result<()
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
@@ -1138,6 +1183,58 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     let _ = adjust_window_if_mostly_offscreen(&main_window);
+                });
+            }
+
+            // System Tray
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+                let open_i = MenuItem::with_id(app, "tray_open", "SyncWatcher 열기", true, None::<&str>)?;
+                let quit_i = MenuItem::with_id(app, "tray_quit", "끝내기", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
+
+                let mut tray_builder = TrayIconBuilder::new()
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .tooltip("SyncWatcher");
+
+                if let Some(icon) = app.default_window_icon() {
+                    tray_builder = tray_builder.icon(icon.clone());
+                }
+
+                tray_builder
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "tray_open" => {
+                            restore_main_window_from_tray(app);
+                        }
+                        "tray_quit" => {
+                            let _ = app.emit("tray-quit-requested", ());
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            restore_main_window_from_tray(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
+            }
+
+            // main window close intercept
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = app_handle.emit("close-requested", ());
+                    }
                 });
             }
 
@@ -1235,6 +1332,8 @@ pub fn run() {
             list_sync_tasks,
             cancel_operation,
             send_notification,
+            hide_to_background,
+            quit_app,
             start_watch,
             stop_watch,
             get_watching_tasks,
@@ -1251,7 +1350,18 @@ pub fn run() {
             get_system_logs,
             get_task_logs,
             generate_licenses_report,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        ]);
+
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+            if code.is_none() {
+                api.prevent_exit();
+                let _ = app_handle.emit("close-requested", ());
+            }
+        }
+    });
 }

@@ -1,6 +1,14 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "app": {
+      "quitConfirmTitle": "Confirmar salida",
+      "quitConfirmMessage": "Hay tareas con Watch Mode activo o sincronizaciones en curso. ¿Seguro que quieres salir?",
+      "quitConfirmMessageStateUnknown": "No se pudo verificar el estado de sincronización. Para evitar interrumpir tareas activas, ¿seguro que quieres salir?",
+      "backgroundNotification": "SyncWatcher se está ejecutando en segundo plano.",
+      "backgroundIntroMessage": "SyncWatcher puede seguir ejecutándose en segundo plano al cerrar la ventana. Puedes cambiarlo en Configuración > Comportamiento.",
+      "loadingView": "Cargando vista..."
+    },
     "nav": {
       "dashboard": "Volúmenes",
       "syncTasks": "Tareas de Sincronización",
@@ -90,6 +98,19 @@
       "language": "Idioma",
       "darkMode": "Modo Oscuro",
       "systemTheme": "Tema del Sistema",
+      "themeSystem": "Sistema",
+      "themeLight": "Claro",
+      "themeDark": "Oscuro",
+      "sectionDisplay": "Pantalla",
+      "sectionSystem": "Sistema",
+      "sectionBehavior": "Comportamiento",
+      "stateLocation": "Ubicación del estado",
+      "stateLocationPlaceholder": "Predeterminado: Tauri AppData",
+      "maxLogLines": "Líneas máximas de registro",
+      "closeAction": "Acción al cerrar",
+      "closeActionDesc": "Elige qué pasa al cerrar la aplicación",
+      "closeActionQuit": "Salir",
+      "closeActionBackground": "Ejecutar en segundo plano",
       "notifications": "Notificaciones",
       "deleteConfirmation": "Confirmación de Eliminación",
       "verifyAfterCopy": "Verificar después de copiar",
@@ -138,6 +159,13 @@
         "autoDetection": "Detecta automáticamente cambios de archivos en el directorio de origen",
         "realTime": "Inicia la sincronización inmediatamente cuando se modifican los archivos"
       },
+      "backgroundMode": {
+        "title": "Modo en segundo plano",
+        "description": "Mantiene la vigilancia y el runtime activos aunque cierres la ventana principal",
+        "closeAction": "Configura en Ajustes > Comportamiento si cerrar debe salir o pasar a segundo plano",
+        "trayOpen": "Usa el menú de bandeja 'SyncWatcher 열기' para volver a abrir la ventana",
+        "trayQuit": "El menú de bandeja '끝내기' siempre realiza una salida completa"
+      },
       "security": {
         "title": "Integridad de Datos",
         "description": "Asegure que sus datos permanezcan seguros y consistentes",
@@ -171,6 +199,7 @@
       "add": "Añadir",
       "close": "Cerrar",
       "ok": "Aceptar",
+      "browse": "Examinar",
       "loading": "Cargando...",
       "error": "Error",
       "success": "Éxito",

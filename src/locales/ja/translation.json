@@ -1,6 +1,14 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "app": {
+      "quitConfirmTitle": "終了の確認",
+      "quitConfirmMessage": "Watch Mode が有効なタスク、または同期中のタスクがあります。終了してもよろしいですか？",
+      "quitConfirmMessageStateUnknown": "現在の同期状態を確認できません。処理中の作業を中断しないため、終了してもよろしいですか？",
+      "backgroundNotification": "SyncWatcher はバックグラウンドで実行中です。",
+      "backgroundIntroMessage": "SyncWatcher はウィンドウを閉じてもバックグラウンドで実行できます。設定 > 動作 で終了動作を変更できます。",
+      "loadingView": "ビューを読み込み中..."
+    },
     "nav": {
       "dashboard": "ボリューム",
       "syncTasks": "同期タスク",
@@ -90,6 +98,19 @@
       "language": "言語",
       "darkMode": "ダークモード",
       "systemTheme": "システムテーマ",
+      "themeSystem": "システム",
+      "themeLight": "ライト",
+      "themeDark": "ダーク",
+      "sectionDisplay": "表示",
+      "sectionSystem": "システム",
+      "sectionBehavior": "動作",
+      "stateLocation": "状態保存先",
+      "stateLocationPlaceholder": "既定: Tauri AppData",
+      "maxLogLines": "最大ログ行数",
+      "closeAction": "終了時の動作",
+      "closeActionDesc": "アプリを閉じるときの動作を選択します",
+      "closeActionQuit": "終了",
+      "closeActionBackground": "バックグラウンド実行",
       "notifications": "通知",
       "deleteConfirmation": "削除確認",
       "verifyAfterCopy": "コピー後の検証",
@@ -138,6 +159,13 @@
         "autoDetection": "転送元ディレクトリのファイル変更を自動検出",
         "realTime": "ファイルが変更されると直ちに同期を開始"
       },
+      "backgroundMode": {
+        "title": "バックグラウンドモード",
+        "description": "メインウィンドウを閉じても監視とランタイム処理を継続します",
+        "closeAction": "設定 > 動作 で「終了」または「バックグラウンド実行」を選択できます",
+        "trayOpen": "トレイメニューの「SyncWatcher 열기」でウィンドウを再表示できます",
+        "trayQuit": "トレイメニューの「끝내기」は常に完全終了を実行します"
+      },
       "security": {
         "title": "データ整合性",
         "description": "データの安全性と一貫性を確保",
@@ -171,6 +199,7 @@
       "add": "追加",
       "close": "閉じる",
       "ok": "OK",
+      "browse": "参照",
       "loading": "読み込み中...",
       "error": "エラー",
       "success": "成功",

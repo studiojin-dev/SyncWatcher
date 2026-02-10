@@ -7,6 +7,7 @@ export interface Settings {
     notifications: boolean;
     stateLocation: string;
     maxLogLines: number;
+    closeAction: 'quit' | 'background';
 }
 
 const defaultSettings: Settings = {
@@ -15,6 +16,7 @@ const defaultSettings: Settings = {
     notifications: true,
     stateLocation: '',
     maxLogLines: 10000,
+    closeAction: 'quit',
 };
 
 const STORAGE_KEY = 'syncwatcher_settings';
