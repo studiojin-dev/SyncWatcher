@@ -9,9 +9,9 @@ import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
-// DashboardView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
-import DashboardView from './views/DashboardView';
-const SyncTasksView = lazy(() => import('./views/SyncTasksView'));
+// SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
+import SyncTasksView from './views/SyncTasksView';
+const DashboardView = lazy(() => import('./views/DashboardView'));
 const ActivityLogView = lazy(() => import('./views/ActivityLogView'));
 const SettingsView = lazy(() => import('./views/SettingsView'));
 const HelpView = lazy(() => import('./views/HelpView'));
@@ -22,7 +22,7 @@ const AboutView = lazy(() => import('./views/AboutView'));
  * State-based page routing with AppShell layout
  */
 function AppContent() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('sync-tasks');
   const { loaded: settingsLoaded } = useSettings();
   const { loaded: tasksLoaded } = useSyncTasksContext();
   const { loaded: setsLoaded } = useExclusionSetsContext();

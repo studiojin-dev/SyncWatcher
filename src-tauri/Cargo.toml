@@ -46,3 +46,4 @@ tempfile = "3.10"
 [[bin]]
 name = "sync-cli"
 path = "src/bin/sync-cli.rs"
+

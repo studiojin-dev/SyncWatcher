@@ -20,8 +20,8 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-    { id: 'dashboard', labelKey: 'nav.dashboard', icon: IconDashboard },
     { id: 'sync-tasks', labelKey: 'nav.syncTasks', icon: IconRefresh },
+    { id: 'dashboard', labelKey: 'nav.dashboard', icon: IconDashboard },
     { id: 'activity-log', labelKey: 'nav.activityLog', icon: IconHistory },
     { id: 'settings', labelKey: 'nav.settings', icon: IconSettings },
     { id: 'help', labelKey: 'nav.help', icon: IconHelp },

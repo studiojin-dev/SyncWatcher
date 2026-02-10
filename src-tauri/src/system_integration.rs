@@ -25,8 +25,9 @@ pub struct VolumeInfo {
     pub name: String,
     pub path: PathBuf,
     pub mount_point: PathBuf,
-    pub total_bytes: u64,
-    pub available_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub available_bytes: Option<u64>,
+    pub is_network: bool,
     pub is_removable: bool,
     /// 파일시스템 UUID (포맷 시 변경될 수 있음)
     pub volume_uuid: Option<String>,
@@ -89,113 +90,38 @@ impl DiskMonitor {
     }
 
     /// 볼륨 목록을 조회합니다.
-    /// 
-    /// 성능 최적화: statvfs 시스템 콜로 용량을 조회합니다.
-    /// UUID는 diskutil info를 호출하여 조회합니다 (볼륨 식별에 필요).
+    ///
+    /// macOS 마운트 테이블(getmntinfo_r_np)을 기준으로 사용자 노출 볼륨을 열거합니다.
+    /// 네트워크 마운트는 목록에 포함하지만 용량은 계산하지 않습니다.
     pub fn list_volumes(&self) -> Result<Vec<VolumeInfo>> {
+        let mount_entries = list_mount_entries()?;
         let mut volumes = Vec::new();
 
-        if let Ok(entries) = std::fs::read_dir("/Volumes") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-
-                if let Ok(meta) = std::fs::metadata(&path) {
-                    if meta.is_dir() {
-                        let name = path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("Unknown")
-                            .to_string();
-
-                        // statvfs 시스템 콜로 용량 조회 (매우 빠름)
-                        if let (Ok(total), Ok(available)) =
-                            (get_disk_space(&path), get_available_space(&path))
-                        {
-                            let is_removable = Self::is_removable_volume(&path);
-                            // UUID는 볼륨 식별에 필요하므로 조회
-                            let (volume_uuid, disk_uuid) = Self::get_volume_uuid(&path);
-
-                            volumes.push(VolumeInfo {
-                                name,
-                                path: path.clone(),
-                                mount_point: path,
-                                total_bytes: total,
-                                available_bytes: available,
-                                is_removable,
-                                volume_uuid,
-                                disk_uuid,
-                            });
-                        }
-                    }
-                }
+        for entry in mount_entries {
+            if !is_user_visible_mount(&entry.mount_point, entry.flags) {
+                continue;
             }
+
+            let is_network = is_network_mount(entry.flags);
+            let is_removable = is_removable_mount(&entry, is_network);
+
+            // UUID 조회는 로컬 볼륨에서만 best-effort로 수행.
+            let (volume_uuid, disk_uuid) = if is_network {
+                (None, None)
+            } else {
+                Self::get_volume_uuid(&entry.mount_point)
+            };
+
+            volumes.push(volume_info_from_mount(
+                &entry,
+                is_network,
+                is_removable,
+                volume_uuid,
+                disk_uuid,
+            ));
         }
 
         Ok(volumes)
-    }
-
-    fn is_removable_volume(path: &Path) -> bool {
-        let volume_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-        // Non-removable system volumes
-        let non_removable = [
-            "Macintosh HD",
-            "Preboot",
-            "Recovery",
-            "Data",
-            "System",
-            "VM",
-        ];
-
-        // Check if it's a known system volume
-        if non_removable.contains(&volume_name) {
-            return false;
-        }
-
-        // Check if it's a Time Machine volume
-        if Self::is_time_machine_volume(path) {
-            return false;
-        }
-
-        // Check if it's a system path
-        if Self::is_system_volume(path) {
-            return false;
-        }
-
-        true
-    }
-
-    fn is_time_machine_volume(path: &Path) -> bool {
-        // Check for .timemachine file
-        if path.join(".timemachine").exists() {
-            return true;
-        }
-
-        // Check for com.apple.TimeMachine.MachineID.plist
-        if path.join(".com.apple.TimeMachine.MachineID.plist").exists() {
-            return true;
-        }
-
-        // Check volume name patterns
-        let volume_name = path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-
-        volume_name.contains("time machine") 
-            || volume_name.contains("timemachine")
-            || volume_name.contains("backup")
-    }
-
-    fn is_system_volume(path: &Path) -> bool {
-        // Check if mounted under /System/Volumes
-        if let Some(path_str) = path.to_str() {
-            if path_str.starts_with("/System/Volumes/") {
-                return true;
-            }
-        }
-
-        false
     }
 
     /// Get only removable volumes (USB, SD cards, external drives)
@@ -276,14 +202,182 @@ impl DiskMonitor {
     }
 }
 
-fn get_disk_space(path: &Path) -> Result<u64> {
-    let stat = nix::sys::statvfs::statvfs(path)?;
-    Ok(stat.blocks() as u64 * stat.block_size() as u64)
+#[derive(Debug, Clone)]
+struct MountEntry {
+    mount_point: PathBuf,
+    mount_from: String,
+    flags: u32,
+    block_size: u64,
+    blocks: u64,
+    blocks_available: u64,
 }
 
-fn get_available_space(path: &Path) -> Result<u64> {
-    let stat = nix::sys::statvfs::statvfs(path)?;
-    Ok(stat.blocks_available() as u64 * stat.block_size() as u64)
+const ROOT_MOUNT: &str = "/";
+const VOLUMES_ROOT: &str = "/Volumes/";
+
+fn c_char_buffer_to_string(buffer: &[nix::libc::c_char]) -> String {
+    let bytes: Vec<u8> = buffer
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+fn mount_name(path: &Path) -> String {
+    if path == Path::new(ROOT_MOUNT) {
+        return "Macintosh HD".to_string();
+    }
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
+fn is_user_visible_mount(path: &Path, flags: u32) -> bool {
+    if path == Path::new(ROOT_MOUNT) {
+        return true;
+    }
+
+    let Some(path_str) = path.to_str() else {
+        return false;
+    };
+
+    if !path_str.starts_with(VOLUMES_ROOT) {
+        return false;
+    }
+
+    if flags & nix::libc::MNT_DONTBROWSE as u32 != 0 {
+        return false;
+    }
+
+    let volume_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if volume_name.starts_with('.') {
+        return false;
+    }
+
+    if volume_name == "com.apple.timemachine.localsnapshots" {
+        return false;
+    }
+
+    if path_str.contains("/.timemachine/") || path_str.ends_with("/.timemachine") {
+        return false;
+    }
+
+    true
+}
+
+fn is_network_mount(flags: u32) -> bool {
+    flags & nix::libc::MNT_LOCAL as u32 == 0
+}
+
+fn is_removable_mount(entry: &MountEntry, is_network: bool) -> bool {
+    if is_network {
+        return false;
+    }
+
+    let Some(path_str) = entry.mount_point.to_str() else {
+        return false;
+    };
+
+    if !path_str.starts_with(VOLUMES_ROOT) {
+        return false;
+    }
+
+    entry.mount_from.starts_with("/dev/")
+}
+
+fn volume_info_from_mount(
+    entry: &MountEntry,
+    is_network: bool,
+    is_removable: bool,
+    volume_uuid: Option<String>,
+    disk_uuid: Option<String>,
+) -> VolumeInfo {
+    let (total_bytes, available_bytes) = if is_network {
+        (None, None)
+    } else {
+        (
+            Some(entry.blocks.saturating_mul(entry.block_size)),
+            Some(entry.blocks_available.saturating_mul(entry.block_size)),
+        )
+    };
+
+    VolumeInfo {
+        name: mount_name(&entry.mount_point),
+        path: entry.mount_point.clone(),
+        mount_point: entry.mount_point.clone(),
+        total_bytes,
+        available_bytes,
+        is_network,
+        is_removable,
+        volume_uuid,
+        disk_uuid,
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn getmntinfo_r_np(
+        mntbufp: *mut *mut nix::libc::statfs,
+        flags: nix::libc::c_int,
+    ) -> nix::libc::c_int;
+}
+
+#[cfg(target_os = "macos")]
+fn list_mount_entries() -> Result<Vec<MountEntry>> {
+    let mut mount_buf: *mut nix::libc::statfs = std::ptr::null_mut();
+    let count = unsafe {
+        // SAFETY: getmntinfo_r_np writes a pointer to an allocated statfs array on success.
+        getmntinfo_r_np(&mut mount_buf, nix::libc::MNT_NOWAIT)
+    };
+
+    if count <= 0 || mount_buf.is_null() {
+        return Err(anyhow::anyhow!(
+            "Failed to list mounted filesystems: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+
+    let mount_slice = unsafe {
+        // SAFETY: count and pointer are returned by getmntinfo_r_np above.
+        std::slice::from_raw_parts(mount_buf, count as usize)
+    };
+
+    let mut entries = Vec::with_capacity(count as usize);
+    for stat in mount_slice {
+        let mount_point = PathBuf::from(c_char_buffer_to_string(&stat.f_mntonname));
+        if mount_point.as_os_str().is_empty() {
+            continue;
+        }
+
+        entries.push(MountEntry {
+            mount_point,
+            mount_from: c_char_buffer_to_string(&stat.f_mntfromname),
+            flags: stat.f_flags as u32,
+            block_size: stat.f_bsize as u64,
+            blocks: stat.f_blocks as u64,
+            blocks_available: stat.f_bavail as u64,
+        });
+    }
+
+    unsafe {
+        // SAFETY: getmntinfo_r_np allocates this buffer and requires the caller to free it.
+        nix::libc::free(mount_buf.cast());
+    }
+
+    Ok(entries)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn list_mount_entries() -> Result<Vec<MountEntry>> {
+    Err(anyhow::anyhow!("list_mount_entries is only supported on macOS"))
 }
 
 #[cfg(test)]
@@ -345,5 +439,46 @@ mod tests {
         let (vol_uuid, disk_uuid) = DiskMonitor::parse_volume_uuids_from_plist(xml.as_bytes());
         assert_eq!(vol_uuid, None);
         assert_eq!(disk_uuid, None);
+    }
+
+    #[test]
+    fn test_is_user_visible_mount_filters_expected_paths() {
+        let browsable_flags = 0u32;
+
+        assert!(is_user_visible_mount(Path::new("/"), browsable_flags));
+        assert!(is_user_visible_mount(Path::new("/Volumes/EVO990"), browsable_flags));
+        assert!(!is_user_visible_mount(Path::new("/System/Volumes/VM"), browsable_flags));
+        assert!(!is_user_visible_mount(Path::new("/Volumes/.timemachine"), browsable_flags));
+        assert!(!is_user_visible_mount(
+            Path::new("/Volumes/.timemachine/backup"),
+            browsable_flags
+        ));
+        assert!(!is_user_visible_mount(
+            Path::new("/Volumes/com.apple.TimeMachine.localsnapshots"),
+            browsable_flags
+        ));
+        assert!(!is_user_visible_mount(
+            Path::new("/Volumes/Visible"),
+            nix::libc::MNT_DONTBROWSE as u32
+        ));
+    }
+
+    #[test]
+    fn test_network_mount_capacity_is_none() {
+        let entry = MountEntry {
+            mount_point: PathBuf::from("/Volumes/NAS"),
+            mount_from: "//nas.local/share".to_string(),
+            flags: 0, // MNT_LOCAL 미포함 = 네트워크 마운트
+            block_size: 4096,
+            blocks: 100,
+            blocks_available: 40,
+        };
+
+        let volume = volume_info_from_mount(&entry, true, false, None, None);
+
+        assert!(volume.is_network);
+        assert_eq!(volume.total_bytes, None);
+        assert_eq!(volume.available_bytes, None);
+        assert!(!volume.is_removable);
     }
 }

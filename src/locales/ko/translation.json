@@ -2,7 +2,7 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "대시보드",
+      "dashboard": "볼륨",
       "syncTasks": "동기화 작업",
       "activityLog": "활동 로그",
       "settings": "설정",
@@ -10,7 +10,7 @@
       "about": "정보"
     },
     "dashboard": {
-      "title": "대시보드",
+      "title": "볼륨",
       "noDevices": "연결된 장치 없음",
       "currentSpeed": "현재 속도",
       "freeSpace": "여유 공간",
@@ -21,7 +21,9 @@
       "warning": "경고",
       "refresh": "새로고침",
       "bytesPerSecond": "바이트/초",
-      "analyzing": "분석중..."
+      "analyzing": "분석중...",
+      "capacityUnavailable": "N/A",
+      "networkCapacityUnavailable": "N/A - 네트워크 연결"
     },
     "logs": {
       "title": "작업 로그"

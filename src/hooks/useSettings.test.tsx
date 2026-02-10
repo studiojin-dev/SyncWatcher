@@ -103,7 +103,8 @@ describe('useSettings', () => {
     });
 
     expect(localStorageMock.setItem).toHaveBeenCalled();
-    const lastCall = localStorageMock.setItem.mock.calls.at(-1);
+    const calls = localStorageMock.setItem.mock.calls;
+    const lastCall = calls[calls.length - 1];
     const parsed = JSON.parse(lastCall![1]);
 
     expect(parsed.language).toBe('es');

@@ -31,8 +31,9 @@ vi.mock('react-i18next', () => ({
 type VolumeInfo = {
   name: string;
   mount_point: string;
-  total_bytes: number;
-  available_bytes: number;
+  total_bytes: number | null;
+  available_bytes: number | null;
+  is_network: boolean;
   is_removable: boolean;
 };
 
@@ -58,6 +59,7 @@ function sampleVolume(name: string, mountPoint: string): VolumeInfo {
     mount_point: mountPoint,
     total_bytes: 100,
     available_bytes: 40,
+    is_network: false,
     is_removable: true,
   };
 }
@@ -180,5 +182,26 @@ describe('DashboardView', () => {
     });
 
     warnSpy.mockRestore();
+  });
+
+  it('renders network volume with N/A capacity label', async () => {
+    mockInvoke.mockResolvedValueOnce([
+      {
+        name: 'NAS',
+        mount_point: '/Volumes/NAS',
+        total_bytes: null,
+        available_bytes: null,
+        is_network: true,
+        is_removable: false,
+      } satisfies VolumeInfo,
+    ]);
+
+    render(<DashboardView />);
+
+    await waitFor(() => {
+      expect(screen.getByText('/Volumes/NAS')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('N/A - 네트워크 연결')).toBeInTheDocument();
   });
 });

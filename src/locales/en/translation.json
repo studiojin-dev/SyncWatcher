@@ -2,7 +2,7 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "Dashboard",
+      "dashboard": "Volumes",
       "syncTasks": "Sync Tasks",
       "activityLog": "Activity Log",
       "settings": "Settings",
@@ -10,7 +10,7 @@
       "about": "About"
     },
     "dashboard": {
-      "title": "Dashboard",
+      "title": "Volumes",
       "noDevices": "No devices connected",
       "currentSpeed": "Current Speed",
       "freeSpace": "Free Space",
@@ -18,7 +18,9 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "bytesPerSecond": "bytes/s",
-      "analyzing": "Analyzing..."
+      "analyzing": "Analyzing...",
+      "capacityUnavailable": "N/A",
+      "networkCapacityUnavailable": "N/A - Network connection"
     },
     "logs": {
       "title": "Task Logs"

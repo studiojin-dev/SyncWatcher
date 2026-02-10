@@ -9,8 +9,9 @@ import { CardAnimation, FadeIn } from '../components/ui/Animations';
 interface VolumeInfo {
     name: string;
     mount_point: string;
-    total_bytes: number;
-    available_bytes: number;
+    total_bytes: number | null;
+    available_bytes: number | null;
+    is_network: boolean;
     is_removable: boolean;
     /** 파일시스템 UUID (포맷 시 변경될 수 있음) */
     volume_uuid?: string;
@@ -33,7 +34,12 @@ function loadCachedVolumes(): VolumeInfo[] {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed)) {
                 console.debug('[DashboardView] Loaded cached volumes', { count: parsed.length });
-                return parsed;
+                return parsed.map((volume) => ({
+                    ...volume,
+                    total_bytes: typeof volume?.total_bytes === 'number' ? volume.total_bytes : null,
+                    available_bytes: typeof volume?.available_bytes === 'number' ? volume.available_bytes : null,
+                    is_network: Boolean(volume?.is_network),
+                })) as VolumeInfo[];
             }
         }
     } catch (err) {

@@ -2,7 +2,7 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "Panel de Control",
+      "dashboard": "Volúmenes",
       "syncTasks": "Tareas de Sincronización",
       "activityLog": "Registro de Actividad",
       "settings": "Configuración",
@@ -10,7 +10,7 @@
       "about": "Acerca de"
     },
     "dashboard": {
-      "title": "Panel de Control",
+      "title": "Volúmenes",
       "noDevices": "No hay dispositivos conectados",
       "currentSpeed": "Velocidad Actual",
       "freeSpace": "Espacio Libre",
@@ -21,7 +21,9 @@
       "warning": "Advertencia",
       "refresh": "Actualizar",
       "bytesPerSecond": "bytes/s",
-      "analyzing": "Analizando..."
+      "analyzing": "Analizando...",
+      "capacityUnavailable": "N/A",
+      "networkCapacityUnavailable": "N/A - Conexión de red"
     },
     "logs": {
       "title": "Registros de Tarea"

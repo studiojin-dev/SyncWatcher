@@ -5,8 +5,9 @@ export interface VolumeInfo {
     name: string;
     path: string;
     mount_point: string;
-    total_bytes: number;
-    available_bytes: number;
+    total_bytes: number | null;
+    available_bytes: number | null;
+    is_network: boolean;
     is_removable: boolean;
 }
 

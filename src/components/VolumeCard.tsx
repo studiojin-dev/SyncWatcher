@@ -4,8 +4,9 @@ import { IconDeviceDesktop, IconUsb } from '@tabler/icons-react';
 interface VolumeInfo {
     name: string;
     mount_point: string;
-    total_bytes: number;
-    available_bytes: number;
+    total_bytes: number | null;
+    available_bytes: number | null;
+    is_network: boolean;
     is_removable: boolean;
 }
 
@@ -18,7 +19,8 @@ interface VolumeCardProps {
  */
 function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
-    const k = 1024;
+    // macOS Finder/Disk Utility convention: decimal units (base 1000)
+    const k = 1000;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
@@ -29,11 +31,18 @@ function formatBytes(bytes: number): string {
  * Shows volume name, mount point, free/total space
  */
 function VolumeCard({ volume }: VolumeCardProps) {
-    useTranslation();
-    const usedBytes = volume.total_bytes - volume.available_bytes;
-    const usagePercent = volume.total_bytes > 0
-        ? Math.round((usedBytes / volume.total_bytes) * 100)
+    const { t } = useTranslation();
+    const hasCapacity = typeof volume.total_bytes === 'number'
+        && typeof volume.available_bytes === 'number';
+    const totalBytes = volume.total_bytes ?? 0;
+    const availableBytes = volume.available_bytes ?? 0;
+    const usedBytes = totalBytes - availableBytes;
+    const usagePercent = hasCapacity && totalBytes > 0
+        ? Math.round((usedBytes / totalBytes) * 100)
         : 0;
+    const unavailableLabel = volume.is_network
+        ? t('dashboard.networkCapacityUnavailable', 'N/A - 네트워크 연결')
+        : t('dashboard.capacityUnavailable', 'N/A');
 
     return (
         <div className="neo-box p-5 hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0_0_var(--shadow-color)] transition-all">
@@ -58,7 +67,7 @@ function VolumeCard({ volume }: VolumeCardProps) {
             </div>
 
             {/* Progress Bar (Neo) */}
-            <div className="relative h-6 w-full bg-[var(--bg-secondary)] border-2 border-[var(--border-main)] mb-3">
+            <div className={`relative h-6 w-full bg-[var(--bg-secondary)] border-2 border-[var(--border-main)] mb-3 ${hasCapacity ? '' : 'opacity-40'}`}>
                 <div
                     className="h-full bg-[var(--accent-main)] border-r-2 border-[var(--border-main)] relative overflow-hidden"
                     style={{ width: `${usagePercent}%` }}
@@ -68,14 +77,22 @@ function VolumeCard({ volume }: VolumeCardProps) {
                 </div>
             </div>
 
-            <div className="flex justify-between items-center font-mono text-xs font-bold">
-                <span className="bg-[var(--accent-success)] text-black px-2 py-1 border-2 border-[var(--border-main)] shadow-[2px_2px_0_0_#000]">
-                    {formatBytes(volume.available_bytes)} FREE
-                </span>
-                <span className="text-[var(--text-secondary)]">
-                    / {formatBytes(volume.total_bytes)}
-                </span>
-            </div>
+            {hasCapacity ? (
+                <div className="flex justify-between items-center font-mono text-xs font-bold">
+                    <span className="bg-[var(--accent-success)] text-black px-2 py-1 border-2 border-[var(--border-main)] shadow-[2px_2px_0_0_#000]">
+                        {formatBytes(availableBytes)} FREE
+                    </span>
+                    <span className="text-[var(--text-secondary)]">
+                        / {formatBytes(totalBytes)}
+                    </span>
+                </div>
+            ) : (
+                <div className="font-mono text-xs font-bold">
+                    <span className="bg-[var(--bg-secondary)] text-[var(--text-secondary)] px-2 py-1 border-2 border-[var(--border-main)] inline-block">
+                        {unavailableLabel}
+                    </span>
+                </div>
+            )}
         </div>
     );
 }

@@ -50,19 +50,27 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", "-".repeat(65));
 
                 for vol in volumes {
-                    let type_str = if vol.is_removable {
+                    let type_str = if vol.is_network {
+                        "Network"
+                    } else if vol.is_removable {
                         "Removable"
                     } else {
                         "Fixed"
                     };
-                    let total_gb = vol.total_bytes as f64 / 1_073_741_824.0;
-                    let avail_gb = vol.available_bytes as f64 / 1_073_741_824.0;
+                    let total_label = vol
+                        .total_bytes
+                        .map(|bytes| format!("{:.2} GB", bytes as f64 / 1_000_000_000.0))
+                        .unwrap_or_else(|| "N/A - Network".to_string());
+                    let avail_label = vol
+                        .available_bytes
+                        .map(|bytes| format!("{:.2} GB", bytes as f64 / 1_000_000_000.0))
+                        .unwrap_or_else(|| "N/A - Network".to_string());
 
                     println!(
-                        "{:<20} {:<15.2} {:<15.2} {:<15}",
+                        "{:<20} {:<15} {:<15} {:<15}",
                         vol.name,
-                        format!("{:.2} GB", total_gb),
-                        format!("{:.2} GB", avail_gb),
+                        total_label,
+                        avail_label,
                         type_str
                     );
                 }

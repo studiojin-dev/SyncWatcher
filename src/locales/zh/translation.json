@@ -2,7 +2,7 @@
   "translation": {
     "appName": "SyncWatcher",
     "nav": {
-      "dashboard": "仪表板",
+      "dashboard": "卷",
       "syncTasks": "同步任务",
       "activityLog": "活动日志",
       "settings": "设置",
@@ -10,7 +10,7 @@
       "about": "关于"
     },
     "dashboard": {
-      "title": "仪表板",
+      "title": "卷",
       "noDevices": "未连接设备",
       "currentSpeed": "当前速度",
       "freeSpace": "剩余空间",
@@ -21,7 +21,9 @@
       "warning": "警告",
       "refresh": "刷新",
       "bytesPerSecond": "字节/秒",
-      "analyzing": "分析中..."
+      "analyzing": "分析中...",
+      "capacityUnavailable": "N/A",
+      "networkCapacityUnavailable": "N/A - 网络连接"
     },
     "logs": {
       "title": "任务日志"

@@ -18,8 +18,9 @@ import CancelConfirmModal from '../components/ui/CancelConfirmModal';
 interface VolumeInfo {
     name: string;
     mount_point: string;
-    total_bytes: number;
-    available_bytes: number;
+    total_bytes: number | null;
+    available_bytes: number | null;
+    is_network: boolean;
     is_removable: boolean;
     volume_uuid?: string;
     disk_uuid?: string;
@@ -95,6 +96,13 @@ function SyncTasksView() {
 
     // Cancel confirmation state
     const [cancelConfirm, setCancelConfirm] = useState<{ type: 'sync' | 'dryRun'; taskId: string } | null>(null);
+
+    const formatVolumeSize = useCallback((volume: VolumeInfo): string => {
+        if (typeof volume.total_bytes !== 'number') {
+            return t('dashboard.networkCapacityUnavailable', { defaultValue: 'N/A - 네트워크 연결' });
+        }
+        return `${(volume.total_bytes / 1_000_000_000).toFixed(1)} GB`;
+    }, [t]);
 
     // 볼륨 목록 로드
     const loadVolumes = async () => {
@@ -523,7 +531,7 @@ function SyncTasksView() {
                                                 placeholder={loadingVolumes ? '로딩 중...' : t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' })}
                                                 data={volumes.map(v => ({
                                                     value: v.disk_uuid || '',
-                                                    label: `${v.name} (${(v.total_bytes / 1024 / 1024 / 1024).toFixed(1)} GB)`,
+                                                    label: `${v.name} (${formatVolumeSize(v)})`,
                                                     disabled: !v.disk_uuid,
                                                 }))}
                                                 value={sourceUuid}
