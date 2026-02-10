@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { IconX, IconRefresh, IconArrowDown } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { isTaskVisibleCategory } from '../../types/logCategories';
 
 interface LogEntry {
     id: string;
@@ -12,6 +13,7 @@ interface LogEntry {
     level: string;
     message: string;
     task_id?: string;
+    category?: string;
 }
 
 interface LogBatchEvent {
@@ -23,6 +25,10 @@ interface TaskLogsModalProps {
     taskId: string;
     taskName: string;
     onClose: () => void;
+}
+
+function isTaskVisibleLog(entry: LogEntry): boolean {
+    return isTaskVisibleCategory(entry.category);
 }
 
 export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsModalProps) {
@@ -37,7 +43,9 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
         try {
             const data = await invoke<LogEntry[]>('get_task_logs', { taskId });
             // Sort by timestamp ascending (oldest first) for log view usually
-            const sorted = data.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            const sorted = data
+                .filter(isTaskVisibleLog)
+                .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
             setLogs(sorted);
 
             // Scroll to bottom after load
@@ -55,7 +63,7 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
 
         // Listen for new log events (Single)
         const unlistenSinglePromise = listen<{ task_id?: string; entry: LogEntry }>('new-log-task', (event) => {
-            if (event.payload.task_id === taskId) {
+            if (event.payload.task_id === taskId && isTaskVisibleLog(event.payload.entry)) {
                 setLogs(prevLogs => {
                     const newLogs = [...prevLogs, event.payload.entry];
                     // Keep max 10000 logs (matches backend)
@@ -71,7 +79,11 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
         const unlistenBatchPromise = listen<LogBatchEvent>('new-logs-batch', (event) => {
             if (event.payload.task_id === taskId) {
                 setLogs(prevLogs => {
-                    const newLogs = [...prevLogs, ...event.payload.entries];
+                    const filteredEntries = event.payload.entries.filter(isTaskVisibleLog);
+                    if (filteredEntries.length === 0) {
+                        return prevLogs;
+                    }
+                    const newLogs = [...prevLogs, ...filteredEntries];
                     if (newLogs.length > 10000) {
                         return newLogs.slice(newLogs.length - 10000);
                     }

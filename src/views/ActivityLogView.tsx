@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { IconRefresh } from '@tabler/icons-react';
+import { isActivityVisibleCategory } from '../types/logCategories';
 
 interface LogEntry {
   id: string;
   timestamp: string;
-  level: 'info' | 'warning' | 'error';
+  level: 'info' | 'warning' | 'error' | 'success';
   message: string;
-  taskId?: string;
+  task_id?: string;
+  category?: string;
 }
 
 function ActivityLogView() {
@@ -21,7 +23,9 @@ function ActivityLogView() {
     try {
       const result = await invoke<LogEntry[]>('get_system_logs');
       // 최신 로그가 상단에 오도록 정렬
-      setLogs(result.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+      setLogs(result
+        .filter((entry) => isActivityVisibleCategory(entry.category))
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
     } catch (error) {
       console.error('Failed to load logs:', error);
     } finally {
@@ -41,6 +45,8 @@ function ActivityLogView() {
         return <div style={{ color: 'var(--status-warning-text)' }}>⚠️</div>;
       case 'error':
         return <div style={{ color: 'var(--status-error-text)' }}>❌</div>;
+      case 'success':
+        return <div style={{ color: 'var(--status-success-text)' }}>✅</div>;
     }
   };
 
@@ -78,9 +84,9 @@ function ActivityLogView() {
                 <span className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wider">
                   [{log.timestamp}]
                 </span>
-                {log.taskId && (
+                {log.task_id && (
                   <span className="px-1 py-0 text-[10px] border border-[var(--border-main)] bg-[var(--bg-tertiary)]">
-                    TASK:{log.taskId}
+                    TASK:{log.task_id}
                   </span>
                 )}
               </div>
@@ -101,4 +107,3 @@ function ActivityLogView() {
 }
 
 export default ActivityLogView;
-

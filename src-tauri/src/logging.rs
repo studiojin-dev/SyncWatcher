@@ -1,8 +1,8 @@
+use crate::AppState;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 use tauri::Emitter;
-use crate::AppState;
 
 /// Default maximum number of log lines to keep in memory
 pub const DEFAULT_MAX_LOG_LINES: usize = 10000;
@@ -14,6 +14,51 @@ pub struct LogEntry {
     pub level: String,
     pub message: String,
     pub task_id: Option<String>,
+    #[serde(default)]
+    pub category: LogCategory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum LogCategory {
+    SyncStarted,
+    SyncCompleted,
+    SyncError,
+    WatchStarted,
+    WatchStopped,
+    VolumeMounted,
+    VolumeUnmounted,
+    FileCopied,
+    FileDeleted,
+    #[default]
+    Other,
+}
+
+impl LogCategory {
+    pub fn is_activity_visible(&self) -> bool {
+        matches!(
+            self,
+            LogCategory::SyncStarted
+                | LogCategory::SyncCompleted
+                | LogCategory::SyncError
+                | LogCategory::WatchStarted
+                | LogCategory::WatchStopped
+                | LogCategory::VolumeMounted
+                | LogCategory::VolumeUnmounted
+        )
+    }
+
+    pub fn is_task_visible(&self) -> bool {
+        matches!(
+            self,
+            LogCategory::SyncStarted
+                | LogCategory::SyncCompleted
+                | LogCategory::SyncError
+                | LogCategory::WatchStarted
+                | LogCategory::WatchStopped
+                | LogCategory::FileCopied
+                | LogCategory::FileDeleted
+        )
+    }
 }
 
 /// Event emitted when a new log entry is added
@@ -43,81 +88,174 @@ impl LogManager {
         }
     }
 
-    pub fn log_with_event(&self, level: &str, message: &str, task_id: Option<String>, app: Option<&tauri::AppHandle>) {
+    fn build_entry(
+        level: &str,
+        message: &str,
+        task_id: Option<String>,
+        category: LogCategory,
+    ) -> LogEntry {
         let now = chrono::Utc::now().to_rfc3339();
-        let entry = LogEntry {
+        LogEntry {
             id: now.clone(),
             timestamp: now,
             level: level.to_string(),
             message: message.to_string(),
-            task_id: task_id.clone(),
-        };
-
-        let mut logs = self.system_logs.lock().unwrap();
-        logs.push_back(entry.clone()); // Add to end
-
-        // Remove from front if full
-        while logs.len() > self.max_lines {
-            logs.pop_front();
-        }
-
-        // Emit event to frontend if app handle is provided
-        if let Some(app) = app {
-            let _ = app.emit("new-log-task", &LogEvent {
-                task_id: task_id.clone(),
-                entry,
-            });
+            task_id,
+            category,
         }
     }
 
-    /// Add multiple logs at once and optionally emit a batch event
-    pub fn log_batch(&self, entries: Vec<LogEntry>, task_id: Option<String>, app: Option<&tauri::AppHandle>) {
-        if entries.is_empty() { return; }
-
+    fn append_entries(&self, entries: &[LogEntry]) {
         let mut logs = self.system_logs.lock().unwrap();
-        
-        for entry in &entries {
+        for entry in entries {
             logs.push_back(entry.clone());
         }
 
         while logs.len() > self.max_lines {
             logs.pop_front();
         }
+    }
+
+    pub fn log_with_category_and_event(
+        &self,
+        level: &str,
+        message: &str,
+        task_id: Option<String>,
+        category: LogCategory,
+        app: Option<&tauri::AppHandle>,
+    ) {
+        let entry = Self::build_entry(level, message, task_id.clone(), category);
+        self.append_entries(std::slice::from_ref(&entry));
 
         if let Some(app) = app {
-            let _ = app.emit("new-logs-batch", &LogBatchEvent {
-                task_id,
-                entries,
-            });
+            let _ = app.emit(
+                "new-log-task",
+                &LogEvent {
+                    task_id: task_id.clone(),
+                    entry,
+                },
+            );
         }
     }
 
+    pub fn log_with_event(
+        &self,
+        level: &str,
+        message: &str,
+        task_id: Option<String>,
+        app: Option<&tauri::AppHandle>,
+    ) {
+        self.log_with_category_and_event(level, message, task_id, LogCategory::Other, app);
+    }
+
+    pub fn log_with_category(
+        &self,
+        level: &str,
+        message: &str,
+        task_id: Option<String>,
+        category: LogCategory,
+    ) {
+        self.log_with_category_and_event(level, message, task_id, category, None);
+    }
+
+    /// Add multiple logs at once and optionally emit a batch event
+    pub fn log_batch_entries(
+        &self,
+        entries: Vec<LogEntry>,
+        task_id: Option<String>,
+        app: Option<&tauri::AppHandle>,
+    ) {
+        if entries.is_empty() {
+            return;
+        }
+        self.append_entries(&entries);
+
+        if let Some(app) = app {
+            let _ = app.emit("new-logs-batch", &LogBatchEvent { task_id, entries });
+        }
+    }
+
+    pub fn log_batch_with_category(
+        &self,
+        mut entries: Vec<LogEntry>,
+        task_id: Option<String>,
+        category: LogCategory,
+        app: Option<&tauri::AppHandle>,
+    ) {
+        for entry in &mut entries {
+            entry.category = category.clone();
+        }
+        self.log_batch_entries(entries, task_id, app);
+    }
+
+    /// Backward-compatible API: defaults all batch entries to Other category.
+    pub fn log_batch(
+        &self,
+        entries: Vec<LogEntry>,
+        task_id: Option<String>,
+        app: Option<&tauri::AppHandle>,
+    ) {
+        self.log_batch_with_category(entries, task_id, LogCategory::Other, app);
+    }
+
     pub fn log(&self, level: &str, message: &str, task_id: Option<String>) {
-        self.log_with_event(level, message, task_id, None);
+        self.log_with_category(level, message, task_id, LogCategory::Other);
     }
 
     pub fn get_logs(&self, task_id: Option<String>) -> Vec<LogEntry> {
         let logs = self.system_logs.lock().unwrap();
         match task_id {
-            Some(id) => logs.iter().filter(|l| l.task_id.as_ref() == Some(&id)).cloned().collect(),
+            Some(id) => logs
+                .iter()
+                .filter(|l| l.task_id.as_ref() == Some(&id))
+                .cloned()
+                .collect(),
             None => logs.iter().cloned().collect(),
         }
     }
 
+    pub fn get_activity_logs(&self) -> Vec<LogEntry> {
+        let logs = self.system_logs.lock().unwrap();
+        logs.iter()
+            .filter(|entry| entry.category.is_activity_visible())
+            .cloned()
+            .collect()
+    }
+
+    pub fn get_task_logs_filtered(&self, task_id: &str) -> Vec<LogEntry> {
+        let logs = self.system_logs.lock().unwrap();
+        logs.iter()
+            .filter(|entry| entry.task_id.as_deref() == Some(task_id))
+            .filter(|entry| entry.category.is_task_visible())
+            .cloned()
+            .collect()
+    }
+
     /// Get logs with pagination for better performance with large log sets
-    pub fn get_logs_paginated(&self, task_id: Option<String>, offset: usize, limit: usize) -> Vec<LogEntry> {
+    pub fn get_logs_paginated(
+        &self,
+        task_id: Option<String>,
+        offset: usize,
+        limit: usize,
+    ) -> Vec<LogEntry> {
         let logs = self.system_logs.lock().unwrap();
         // Since we can't efficiently index filter iterator on VecDeque without collecting,
         // and we need to filter by task_id first:
         let filtered: Vec<_> = match task_id {
-            Some(id) => logs.iter().filter(|l| l.task_id.as_ref() == Some(&id)).collect(),
+            Some(id) => logs
+                .iter()
+                .filter(|l| l.task_id.as_ref() == Some(&id))
+                .collect(),
             None => logs.iter().collect(),
         };
 
         let start = offset.min(filtered.len());
         let end = (offset + limit).min(filtered.len());
 
-        filtered[start..end].iter().map(|&entry| entry.clone()).collect()
+        filtered[start..end]
+            .iter()
+            .map(|&entry| entry.clone())
+            .collect()
     }
 }
 
@@ -203,20 +341,160 @@ mod tests {
     fn test_default_max_log_lines() {
         assert_eq!(DEFAULT_MAX_LOG_LINES, 10000);
     }
+
+    #[test]
+    fn test_activity_logs_only_include_activity_categories() {
+        let manager = LogManager::new(10);
+
+        manager.log_with_category(
+            "info",
+            "sync-start",
+            Some("task1".to_string()),
+            LogCategory::SyncStarted,
+        );
+        manager.log_with_category(
+            "success",
+            "sync-end",
+            Some("task1".to_string()),
+            LogCategory::SyncCompleted,
+        );
+        manager.log_with_category(
+            "info",
+            "copied-file",
+            Some("task1".to_string()),
+            LogCategory::FileCopied,
+        );
+        manager.log_with_category(
+            "warning",
+            "misc",
+            Some("task1".to_string()),
+            LogCategory::Other,
+        );
+
+        let activity_logs = manager.get_activity_logs();
+        assert_eq!(activity_logs.len(), 2);
+        assert!(activity_logs
+            .iter()
+            .all(|entry| entry.category.is_activity_visible()));
+    }
+
+    #[test]
+    fn test_task_logs_include_task_categories_and_task_id_only() {
+        let manager = LogManager::new(20);
+
+        manager.log_with_category(
+            "info",
+            "watch-start",
+            Some("task1".to_string()),
+            LogCategory::WatchStarted,
+        );
+        manager.log_with_category(
+            "info",
+            "copy-a",
+            Some("task1".to_string()),
+            LogCategory::FileCopied,
+        );
+        manager.log_with_category(
+            "info",
+            "delete-a",
+            Some("task1".to_string()),
+            LogCategory::FileDeleted,
+        );
+        manager.log_with_category(
+            "warning",
+            "cancelled",
+            Some("task1".to_string()),
+            LogCategory::Other,
+        );
+        manager.log_with_category(
+            "info",
+            "copy-b",
+            Some("task2".to_string()),
+            LogCategory::FileCopied,
+        );
+        manager.log_with_category("info", "mounted", None, LogCategory::VolumeMounted);
+
+        let task_logs = manager.get_task_logs_filtered("task1");
+        assert_eq!(task_logs.len(), 3);
+        assert!(task_logs
+            .iter()
+            .all(|entry| entry.task_id.as_deref() == Some("task1")));
+        assert!(task_logs
+            .iter()
+            .all(|entry| entry.category.is_task_visible()));
+    }
+
+    #[test]
+    fn test_log_category_visibility_whitelist_is_exact() {
+        let categories = [
+            LogCategory::SyncStarted,
+            LogCategory::SyncCompleted,
+            LogCategory::SyncError,
+            LogCategory::WatchStarted,
+            LogCategory::WatchStopped,
+            LogCategory::VolumeMounted,
+            LogCategory::VolumeUnmounted,
+            LogCategory::FileCopied,
+            LogCategory::FileDeleted,
+            LogCategory::Other,
+        ];
+
+        let activity_visible: Vec<LogCategory> = categories
+            .iter()
+            .filter(|category| category.is_activity_visible())
+            .cloned()
+            .collect();
+        let task_visible: Vec<LogCategory> = categories
+            .iter()
+            .filter(|category| category.is_task_visible())
+            .cloned()
+            .collect();
+
+        assert_eq!(
+            activity_visible,
+            vec![
+                LogCategory::SyncStarted,
+                LogCategory::SyncCompleted,
+                LogCategory::SyncError,
+                LogCategory::WatchStarted,
+                LogCategory::WatchStopped,
+                LogCategory::VolumeMounted,
+                LogCategory::VolumeUnmounted,
+            ]
+        );
+
+        assert_eq!(
+            task_visible,
+            vec![
+                LogCategory::SyncStarted,
+                LogCategory::SyncCompleted,
+                LogCategory::SyncError,
+                LogCategory::WatchStarted,
+                LogCategory::WatchStopped,
+                LogCategory::FileCopied,
+                LogCategory::FileDeleted,
+            ]
+        );
+    }
 }
 
 #[tauri::command]
-pub async fn add_log(level: String, message: String, task_id: Option<String>, state: tauri::State<'_, AppState>) -> Result<(), String> {
+pub async fn add_log(
+    level: String,
+    message: String,
+    task_id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     state.log_manager.log(&level, &message, task_id);
     Ok(())
 }
 
 #[tauri::command]
 pub fn get_system_logs(state: tauri::State<'_, AppState>) -> Vec<LogEntry> {
-    state.log_manager.get_logs(None)
+    state.log_manager.get_activity_logs()
 }
 
 #[tauri::command]
 pub fn get_task_logs(task_id: String, state: tauri::State<'_, AppState>) -> Vec<LogEntry> {
-    state.log_manager.get_logs(Some(task_id))
+    state.log_manager.get_task_logs_filtered(&task_id)
 }

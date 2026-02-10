@@ -1,36 +1,36 @@
+pub mod error_codes;
+pub mod input_validation;
+pub mod license;
+pub mod logging;
+pub mod path_validation;
 pub mod sync_engine;
 pub mod system_integration;
-pub mod logging;
-pub mod license;
-pub mod path_validation;
 pub mod watcher;
-pub mod input_validation;
-pub mod error_codes;
 
 #[cfg(test)]
 mod lib_tests;
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewWindow};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tauri::{AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewWindow};
 
 use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
-use system_integration::{DiskMonitor};
+use system_integration::DiskMonitor;
 
-use logging::LogManager;
-use logging::{add_log, get_system_logs, get_task_logs, DEFAULT_MAX_LOG_LINES};
 use license::generate_licenses_report;
+use logging::LogManager;
+use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
 
-use watcher::{WatcherManager, WatchEvent};
+use watcher::{WatchEvent, WatcherManager};
 
 // Consolidated progress state (prevents race conditions and deadlocks)
 struct SyncProgressStateInner {
     last_emit_time: Instant,
-    last_file: String,
+    last_log_key: String,
     log_buffer: Vec<logging::LogEntry>,
     last_log_emit_time: Instant,
 }
@@ -39,7 +39,7 @@ impl SyncProgressStateInner {
     fn new() -> Self {
         Self {
             last_emit_time: Instant::now(),
-            last_file: String::new(),
+            last_log_key: String::new(),
             log_buffer: Vec::with_capacity(50), // Buffer size 50
             last_log_emit_time: Instant::now(),
         }
@@ -58,11 +58,12 @@ impl SyncProgressState {
         }
     }
 
-    fn should_update_file(&self, current_file: &str) -> bool {
+    fn should_update_file(&self, category: &LogCategory, current_file: &str) -> bool {
         let state = self.inner.try_lock();
         if let Ok(mut state) = state {
-            if state.last_file != current_file {
-                state.last_file = current_file.to_string();
+            let key = format!("{category:?}:{current_file}");
+            if state.last_log_key != key {
+                state.last_log_key = key;
                 true
             } else {
                 false
@@ -92,9 +93,11 @@ impl SyncProgressState {
         let state = self.inner.try_lock();
         if let Ok(mut state) = state {
             state.log_buffer.push(entry);
-            
+
             // Flush if buffer full or time elapsed (200ms)
-            if state.log_buffer.len() >= 50 || state.last_log_emit_time.elapsed() >= Duration::from_millis(200) {
+            if state.log_buffer.len() >= 50
+                || state.last_log_emit_time.elapsed() >= Duration::from_millis(200)
+            {
                 state.last_log_emit_time = Instant::now();
                 let batch = std::mem::replace(&mut state.log_buffer, Vec::with_capacity(50));
                 Some(batch)
@@ -105,20 +108,20 @@ impl SyncProgressState {
             None
         }
     }
-    
+
     // Force flush remaining logs
     fn flush_logs(&self) -> Option<Vec<logging::LogEntry>> {
-            let state = self.inner.try_lock();
-            if let Ok(mut state) = state {
-                if state.log_buffer.is_empty() {
-                    None
-                } else {
-                    let batch = std::mem::replace(&mut state.log_buffer, Vec::with_capacity(50));
-                    Some(batch)
-                }
-            } else {
+        let state = self.inner.try_lock();
+        if let Ok(mut state) = state {
+            if state.log_buffer.is_empty() {
                 None
+            } else {
+                let batch = std::mem::replace(&mut state.log_buffer, Vec::with_capacity(50));
+                Some(batch)
             }
+        } else {
+            None
+        }
     }
 }
 
@@ -203,7 +206,40 @@ fn default_verify_after_copy() -> bool {
     true
 }
 
-fn emit_runtime_watch_state(app: &tauri::AppHandle, task_id: &str, watching: bool, reason: Option<String>) {
+pub(crate) fn progress_phase_to_log_category(
+    phase: &sync_engine::types::SyncPhase,
+) -> Option<LogCategory> {
+    match phase {
+        sync_engine::types::SyncPhase::Copying => Some(LogCategory::FileCopied),
+        sync_engine::types::SyncPhase::Deleting => Some(LogCategory::FileDeleted),
+        _ => None,
+    }
+}
+
+pub(crate) fn compute_volume_mount_diff(
+    previous_mounts: &HashSet<String>,
+    current_mounts: &HashSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    let mut mounted: Vec<String> = current_mounts
+        .difference(previous_mounts)
+        .cloned()
+        .collect();
+    let mut unmounted: Vec<String> = previous_mounts
+        .difference(current_mounts)
+        .cloned()
+        .collect();
+
+    mounted.sort();
+    unmounted.sort();
+    (mounted, unmounted)
+}
+
+fn emit_runtime_watch_state(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    watching: bool,
+    reason: Option<String>,
+) {
     let event = RuntimeWatchStateEvent {
         task_id: task_id.to_string(),
         watching,
@@ -212,7 +248,12 @@ fn emit_runtime_watch_state(app: &tauri::AppHandle, task_id: &str, watching: boo
     let _ = app.emit("runtime-watch-state", &event);
 }
 
-fn emit_runtime_sync_state(app: &tauri::AppHandle, task_id: &str, syncing: bool, reason: Option<String>) {
+fn emit_runtime_sync_state(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    syncing: bool,
+    reason: Option<String>,
+) {
     let event = RuntimeSyncStateEvent {
         task_id: task_id.to_string(),
         syncing,
@@ -233,7 +274,9 @@ fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
             let volume = volumes
                 .into_iter()
                 .find(|v| v.disk_uuid.as_deref() == Some(uuid_part))
-                .ok_or_else(|| format!("Volume with UUID {} not found (not mounted?)", uuid_part))?;
+                .ok_or_else(|| {
+                    format!("Volume with UUID {} not found (not mounted?)", uuid_part)
+                })?;
 
             let clean_sub_path = sub_path.trim_start_matches('/');
             return Ok(volume.mount_point.join(clean_sub_path));
@@ -242,7 +285,10 @@ fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path_str))
 }
 
-fn resolve_runtime_exclude_patterns(task: &RuntimeSyncTask, sets: &[RuntimeExclusionSet]) -> Vec<String> {
+fn resolve_runtime_exclude_patterns(
+    task: &RuntimeSyncTask,
+    sets: &[RuntimeExclusionSet],
+) -> Vec<String> {
     if task.exclusion_sets.is_empty() {
         return Vec::new();
     }
@@ -262,7 +308,10 @@ fn runtime_desired_watch_sources(tasks: &[RuntimeSyncTask]) -> HashMap<String, S
         .collect()
 }
 
-fn runtime_find_watch_task<'a>(tasks: &'a [RuntimeSyncTask], task_id: &str) -> Option<&'a RuntimeSyncTask> {
+fn runtime_find_watch_task<'a>(
+    tasks: &'a [RuntimeSyncTask],
+    task_id: &str,
+) -> Option<&'a RuntimeSyncTask> {
     tasks
         .iter()
         .find(|task| task.id == task_id && task.watch_mode)
@@ -331,7 +380,12 @@ async fn execute_sync_internal(
             tokens.insert(task_id.clone(), cancel_token.clone());
         }
 
-        state.log_manager.log("info", "Sync started", Some(task_id.clone()));
+        state.log_manager.log_with_category(
+            "info",
+            "Sync started",
+            Some(task_id.clone()),
+            LogCategory::SyncStarted,
+        );
 
         let engine = SyncEngine::new(source, target);
         let options = SyncOptions {
@@ -370,18 +424,30 @@ async fn execute_sync_internal(
             res = engine.sync_files(&options, move |progress| {
                  // 1. Detailed Logging: Batching
                 if let Some(current) = &progress.current_file {
-                    if progress_state_closure.should_update_file(current) {
-                        let now = chrono::Utc::now().to_rfc3339();
-                        let entry = logging::LogEntry {
-                            id: now.clone(),
-                            timestamp: now,
-                            level: "info".to_string(),
-                            message: format!("Syncing: {}", current),
-                            task_id: Some(task_id_for_log.clone()),
-                        };
+                    if let Some(category) = progress_phase_to_log_category(&progress.phase) {
+                        if progress_state_closure.should_update_file(&category, current) {
+                            let now = chrono::Utc::now().to_rfc3339();
+                            let message = match &category {
+                                LogCategory::FileCopied => format!("Copy: {}", current),
+                                LogCategory::FileDeleted => format!("Delete: {}", current),
+                                _ => current.to_string(),
+                            };
+                            let entry = logging::LogEntry {
+                                id: now.clone(),
+                                timestamp: now,
+                                level: "info".to_string(),
+                                message,
+                                task_id: Some(task_id_for_log.clone()),
+                                category,
+                            };
 
-                        if let Some(batch) = progress_state_closure.add_log(entry) {
-                             log_manager_closure.log_batch(batch, Some(task_id_for_log.clone()), Some(&app_for_log));
+                            if let Some(batch) = progress_state_closure.add_log(entry) {
+                                log_manager_closure.log_batch_entries(
+                                    batch,
+                                    Some(task_id_for_log.clone()),
+                                    Some(&app_for_log),
+                                );
+                            }
                         }
                     }
                 }
@@ -401,14 +467,14 @@ async fn execute_sync_internal(
             }) => {
                 // Flush remaining logs on completion
                 if let Some(batch) = progress_state.flush_logs() {
-                    log_manager.log_batch(batch, Some(task_id.clone()), Some(&app));
+                    log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
                 }
                 res
             },
             _ = cancel_token.cancelled() => {
                  // Flush logs on cancel too
                 if let Some(batch) = progress_state.flush_logs() {
-                    log_manager.log_batch(batch, Some(task_id.clone()), Some(&app));
+                    log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
                 }
                 Err(anyhow::anyhow!("Operation cancelled by user"))
             }
@@ -422,17 +488,27 @@ async fn execute_sync_internal(
 
         match &result {
             Ok(res) => {
-                 let msg = format!(
+                let msg = format!(
                     "Sync completed.\nCopied: {} files\nDeleted: {} files\nData transferred: {}",
                     format_number(res.files_copied),
                     format_number(res.files_deleted),
                     format_bytes(res.bytes_copied)
                 );
-                state.log_manager.log("success", &msg, Some(task_id.clone()));
+                state.log_manager.log_with_category(
+                    "success",
+                    &msg,
+                    Some(task_id.clone()),
+                    LogCategory::SyncCompleted,
+                );
             }
             Err(e) => {
                 let msg = format!("Sync failed: {:#}", e);
-                state.log_manager.log("error", &msg, Some(task_id.clone()));
+                state.log_manager.log_with_category(
+                    "error",
+                    &msg,
+                    Some(task_id.clone()),
+                    LogCategory::SyncError,
+                );
             }
         }
 
@@ -505,11 +581,13 @@ async fn start_watch_internal(
     state: AppState,
     runtime_owned: bool,
 ) -> Result<PathBuf, String> {
-    let source_path = resolve_path_with_uuid(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let source_path =
+        resolve_path_with_uuid(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
 
     // Validate inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source_path.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
 
     let task_id_clone = task_id.clone();
     let app_clone = app.clone();
@@ -533,10 +611,11 @@ async fn start_watch_internal(
         })
         .map_err(|e| format!("{}:{}", error_codes::ERR_WATCH_START_FAILED, e))?;
 
-    state.log_manager.log(
+    state.log_manager.log_with_category(
         "info",
         &format!("Watch started: {}", source_path.display()),
         Some(task_id),
+        LogCategory::WatchStarted,
     );
 
     Ok(source_path)
@@ -622,7 +701,12 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
 
         match stop_result {
             Ok(()) => {
-                state.log_manager.log("info", "Watch stopped", Some(task_id.clone()));
+                state.log_manager.log_with_category(
+                    "info",
+                    "Watch stopped",
+                    Some(task_id.clone()),
+                    LogCategory::WatchStopped,
+                );
                 {
                     let mut sources = state.runtime_watch_sources.write().await;
                     sources.remove(task_id);
@@ -640,8 +724,7 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
 
 #[tauri::command]
 async fn get_app_config_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let app_data = app.path().app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let config_dir = app_data.join("config");
     tokio::fs::create_dir_all(&config_dir)
         .await
@@ -673,7 +756,8 @@ fn get_app_version() -> String {
 #[tauri::command]
 #[allow(dead_code)]
 async fn get_app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
-    app.path().app_data_dir()
+    app.path()
+        .app_data_dir()
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| e.to_string())
 }
@@ -722,14 +806,14 @@ async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), Strin
         .map_err(|e| format!("Invalid path: {e}"))?;
 
     // Get the config directory for validation
-    let app_data = app.path().app_data_dir()
+    let app_data = app
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {e}"))?;
     let config_dir = app_data.join("config");
 
     // Ensure config directory exists for comparison
-    let config_canonical = config_dir
-        .canonicalize()
-        .unwrap_or(config_dir);
+    let config_canonical = config_dir.canonicalize().unwrap_or(config_dir);
 
     // Verify the path is within the config directory
     let canonical_str = canonical.to_string_lossy();
@@ -792,16 +876,22 @@ async fn sync_dry_run(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
-    let source = resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let source =
+        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let target =
+        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
 
     // Validate all inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
     input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
 
-    state.log_manager.log("info", "Dry run started", Some(task_id.clone()));
+    state
+        .log_manager
+        .log("info", "Dry run started", Some(task_id.clone()));
 
     let engine = SyncEngine::new(source, target);
     let options = SyncOptions {
@@ -817,8 +907,8 @@ async fn sync_dry_run(
         Ok(result) => {
             let msg = format!(
                 "Dry run completed.\nTo copy: {} files\nTo delete: {} files\nTotal size: {}",
-                format_number(result.files_to_copy as u64), 
-                format_number(result.files_to_delete as u64), 
+                format_number(result.files_to_copy as u64),
+                format_number(result.files_to_delete as u64),
                 format_bytes(result.bytes_to_copy)
             );
             state.log_manager.log("success", &msg, Some(task_id));
@@ -864,19 +954,16 @@ fn resolve_path_by_uuid(disk_uuid: String) -> Result<std::path::PathBuf, String>
 
 /// Removable 디스크를 언마운트합니다.
 #[tauri::command]
-async fn unmount_volume(
-    path: PathBuf,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    DiskMonitor::unmount_volume(&path)
-        .map_err(|e| e.to_string())?;
-    
-    state.log_manager.log(
-        "success", 
-        &format!("Volume unmounted: {}", path.display()), 
-        None
+async fn unmount_volume(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    DiskMonitor::unmount_volume(&path).map_err(|e| e.to_string())?;
+
+    state.log_manager.log_with_category(
+        "success",
+        &format!("Volume unmounted: {}", path.display()),
+        None,
+        LogCategory::VolumeUnmounted,
     );
-    
+
     Ok(())
 }
 
@@ -921,7 +1008,9 @@ async fn cancel_operation(
     let tokens = state.cancel_tokens.read().await;
     if let Some(token) = tokens.get(&task_id) {
         token.cancel();
-        state.log_manager.log("warning", "Operation cancelled by user", Some(task_id));
+        state
+            .log_manager
+            .log("warning", "Operation cancelled by user", Some(task_id));
         Ok(true)
     } else {
         Ok(false) // 해당 task_id로 실행 중인 작업 없음
@@ -937,7 +1026,14 @@ async fn start_watch(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let started_task_id = task_id.clone();
-    let _ = start_watch_internal(task_id, source_path, app.clone(), state.inner().clone(), false).await?;
+    let _ = start_watch_internal(
+        task_id,
+        source_path,
+        app.clone(),
+        state.inner().clone(),
+        false,
+    )
+    .await?;
     emit_runtime_watch_state(&app, &started_task_id, true, None);
     Ok(())
 }
@@ -955,19 +1051,23 @@ async fn stop_watch(
     }
 
     let mut manager = state.watcher_manager.write().await;
-    manager.stop_watching(&task_id)
+    manager
+        .stop_watching(&task_id)
         .map_err(|e| format!("{}:{}", error_codes::ERR_WATCH_STOP_FAILED, e))?;
-    
-    state.log_manager.log("info", "Watch stopped", Some(task_id.clone()));
+
+    state.log_manager.log_with_category(
+        "info",
+        "Watch stopped",
+        Some(task_id.clone()),
+        LogCategory::WatchStopped,
+    );
     emit_runtime_watch_state(&app, &task_id, false, None);
     Ok(())
 }
 
 /// 현재 감시 중인 Task 목록을 반환합니다.
 #[tauri::command]
-async fn get_watching_tasks(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+async fn get_watching_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
     let manager = state.watcher_manager.read().await;
     Ok(manager.get_watching_tasks())
 }
@@ -999,9 +1099,7 @@ async fn runtime_set_config(
 }
 
 #[tauri::command]
-async fn runtime_get_state(
-    state: tauri::State<'_, AppState>,
-) -> Result<RuntimeState, String> {
+async fn runtime_get_state(state: tauri::State<'_, AppState>) -> Result<RuntimeState, String> {
     Ok(runtime_get_state_internal(state.inner()).await)
 }
 
@@ -1046,14 +1144,14 @@ async fn send_notification(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
-    
+
     app.notification()
         .builder()
         .title(&title)
         .body(&body)
         .show()
         .map_err(|e| format!("알림 전송 실패: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -1171,13 +1269,17 @@ fn adjust_window_if_mostly_offscreen(window: &WebviewWindow) -> tauri::Result<()
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let shared_log_manager = Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES));
+    let setup_log_manager = shared_log_manager.clone();
+    let managed_log_manager = shared_log_manager;
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .setup(|app| {
+        .setup(move |app| {
             // 윈도우 위치 조정
             if let Some(main_window) = app.get_webview_window("main") {
                 tauri::async_runtime::spawn(async move {
@@ -1191,7 +1293,8 @@ pub fn run() {
                 use tauri::menu::{Menu, MenuItem};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-                let open_i = MenuItem::with_id(app, "tray_open", "SyncWatcher 열기", true, None::<&str>)?;
+                let open_i =
+                    MenuItem::with_id(app, "tray_open", "SyncWatcher 열기", true, None::<&str>)?;
                 let quit_i = MenuItem::with_id(app, "tray_quit", "끝내기", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
 
@@ -1240,6 +1343,7 @@ pub fn run() {
 
             // /Volumes 디렉토리 감시 시작 (볼륨 마운트/언마운트 감지)
             let app_handle = app.handle().clone();
+            let volume_log_manager = setup_log_manager.clone();
             std::thread::spawn(move || {
                 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -1248,9 +1352,28 @@ pub fn run() {
                     use std::sync::mpsc::channel;
                     use std::time::Duration as StdDuration;
 
+                    let removable_mounts = || -> HashSet<String> {
+                        match DiskMonitor::new().get_removable_volumes() {
+                            Ok(volumes) => volumes
+                                .into_iter()
+                                .filter_map(|volume| {
+                                    volume.mount_point.to_str().map(|path| path.to_string())
+                                })
+                                .collect(),
+                            Err(err) => {
+                                eprintln!(
+                                    "[VolumesWatcher] Failed to list removable volumes: {}",
+                                    err
+                                );
+                                HashSet::new()
+                            }
+                        }
+                    };
+
+                    let mut previous_removable_mounts = removable_mounts();
+
                     let (tx, rx) = channel();
-                    let config = Config::default()
-                        .with_poll_interval(StdDuration::from_secs(2));
+                    let config = Config::default().with_poll_interval(StdDuration::from_secs(2));
 
                     let mut watcher: RecommendedWatcher = match notify::Watcher::new(tx, config) {
                         Ok(w) => w,
@@ -1283,7 +1406,31 @@ pub fn run() {
                                     .unwrap_or(true);
                                 if should_emit {
                                     last_emit = Some(std::time::Instant::now());
-                                    println!("[VolumesWatcher] Detected volume change, emitting event");
+                                    let current_removable_mounts = removable_mounts();
+                                    let (mounted, unmounted) = compute_volume_mount_diff(
+                                        &previous_removable_mounts,
+                                        &current_removable_mounts,
+                                    );
+
+                                    for mount_path in mounted {
+                                        volume_log_manager.log_with_category(
+                                            "info",
+                                            &format!("Volume mounted: {}", mount_path),
+                                            None,
+                                            LogCategory::VolumeMounted,
+                                        );
+                                    }
+
+                                    for mount_path in unmounted {
+                                        volume_log_manager.log_with_category(
+                                            "info",
+                                            &format!("Volume unmounted: {}", mount_path),
+                                            None,
+                                            LogCategory::VolumeUnmounted,
+                                        );
+                                    }
+
+                                    previous_removable_mounts = current_removable_mounts;
                                     let _ = app_handle.emit("volumes-changed", ());
                                 }
                             }
@@ -1313,7 +1460,7 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState {
-            log_manager: Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES)),
+            log_manager: managed_log_manager,
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(RuntimeConfigPayload::default())),

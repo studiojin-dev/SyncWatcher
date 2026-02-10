@@ -1,22 +1,22 @@
 #[cfg(test)]
 mod integration_tests {
-    use crate::{
-        get_app_version,
-        join_paths,
-        runtime_delete_missing_for_watch_sync,
-        runtime_desired_watch_sources,
-        runtime_find_watch_task,
-        runtime_get_state_internal,
-        AppState,
-        RuntimeSyncTask,
-    };
     use crate::logging::LogManager;
     use crate::watcher::WatcherManager;
-    use std::sync::Arc;
+    use crate::{
+        compute_volume_mount_diff, get_app_version, join_paths, progress_phase_to_log_category,
+        runtime_delete_missing_for_watch_sync, runtime_desired_watch_sources,
+        runtime_find_watch_task, runtime_get_state_internal, AppState, RuntimeSyncTask,
+    };
     use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
     use tokio::sync::RwLock;
 
-    fn build_runtime_task(id: &str, source: &str, watch_mode: bool, delete_missing: bool) -> RuntimeSyncTask {
+    fn build_runtime_task(
+        id: &str,
+        source: &str,
+        watch_mode: bool,
+        delete_missing: bool,
+    ) -> RuntimeSyncTask {
         RuntimeSyncTask {
             id: id.to_string(),
             name: format!("task-{id}"),
@@ -151,6 +151,39 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_progress_phase_to_log_category_mapping() {
+        use crate::logging::LogCategory;
+        use crate::sync_engine::types::SyncPhase;
+
+        assert_eq!(
+            progress_phase_to_log_category(&SyncPhase::Copying),
+            Some(LogCategory::FileCopied)
+        );
+        assert_eq!(
+            progress_phase_to_log_category(&SyncPhase::Deleting),
+            Some(LogCategory::FileDeleted)
+        );
+        assert_eq!(progress_phase_to_log_category(&SyncPhase::Scanning), None);
+        assert_eq!(progress_phase_to_log_category(&SyncPhase::Verifying), None);
+    }
+
+    #[test]
+    fn test_compute_volume_mount_diff() {
+        let previous: HashSet<String> =
+            ["/Volumes/USB_OLD".to_string(), "/Volumes/SD1".to_string()]
+                .into_iter()
+                .collect();
+        let current: HashSet<String> = ["/Volumes/SD1".to_string(), "/Volumes/USB_NEW".to_string()]
+            .into_iter()
+            .collect();
+
+        let (mounted, unmounted) = compute_volume_mount_diff(&previous, &current);
+
+        assert_eq!(mounted, vec!["/Volumes/USB_NEW".to_string()]);
+        assert_eq!(unmounted, vec!["/Volumes/USB_OLD".to_string()]);
+    }
+
+    #[test]
     fn test_log_manager_functionality() {
         // Test LogManager directly without Tauri State
         let log_manager = LogManager::new(100);
@@ -207,7 +240,11 @@ mod integration_tests {
             .map(|i| {
                 let lm = Arc::clone(&log_manager_arc) as Arc<LogManager>;
                 std::thread::spawn(move || {
-                    lm.log("info", &format!("Thread {}", i), Some(format!("thread_{}", i)));
+                    lm.log(
+                        "info",
+                        &format!("Thread {}", i),
+                        Some(format!("thread_{}", i)),
+                    );
                 })
             })
             .collect();
