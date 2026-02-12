@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useSettings } from '../../hooks/useSettings';
 import {
     IconDashboard,
     IconRefresh,
@@ -37,6 +38,8 @@ const navItems: NavItem[] = [
  */
 function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const { t } = useTranslation();
+    const { settings } = useSettings();
+    const isRegistered = settings.isRegistered;
 
     return (
         <aside className="flex flex-col h-full bg-[var(--bg-primary)] border-r-4 border-[var(--border-main)] overflow-hidden">
@@ -98,28 +101,48 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             </nav>
 
             {/* Footer */}
-            <div className="p-4 border-t-4 border-[var(--border-main)] bg-[var(--bg-secondary)] space-y-3">
+            <div className="p-4 border-t-4 border-[var(--border-main)] bg-[var(--bg-secondary)] space-y-4">
                 {/* Registration Status */}
-                <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--bg-primary)] border-2 border-[var(--border-main)] shadow-[3px_3px_0_0_var(--shadow-color)]">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-[var(--accent-error)]">
-                            {t('about.unregistered')}
-                        </span>
-                        <a
-                            href="https://studiojin.lemonsqueezy.com/checkout/buy/syncwatcher"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] font-black uppercase tracking-tighter bg-black text-[var(--accent-warning)] px-2 py-0.5 hover:bg-[var(--accent-warning)] hover:text-black transition-colors"
-                        >
-                            {t('about.purchaseLicense')}
-                        </a>
-                    </div>
+                <div className="flex flex-col gap-3">
+                    {!isRegistered ? (
+                        <div className="flex flex-col gap-2 p-3 bg-[var(--bg-primary)] border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black uppercase tracking-wider text-[var(--accent-error)]">
+                                    {t('about.unregistered')}
+                                </span>
+                                <div className="w-2 h-2 rounded-full bg-[var(--accent-error)] animate-pulse" />
+                            </div>
+                            <a
+                                href="https://studiojin.lemonsqueezy.com/checkout/buy/syncwatcher"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
+                            >
+                                {t('about.purchaseLicense')}
+                            </a>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col gap-1.5 p-3 bg-[var(--bg-tertiary)] border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] overflow-hidden relative group">
+                            <div className="flex items-center justify-between relative z-10">
+                                <span className="text-[10px] font-black uppercase tracking-wider text-[var(--accent-success)]">
+                                    {t('about.registered')}
+                                </span>
+                                <div className="w-2 h-2 rounded-full bg-[var(--accent-success)]" />
+                            </div>
+                            <p className="text-[9px] font-bold text-[var(--text-secondary)] italic relative z-10">
+                                {t('about.thankYou')}
+                            </p>
+                            {/* Subtle Success Pattern */}
+                            <div className="absolute -right-2 -bottom-2 text-4xl opacity-5 transform rotate-12 group-hover:scale-110 transition-transform">
+                                ✨
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                <div className="neo-box p-2 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest border-2 border-[var(--border-main)]">
-                    v{import.meta.env.PACKAGE_VERSION || '0.1.0'}
-                    <span className="mx-2 text-[var(--border-main)]">•</span>
-                    {t('about.licenseType')}
+                <div className="neo-box p-2 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest border-2 border-[var(--border-main)] relative overflow-hidden group">
+                    <span className="relative z-10">v{import.meta.env.PACKAGE_VERSION || '0.9.0'}</span>
+                    <div className="absolute inset-0 bg-[var(--accent-warning)] translate-y-full group-hover:translate-y-0 transition-transform duration-200" />
                 </div>
             </div>
         </aside>

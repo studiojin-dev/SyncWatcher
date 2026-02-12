@@ -7,7 +7,7 @@ import { LicenseCard, LicenseData } from '../components/ui/LicenseCard';
 function AboutView() {
   const { t } = useTranslation();
   const [showLicenses, setShowLicenses] = useState(false);
-  const [appVersion, setAppVersion] = useState('0.1.0');
+  const [appVersion, setAppVersion] = useState('0.9.0');
   const [licenseData, setLicenseData] = useState<LicenseData[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
 
@@ -71,7 +71,6 @@ function AboutView() {
 
             <div className="flex justify-between items-center">
               <span className="font-bold text-[var(--text-secondary)]">{t('about.license')}</span>
-              <span className="font-mono font-bold">{t('about.licenseType')}</span>
             </div>
 
             <a

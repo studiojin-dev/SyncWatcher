@@ -204,6 +204,10 @@
       "openSourceLibraries": "开源库",
       "viewLicenses": "查看开源许可证",
       "viewOnGithub": "在 GitHub 上查看",
+      "unregistered": "未注册版本",
+      "registered": "已注册版本",
+      "thankYou": "感谢您的购买！",
+      "purchaseLicense": "购买许可证",
       "licenseType": "Polyform NC 1.0.0"
     },
     "common": {

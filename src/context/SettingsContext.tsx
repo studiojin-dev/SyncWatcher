@@ -10,6 +10,7 @@ export interface Settings {
     stateLocation: string;
     maxLogLines: number;
     closeAction: 'quit' | 'background';
+    isRegistered: boolean;
 }
 
 const defaultSettings: Settings = {
@@ -20,6 +21,7 @@ const defaultSettings: Settings = {
     stateLocation: '',
     maxLogLines: 10000,
     closeAction: 'quit',
+    isRegistered: false,
 };
 
 const STORAGE_KEY = 'syncwatcher_settings';

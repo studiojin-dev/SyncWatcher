@@ -205,6 +205,8 @@
       "viewLicenses": "라이선스 보기",
       "viewOnGithub": "GitHub에서 보기",
       "unregistered": "미등록 버전",
+      "registered": "등록된 버전",
+      "thankYou": "구매해 주셔서 감사합니다!",
       "purchaseLicense": "라이선스 구매",
       "licenseType": "Polyform NC 1.0.0"
     },
