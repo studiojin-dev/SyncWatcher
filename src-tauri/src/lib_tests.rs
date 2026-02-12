@@ -4,26 +4,39 @@ mod integration_tests {
     use crate::watcher::WatcherManager;
     use crate::{
         compute_volume_mount_diff, get_app_version, join_paths, progress_phase_to_log_category,
-        runtime_delete_missing_for_watch_sync, runtime_desired_watch_sources, DataUnitSystem,
-        format_bytes_with_unit,
-        runtime_find_watch_task, runtime_get_state_internal, AppState, RuntimeSyncTask,
+        runtime_desired_watch_sources, DataUnitSystem, format_bytes_with_unit,
+        runtime_find_watch_task, runtime_get_state_internal, validate_runtime_tasks, AppState,
+        RuntimeSyncTask,
     };
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
-    fn build_runtime_task(
-        id: &str,
-        source: &str,
-        watch_mode: bool,
-        delete_missing: bool,
-    ) -> RuntimeSyncTask {
+    fn build_runtime_task(id: &str, source: &str, watch_mode: bool) -> RuntimeSyncTask {
         RuntimeSyncTask {
             id: id.to_string(),
             name: format!("task-{id}"),
             source: source.to_string(),
             target: "/tmp/target".to_string(),
-            delete_missing,
+            checksum_mode: false,
+            watch_mode,
+            auto_unmount: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+        }
+    }
+
+    fn build_runtime_task_with_paths(
+        id: &str,
+        source: &str,
+        target: &str,
+        watch_mode: bool,
+    ) -> RuntimeSyncTask {
+        RuntimeSyncTask {
+            id: id.to_string(),
+            name: format!("task-{id}"),
+            source: source.to_string(),
+            target: target.to_string(),
             checksum_mode: false,
             watch_mode,
             auto_unmount: false,
@@ -96,9 +109,9 @@ mod integration_tests {
     #[test]
     fn test_runtime_desired_watch_sources_uses_watch_mode_only() {
         let tasks = vec![
-            build_runtime_task("a", "/src/a", true, false),
-            build_runtime_task("b", "/src/b", false, false),
-            build_runtime_task("c", "/src/c", true, true),
+            build_runtime_task("a", "/src/a", true),
+            build_runtime_task("b", "/src/b", false),
+            build_runtime_task("c", "/src/c", true),
         ];
 
         let desired = runtime_desired_watch_sources(&tasks);
@@ -111,22 +124,13 @@ mod integration_tests {
     #[test]
     fn test_runtime_find_watch_task_filters_non_watch_tasks() {
         let tasks = vec![
-            build_runtime_task("watch-off", "/src/off", false, false),
-            build_runtime_task("watch-on", "/src/on", true, false),
+            build_runtime_task("watch-off", "/src/off", false),
+            build_runtime_task("watch-on", "/src/on", true),
         ];
 
         assert!(runtime_find_watch_task(&tasks, "watch-off").is_none());
         assert!(runtime_find_watch_task(&tasks, "watch-on").is_some());
         assert!(runtime_find_watch_task(&tasks, "missing").is_none());
-    }
-
-    #[test]
-    fn test_runtime_delete_missing_for_watch_sync_preserves_task_setting() {
-        let delete_on = build_runtime_task("on", "/src/on", true, true);
-        let delete_off = build_runtime_task("off", "/src/off", true, false);
-
-        assert!(runtime_delete_missing_for_watch_sync(&delete_on));
-        assert!(!runtime_delete_missing_for_watch_sync(&delete_off));
     }
 
     #[test]
@@ -152,6 +156,93 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_validate_runtime_tasks_allows_distinct_sources_and_targets() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/a", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/b", false),
+        ];
+
+        assert!(validate_runtime_tasks(&tasks).is_ok());
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_duplicate_targets() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/shared", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/shared", false),
+        ];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Target path conflict"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_target_subdirectory_conflict() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/root", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/root/child", false),
+        ];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Target path conflict"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_same_task_source_target_overlap() {
+        let tasks = vec![build_runtime_task_with_paths(
+            "a",
+            "/data/source",
+            "/data/source/sub",
+            false,
+        )];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("overlapping source/target"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_watch_loop_risk() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/loop/target", true),
+            build_runtime_task_with_paths("b", "/loop/target/inbound", "/dst/b", true),
+        ];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Watch loop risk"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_non_watch_target_overlapping_watch_source() {
+        let tasks = vec![
+            build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+            build_runtime_task_with_paths("manual-b", "/src/manual", "/media/incoming/export", false),
+        ];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Watch loop risk"));
+    }
+
+    #[test]
     fn test_progress_phase_to_log_category_mapping() {
         use crate::logging::LogCategory;
         use crate::sync_engine::types::SyncPhase;
@@ -161,10 +252,9 @@ mod integration_tests {
             Some(LogCategory::FileCopied)
         );
         assert_eq!(
-            progress_phase_to_log_category(&SyncPhase::Deleting),
-            Some(LogCategory::FileDeleted)
+            progress_phase_to_log_category(&SyncPhase::Scanning),
+            None
         );
-        assert_eq!(progress_phase_to_log_category(&SyncPhase::Scanning), None);
         assert_eq!(progress_phase_to_log_category(&SyncPhase::Verifying), None);
     }
 

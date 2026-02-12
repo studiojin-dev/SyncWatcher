@@ -11,14 +11,17 @@ pub mod watcher;
 mod lib_tests;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewWindow};
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use sync_engine::{types::SyncResult, DryRunResult, SyncEngine, SyncOptions};
+use sync_engine::{
+    types::{DeleteOrphanResult, OrphanFile, SyncResult},
+    DryRunResult, SyncEngine, SyncOptions,
+};
 use system_integration::DiskMonitor;
 
 use license::generate_licenses_report;
@@ -166,8 +169,6 @@ struct RuntimeSyncTask {
     source: String,
     target: String,
     #[serde(default)]
-    delete_missing: bool,
-    #[serde(default)]
     checksum_mode: bool,
     #[serde(default)]
     watch_mode: bool,
@@ -224,7 +225,6 @@ pub(crate) fn progress_phase_to_log_category(
 ) -> Option<LogCategory> {
     match phase {
         sync_engine::types::SyncPhase::Copying => Some(LogCategory::FileCopied),
-        sync_engine::types::SyncPhase::Deleting => Some(LogCategory::FileDeleted),
         _ => None,
     }
 }
@@ -313,6 +313,123 @@ fn resolve_runtime_exclude_patterns(
         .collect()
 }
 
+fn normalize_path_components(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn path_key_for_compare(path: &Path) -> String {
+    let normalized = normalize_path_components(path);
+    let mut key = normalized.to_string_lossy().replace('\\', "/");
+    while key.ends_with('/') && key.len() > 1 {
+        key.pop();
+    }
+    key.to_lowercase()
+}
+
+fn is_same_or_subpath(parent: &str, child: &str) -> bool {
+    if parent == child {
+        return true;
+    }
+    child
+        .strip_prefix(parent)
+        .map(|rest| rest.starts_with('/'))
+        .unwrap_or(false)
+}
+
+fn is_path_overlap(a: &str, b: &str) -> bool {
+    is_same_or_subpath(a, b) || is_same_or_subpath(b, a)
+}
+
+fn resolved_path_key(path: &str) -> Result<String, String> {
+    match resolve_path_with_uuid(path) {
+        Ok(resolved) => Ok(path_key_for_compare(&resolved)),
+        Err(err) => {
+            if path.starts_with("[UUID:") {
+                Ok(path_key_for_compare(&PathBuf::from(path)))
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
+    struct ValidatedTask {
+        id: String,
+        name: String,
+        source_key: String,
+        target_key: String,
+        watch_mode: bool,
+    }
+
+    let mut validated_tasks: Vec<ValidatedTask> = Vec::with_capacity(tasks.len());
+
+    for task in tasks {
+        input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(&task.source).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(&task.target).map_err(|e| e.to_string())?;
+
+        let source_key = resolved_path_key(&task.source)?;
+        let target_key = resolved_path_key(&task.target)?;
+
+        if is_path_overlap(&source_key, &target_key) {
+            return Err(format!(
+                "Task '{}' has overlapping source/target paths. source='{}', target='{}'",
+                task.name, task.source, task.target
+            ));
+        }
+
+        validated_tasks.push(ValidatedTask {
+            id: task.id.clone(),
+            name: task.name.clone(),
+            source_key,
+            target_key,
+            watch_mode: task.watch_mode,
+        });
+    }
+
+    for left_index in 0..validated_tasks.len() {
+        for right_index in (left_index + 1)..validated_tasks.len() {
+            let left = &validated_tasks[left_index];
+            let right = &validated_tasks[right_index];
+
+            if is_path_overlap(&left.target_key, &right.target_key) {
+                return Err(format!(
+                    "Target path conflict: '{}' and '{}' use overlapping targets.",
+                    left.name, right.name
+                ));
+            }
+        }
+    }
+
+    for watch_task in validated_tasks.iter().filter(|task| task.watch_mode) {
+        for other in &validated_tasks {
+            if other.id == watch_task.id {
+                continue;
+            }
+
+            if is_path_overlap(&other.target_key, &watch_task.source_key) {
+                return Err(format!(
+                    "Watch loop risk: target of '{}' overlaps watch source of '{}'.",
+                    other.name, watch_task.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn runtime_desired_watch_sources(tasks: &[RuntimeSyncTask]) -> HashMap<String, String> {
     tasks
         .iter()
@@ -328,10 +445,6 @@ fn runtime_find_watch_task<'a>(
     tasks
         .iter()
         .find(|task| task.id == task_id && task.watch_mode)
-}
-
-fn runtime_delete_missing_for_watch_sync(task: &RuntimeSyncTask) -> bool {
-    task.delete_missing
 }
 
 async fn acquire_sync_slot(task_id: &str, state: &AppState) -> bool {
@@ -364,7 +477,6 @@ async fn execute_sync_internal(
     task_id: String,
     source: PathBuf,
     target: PathBuf,
-    delete_missing: bool,
     checksum_mode: bool,
     verify_after_copy: bool,
     exclude_patterns: Vec<String>,
@@ -402,7 +514,6 @@ async fn execute_sync_internal(
 
         let engine = SyncEngine::new(source, target);
         let options = SyncOptions {
-            delete_missing,
             checksum_mode,
             preserve_permissions: true,
             preserve_times: true,
@@ -503,9 +614,8 @@ async fn execute_sync_internal(
             Ok(res) => {
                 let unit_system = state.runtime_config.read().await.settings.data_unit_system;
                 let msg = format!(
-                    "Sync completed.\nCopied: {} files\nDeleted: {} files\nData transferred: {}",
+                    "Sync completed.\nCopied: {} files\nData transferred: {}",
                     format_number(res.files_copied),
-                    format_number(res.files_deleted),
                     format_bytes_with_unit(res.bytes_copied, unit_system)
                 );
                 state.log_manager.log_with_category(
@@ -562,7 +672,6 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         task.id.clone(),
         PathBuf::from(task.source.clone()),
         PathBuf::from(task.target.clone()),
-        runtime_delete_missing_for_watch_sync(&task),
         task.checksum_mode,
         task.verify_after_copy,
         exclude_patterns,
@@ -642,11 +751,7 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
     };
 
     // Validate payload before applying runtime changes.
-    for task in &runtime_config.tasks {
-        input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(&task.source).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(&task.target).map_err(|e| e.to_string())?;
-    }
+    validate_runtime_tasks(&runtime_config.tasks)?;
     for set in &runtime_config.exclusion_sets {
         input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
     }
@@ -885,7 +990,6 @@ async fn sync_dry_run(
     task_id: String,
     source: PathBuf,
     target: PathBuf,
-    delete_missing: bool,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
@@ -909,7 +1013,6 @@ async fn sync_dry_run(
 
     let engine = SyncEngine::new(source, target);
     let options = SyncOptions {
-        delete_missing,
         checksum_mode,
         preserve_permissions: true,
         preserve_times: true,
@@ -921,9 +1024,8 @@ async fn sync_dry_run(
         Ok(result) => {
             let unit_system = state.runtime_config.read().await.settings.data_unit_system;
             let msg = format!(
-                "Dry run completed.\nTo copy: {} files\nTo delete: {} files\nTotal size: {}",
+                "Dry run completed.\nTo copy: {} files\nTotal size: {}",
                 format_number(result.files_to_copy as u64),
-                format_number(result.files_to_delete as u64),
                 format_bytes_with_unit(result.bytes_to_copy, unit_system)
             );
             state.log_manager.log("success", &msg, Some(task_id));
@@ -935,6 +1037,103 @@ async fn sync_dry_run(
             Err(format!("{:#}", e))
         }
     }
+}
+
+#[tauri::command]
+async fn find_orphan_files(
+    task_id: String,
+    source: PathBuf,
+    target: PathBuf,
+    exclude_patterns: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<OrphanFile>, String> {
+    let source = resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
+    let engine = SyncEngine::new(source, target);
+    let orphans = engine
+        .find_orphan_files(&exclude_patterns)
+        .await
+        .map_err(|e| format!("{:#}", e))?;
+
+    state.log_manager.log_with_category(
+        "info",
+        &format!("Orphan scan completed: {} candidates", orphans.len()),
+        Some(task_id),
+        LogCategory::Other,
+    );
+
+    Ok(orphans)
+}
+
+#[tauri::command]
+async fn delete_orphan_files(
+    task_id: String,
+    target: PathBuf,
+    paths: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeleteOrphanResult, String> {
+    let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+
+    let mut relative_paths: Vec<PathBuf> = Vec::new();
+    let mut invalid_count = 0usize;
+    for raw_path in paths {
+        let candidate = PathBuf::from(&raw_path);
+        if candidate.is_absolute()
+            || candidate
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            invalid_count += 1;
+            continue;
+        }
+        relative_paths.push(candidate);
+    }
+
+    // `delete_orphan_paths` only operates on `target`; source is intentionally unused here.
+    let engine = SyncEngine::new(PathBuf::from("."), target);
+    let mut result = engine
+        .delete_orphan_paths(&relative_paths)
+        .await
+        .map_err(|e| format!("{:#}", e))?;
+    result.skipped_count += invalid_count;
+
+    state.log_manager.log_with_category(
+        "info",
+        &format!(
+            "Orphan delete completed: deleted={}, skipped={}, failures={}",
+            result.deleted_count,
+            result.skipped_count,
+            result.failures.len()
+        ),
+        Some(task_id.clone()),
+        LogCategory::FileDeleted,
+    );
+
+    if !result.failures.is_empty() {
+        state.log_manager.log_with_category(
+            "warning",
+            &format!("Orphan delete failures: {}", result.failures.len()),
+            Some(task_id),
+            LogCategory::Other,
+        );
+    } else {
+        state.log_manager.log_with_category(
+            "success",
+            "Orphan delete completed without failures",
+            Some(task_id),
+            LogCategory::Other,
+        );
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -987,7 +1186,6 @@ async fn start_sync(
     task_id: String,
     source: PathBuf,
     target: PathBuf,
-    delete_missing: bool,
     checksum_mode: bool,
     verify_after_copy: bool,
     exclude_patterns: Vec<String>,
@@ -998,7 +1196,6 @@ async fn start_sync(
         task_id,
         source,
         target,
-        delete_missing,
         checksum_mode,
         verify_after_copy,
         exclude_patterns,
@@ -1093,12 +1290,7 @@ async fn runtime_set_config(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<RuntimeState, String> {
-    // Task/exclusion payload validation
-    for task in &payload.tasks {
-        input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(&task.source).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(&task.target).map_err(|e| e.to_string())?;
-    }
+    validate_runtime_tasks(&payload.tasks)?;
 
     for set in &payload.exclusion_sets {
         input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
@@ -1111,6 +1303,11 @@ async fn runtime_set_config(
 
     reconcile_runtime_watchers(app, state.inner().clone()).await?;
     Ok(runtime_get_state_internal(state.inner()).await)
+}
+
+#[tauri::command]
+async fn runtime_validate_tasks(tasks: Vec<RuntimeSyncTask>) -> Result<(), String> {
+    validate_runtime_tasks(&tasks)
 }
 
 #[tauri::command]
@@ -1504,6 +1701,8 @@ pub fn run() {
             greet,
             get_app_version,
             sync_dry_run,
+            find_orphan_files,
+            delete_orphan_files,
             list_volumes,
             get_removable_volumes,
             resolve_path_by_uuid,
@@ -1518,6 +1717,7 @@ pub fn run() {
             stop_watch,
             get_watching_tasks,
             runtime_set_config,
+            runtime_validate_tasks,
             runtime_get_state,
             get_app_config_dir,
             join_paths,

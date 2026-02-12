@@ -1,5 +1,20 @@
 [
   {
+    "id": "ADR-20260211-0003",
+    "title": "Sync task target conflict policy and orphan cleanup workflow",
+    "tags": [
+      "sync-task",
+      "safety",
+      "watch-mode",
+      "cleanup",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-02-11",
+    "tldr": "Remove automatic deletion, block conflicting target/source path combinations, and add explicit orphan scan plus confirmed manual cleanup.",
+    "path": "doc/adr/ADR-20260211-0003-sync-task-target-conflict-and-orphan-cleanup.md"
+  },
+  {
     "id": "ADR-20260210-0002",
     "title": "App lifecycle – background mode and system tray",
     "tags": [

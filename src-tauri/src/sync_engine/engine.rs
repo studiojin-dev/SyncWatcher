@@ -1,8 +1,9 @@
 use crate::sync_engine::types::{
-    DryRunResult, FileDiff, FileDiffKind, FileMetadata, SyncOptions, SyncResult,
+    DeleteOrphanFailure, DeleteOrphanResult, DryRunResult, FileDiff, FileDiffKind, FileMetadata,
+    OrphanFile, SyncOptions, SyncResult,
 };
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -262,28 +263,9 @@ impl SyncEngine {
             }
         }
 
-        if options.delete_missing {
-            for (path, target_meta) in &target_map {
-                if !source_map.contains_key(path) && target_meta.is_file {
-                    diffs.push(FileDiff {
-                        path: path.clone(),
-                        kind: FileDiffKind::Deleted,
-                        source_size: None,
-                        target_size: Some(target_meta.size),
-                        checksum_source: None,
-                        checksum_target: None,
-                    });
-                }
-            }
-        }
-
         let files_to_copy = diffs
             .iter()
             .filter(|d| d.kind == FileDiffKind::New || d.kind == FileDiffKind::Modified)
-            .count();
-        let files_to_delete = diffs
-            .iter()
-            .filter(|d| d.kind == FileDiffKind::Deleted)
             .count();
         let files_modified = diffs
             .iter()
@@ -296,7 +278,6 @@ impl SyncEngine {
             diffs,
             total_files,
             files_to_copy,
-            files_to_delete,
             files_modified,
             bytes_to_copy,
         })
@@ -315,7 +296,6 @@ impl SyncEngine {
 
         let mut result = SyncResult {
             files_copied: 0,
-            files_deleted: 0,
             bytes_copied: 0,
             errors: Vec::new(),
         };
@@ -331,7 +311,6 @@ impl SyncEngine {
                     }
                     total_files_to_copy += 1;
                 }
-                _ => {}
             }
         }
 
@@ -352,22 +331,6 @@ impl SyncEngine {
             let source_path = self.source.join(&diff.path);
             let target_path = self.target.join(&diff.path);
 
-            // Detailed Log: Only set current file, actual log emission is handled by callback via batching or throttling logic in lib.rs if simpler
-            // But here we need to simplify. The user wants to reduce log events. 
-            // The `progress_callback` in `start_sync` (lib.rs) handles the actual logging.
-            // We should just ensure we call progress_callback efficiently.
-            
-            // Actually, `start_sync` in `lib.rs` is where the throttling logic resides.
-            // But `SyncEngine` calls `progress_callback` for every file.
-            // Wait, looking at `lib.rs`, `start_sync` *already* has throttling for `sync-progress` event (100ms).
-            // BUT it calls `log_manager.log_with_event` directly for *every* file change (lines 376 in lib.rs).
-            // So we need to modify `lib.rs` to batch those logs, not necessarily `SearchEngine` here, unless we want to change signature.
-            // The plan said "In SyncEngine, implement Log Throttling/Batching", but looking at code, `SyncEngine` is pure logic, `start_sync` in `lib.rs` owns the `LogManager`.
-            // So I should modify `lib.rs` instead.
-            // However, `SyncEngine` iterates and calls callback.
-            // Let's stick to modifying `lib.rs` for the logging logic since it owns the callback.
-            // Retaining original SyncEngine code structure here, just ensuring it provides necessary info.
-            
             match diff.kind {
                 FileDiffKind::New | FileDiffKind::Modified => {
                     current_progress.current_file = Some(diff.path.to_string_lossy().to_string());
@@ -407,26 +370,154 @@ impl SyncEngine {
                     current_progress.processed_files += 1;
                     progress_callback(current_progress.clone());
                 }
-                FileDiffKind::Deleted => {
-                    current_progress.phase = crate::sync_engine::types::SyncPhase::Deleting;
-                    current_progress.current_file = Some(diff.path.to_string_lossy().to_string());
-                    progress_callback(current_progress.clone());
-
-                    if let Err(e) = fs::remove_file(&target_path).await {
-                        result.errors.push(crate::sync_engine::types::SyncError {
-                            path: diff.path.clone(),
-                            message: e.to_string(),
-                            kind: crate::sync_engine::types::SyncErrorKind::DeleteFailed,
-                        });
-                    } else {
-                        result.files_deleted += 1;
-                    }
-                    current_progress.phase = crate::sync_engine::types::SyncPhase::Copying;
-                }
             }
         }
 
         Ok(result)
+    }
+
+    pub async fn find_orphan_files(&self, exclude_patterns: &[String]) -> Result<Vec<OrphanFile>> {
+        let source_canonical = tokio::fs::canonicalize(&self.source)
+            .await
+            .with_context(|| format!("Failed to canonicalize source: {:?}", self.source))?;
+
+        let source_meta = tokio::fs::metadata(&source_canonical)
+            .await
+            .with_context(|| format!("Failed to access source: {:?}", source_canonical))?;
+        if !source_meta.is_dir() {
+            anyhow::bail!("Source path is not a directory: {:?}", source_canonical);
+        }
+
+        let target_canonical = match tokio::fs::metadata(&self.target).await {
+            Ok(target_meta) => {
+                if !target_meta.is_dir() {
+                    anyhow::bail!("Target path exists but is not a directory: {:?}", self.target);
+                }
+                tokio::fs::canonicalize(&self.target)
+                    .await
+                    .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(err).with_context(|| format!("Failed to access target: {:?}", self.target)),
+        };
+
+        let source_files = self
+            .read_directory(&source_canonical, exclude_patterns)
+            .await
+            .context("Failed to read source directory")?;
+        let target_files = self
+            .read_directory(&target_canonical, exclude_patterns)
+            .await
+            .context("Failed to read target directory")?;
+
+        let source_paths: HashSet<&PathBuf> = source_files.iter().map(|f| &f.path).collect();
+        let mut orphans: Vec<OrphanFile> = target_files
+            .iter()
+            .filter(|meta| !source_paths.contains(&meta.path))
+            .map(|meta| OrphanFile {
+                path: meta.path.clone(),
+                size: if meta.is_file { meta.size } else { 0 },
+                is_dir: !meta.is_file,
+            })
+            .collect();
+
+        orphans.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(orphans)
+    }
+
+    pub async fn delete_orphan_paths(&self, relative_paths: &[PathBuf]) -> Result<DeleteOrphanResult> {
+        let target_canonical = tokio::fs::canonicalize(&self.target)
+            .await
+            .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?;
+
+        let mut canonical_targets: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut skipped_count = 0usize;
+
+        for relative in relative_paths {
+            if relative.is_absolute() {
+                skipped_count += 1;
+                continue;
+            }
+            if relative.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+                skipped_count += 1;
+                continue;
+            }
+
+            let full_path = target_canonical.join(relative);
+            if !full_path.exists() {
+                skipped_count += 1;
+                continue;
+            }
+
+            let canonical = tokio::fs::canonicalize(&full_path)
+                .await
+                .with_context(|| format!("Failed to canonicalize orphan path: {:?}", full_path))?;
+
+            if !canonical.starts_with(&target_canonical) {
+                skipped_count += 1;
+                continue;
+            }
+
+            canonical_targets.push((relative.clone(), canonical));
+        }
+
+        canonical_targets.sort_by(|a, b| a.0.components().count().cmp(&b.0.components().count()));
+
+        let mut reduced_targets: Vec<(PathBuf, PathBuf)> = Vec::new();
+        for (relative, canonical) in canonical_targets {
+            let is_covered = reduced_targets.iter().any(|(kept_relative, _)| {
+                relative == *kept_relative
+                    || relative
+                        .strip_prefix(kept_relative)
+                        .map(|rest| !rest.as_os_str().is_empty())
+                        .unwrap_or(false)
+            });
+            if !is_covered {
+                reduced_targets.push((relative, canonical));
+            }
+        }
+
+        reduced_targets.sort_by(|a, b| b.0.components().count().cmp(&a.0.components().count()));
+
+        let mut deleted_count = 0usize;
+        let mut failures = Vec::new();
+
+        for (relative, canonical) in reduced_targets {
+            let metadata = match tokio::fs::symlink_metadata(&canonical).await {
+                Ok(meta) => meta,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    skipped_count += 1;
+                    continue;
+                }
+                Err(err) => {
+                    failures.push(DeleteOrphanFailure {
+                        path: relative,
+                        error: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            let delete_result = if metadata.is_dir() {
+                tokio::fs::remove_dir_all(&canonical).await
+            } else {
+                tokio::fs::remove_file(&canonical).await
+            };
+
+            match delete_result {
+                Ok(()) => deleted_count += 1,
+                Err(err) => failures.push(DeleteOrphanFailure {
+                    path: relative,
+                    error: err.to_string(),
+                }),
+            }
+        }
+
+        Ok(DeleteOrphanResult {
+            deleted_count,
+            skipped_count,
+            failures,
+        })
     }
 
     async fn copy_file_chunked(
@@ -663,6 +754,71 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_orphan_files() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let shared = source_dir.path().join("shared.txt");
+        let orphan_file = target_dir.path().join("orphan.txt");
+        let orphan_dir = target_dir.path().join("stale");
+        let orphan_nested = orphan_dir.join("old.txt");
+
+        fs::write(&shared, b"same").await?;
+        fs::create_dir_all(&orphan_dir).await?;
+        fs::write(source_dir.path().join("existing.txt"), b"source").await?;
+        fs::write(target_dir.path().join("shared.txt"), b"same").await?;
+        fs::write(&orphan_file, b"target-only").await?;
+        fs::write(&orphan_nested, b"nested").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let orphans = engine.find_orphan_files(&[]).await?;
+
+        let orphan_paths: Vec<String> = orphans
+            .iter()
+            .map(|o| o.path.to_string_lossy().to_string())
+            .collect();
+
+        assert!(orphan_paths.contains(&"orphan.txt".to_string()));
+        assert!(orphan_paths.contains(&"stale".to_string()));
+        assert!(orphan_paths.contains(&"stale/old.txt".to_string()));
+        assert!(!orphan_paths.contains(&"shared.txt".to_string()));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_orphan_paths() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let orphan_dir = target_dir.path().join("stale");
+        let orphan_nested = orphan_dir.join("old.txt");
+        let orphan_file = target_dir.path().join("orphan.txt");
+
+        fs::create_dir_all(&orphan_dir).await?;
+        fs::write(&orphan_nested, b"nested").await?;
+        fs::write(&orphan_file, b"target-only").await?;
+        fs::write(source_dir.path().join("keep.txt"), b"keep").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let paths = vec![
+            PathBuf::from("stale/old.txt"),
+            PathBuf::from("stale"),
+            PathBuf::from("orphan.txt"),
+            PathBuf::from("../escape"),
+        ];
+        let result = engine.delete_orphan_paths(&paths).await?;
+
+        assert_eq!(result.deleted_count, 2);
+        assert_eq!(result.failures.len(), 0);
+        assert!(!target_dir.path().join("stale").exists());
+        assert!(!target_dir.path().join("orphan.txt").exists());
+        assert!(result.skipped_count >= 1);
 
         Ok(())
     }

@@ -18,9 +18,6 @@ struct Cli {
     #[arg(short = 'n', long)]
     dry_run: bool,
 
-    #[arg(short = 'd', long)]
-    delete_missing: bool,
-
     #[arg(short = 'c', long)]
     no_checksum: bool,
 
@@ -94,7 +91,6 @@ async fn main() -> anyhow::Result<()> {
     let engine = SyncEngine::new(source.clone(), target.clone());
 
     let options = SyncOptions {
-        delete_missing: cli.delete_missing,
         checksum_mode: !cli.no_checksum,
         preserve_permissions: true,
         preserve_times: true,
@@ -114,7 +110,6 @@ async fn main() -> anyhow::Result<()> {
                 println!("   Total files in source: {}", format_number(dry_run.total_files as u64));
                 println!("   Files to copy: {}", format_number(dry_run.files_to_copy as u64));
                 println!("   Files modified: {}", format_number(dry_run.files_modified as u64));
-                println!("   Files to delete: {}", format_number(dry_run.files_to_delete as u64));
                 println!("   Bytes to copy: {}", format_bytes(dry_run.bytes_to_copy));
                 println!();
 
@@ -124,12 +119,10 @@ async fn main() -> anyhow::Result<()> {
                         let icon = match diff.kind {
                             FileDiffKind::New => "➕",
                             FileDiffKind::Modified => "🔄",
-                            FileDiffKind::Deleted => "❌",
                         };
                         let action = match diff.kind {
                             FileDiffKind::New => "NEW",
                             FileDiffKind::Modified => "MODIFIED",
-                            FileDiffKind::Deleted => "DELETE",
                         };
                         println!(
                             "   {} {:?} - {} ({})",
@@ -152,14 +145,13 @@ async fn main() -> anyhow::Result<()> {
         println!("🚀 Starting synchronization...");
         println!("   Source: {source:?}");
         println!("   Target: {target:?}");
-        println!("   Delete missing: {}", cli.delete_missing);
         println!("   Checksum mode: {}", options.checksum_mode);
         println!();
 
         let dry_run = engine.dry_run(&options).await?;
         let total_bytes = dry_run.bytes_to_copy;
 
-        if total_bytes == 0 && dry_run.files_to_delete == 0 {
+        if total_bytes == 0 {
             println!("✅ Nothing to synchronize!");
             return Ok(());
         }
@@ -190,14 +182,12 @@ async fn main() -> anyhow::Result<()> {
                 println!();
                 println!("📊 Results:");
                 println!("   Files copied: {}", format_number(result.files_copied));
-                println!("   Files deleted: {}", format_number(result.files_deleted));
                 println!("   Bytes copied: {}", format_bytes(result.bytes_copied));
                 if !result.errors.is_empty() {
                     println!("   Errors: {}", result.errors.len());
                     for error in &result.errors {
                         let kind_str = match error.kind {
                             syncwatcher_lib::sync_engine::types::SyncErrorKind::CopyFailed => "Copy Failed",
-                            syncwatcher_lib::sync_engine::types::SyncErrorKind::DeleteFailed => "Delete Failed",
                             syncwatcher_lib::sync_engine::types::SyncErrorKind::VerificationFailed => "Verification Failed",
                             syncwatcher_lib::sync_engine::types::SyncErrorKind::Other => "Error",
                         };

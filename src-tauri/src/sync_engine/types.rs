@@ -5,7 +5,6 @@ use std::path::PathBuf;
 pub enum FileDiffKind {
     New,
     Modified,
-    Deleted,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,7 +19,6 @@ pub struct FileDiff {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncOptions {
-    pub delete_missing: bool,
     pub checksum_mode: bool,
     pub preserve_permissions: bool,
     pub preserve_times: bool,
@@ -31,7 +29,6 @@ pub struct SyncOptions {
 impl Default for SyncOptions {
     fn default() -> Self {
         Self {
-            delete_missing: false,
             checksum_mode: true,
             preserve_permissions: true,
             preserve_times: true,
@@ -44,7 +41,6 @@ impl Default for SyncOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SyncErrorKind {
     CopyFailed,
-    DeleteFailed,
     VerificationFailed,
     Other,
 }
@@ -59,7 +55,6 @@ pub struct SyncError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncResult {
     pub files_copied: u64,
-    pub files_deleted: u64,
     pub bytes_copied: u64,
     pub errors: Vec<SyncError>,
 }
@@ -69,7 +64,6 @@ pub struct DryRunResult {
     pub diffs: Vec<FileDiff>,
     pub total_files: usize,
     pub files_to_copy: usize,
-    pub files_to_delete: usize,
     pub files_modified: usize,
     pub bytes_to_copy: u64,
 }
@@ -78,7 +72,6 @@ pub struct DryRunResult {
 pub enum SyncPhase {
     Scanning,
     Copying,
-    Deleting,
     Verifying,
 }
 
@@ -99,4 +92,24 @@ pub struct FileMetadata {
     pub size: u64,
     pub modified: std::time::SystemTime,
     pub is_file: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrphanFile {
+    pub path: PathBuf,
+    pub size: u64,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteOrphanFailure {
+    pub path: PathBuf,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteOrphanResult {
+    pub deleted_count: usize,
+    pub skipped_count: usize,
+    pub failures: Vec<DeleteOrphanFailure>,
 }

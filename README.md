@@ -31,8 +31,8 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 
 - **One-way sync** (Source → Target)
 - **Dry-run mode** - Preview changes before executing
-- **Delete missing files** - Optional toggle
 - **Checksum comparison** - xxHash64 for accuracy
+- **Orphan inspector** - Review/delete target-only files with explicit confirmation
 - **Progress tracking** - Real-time feedback
 
 ### 🖥️ System Integration
