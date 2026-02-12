@@ -47,8 +47,8 @@ struct LsActivateResponse {
     activated: bool,
     #[serde(default)]
     error: Option<String>,
-    #[serde(default)]
-    license_key: Option<LsLicenseKeyInfo>,
+    #[serde(default, rename = "license_key")]
+    _license_key: Option<LsLicenseKeyInfo>,
     #[serde(default)]
     instance: Option<LsInstance>,
     #[serde(default)]
