@@ -40,7 +40,7 @@ vi.spyOn(document.documentElement.classList, 'remove').mockImplementation(() => 
 
 // Wrapper component with SettingsProvider
 const wrapper = ({ children }: { children: ReactNode }) => (
-  <SettingsProvider>{ children } </SettingsProvider>
+  <SettingsProvider>{children} </SettingsProvider>
 );
 
 describe('useSettings', () => {
@@ -68,6 +68,7 @@ describe('useSettings', () => {
       stateLocation: '',
       maxLogLines: 10000,
       closeAction: 'quit',
+      isRegistered: false,
     });
   });
 

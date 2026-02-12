@@ -249,6 +249,25 @@
       "networkError": "ネットワークエラー",
       "watchStartFailed": "監視の開始に失敗しました",
       "watchStopFailed": "監視の停止に失敗しました"
+    },
+    "update": {
+      "title": "アップデート",
+      "available": "v{{version}} が利用可能です",
+      "downloading": "ダウンロード中...",
+      "installing": "インストール中... しばらくお待ちください",
+      "error": "アップデート失敗",
+      "later": "後で",
+      "updateNow": "今すぐアップデート"
+    },
+    "license": {
+      "title": "ライセンスのアクティベーション",
+      "enterKeyDescription": "購入時に受け取ったライセンスキーを入力してください。",
+      "keyPlaceholder": "ライセンスキーを入力",
+      "activate": "アクティベート",
+      "activating": "アクティベート中...",
+      "activated": "ライセンスがアクティベートされました！",
+      "invalid": "無効なライセンスキーです。",
+      "enterLicense": "ライセンス入力"
     }
   }
 }

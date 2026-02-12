@@ -249,6 +249,25 @@
       "networkError": "网络错误",
       "watchStartFailed": "启动监控失败",
       "watchStopFailed": "停止监控失败"
+    },
+    "update": {
+      "title": "更新",
+      "available": "v{{version}} 可用",
+      "downloading": "下载中...",
+      "installing": "安装中... 请稍候",
+      "error": "更新失败",
+      "later": "稍后",
+      "updateNow": "立即更新"
+    },
+    "license": {
+      "title": "激活许可证",
+      "enterKeyDescription": "请输入购买时收到的许可证密钥。",
+      "keyPlaceholder": "输入许可证密钥",
+      "activate": "激活",
+      "activating": "激活中...",
+      "activated": "许可证已激活！",
+      "invalid": "无效的许可证密钥。",
+      "enterLicense": "输入许可证"
     }
   }
 }

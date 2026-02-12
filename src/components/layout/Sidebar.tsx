@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettings } from '../../hooks/useSettings';
+import LicenseActivation from '../features/LicenseActivation';
 import {
     IconDashboard,
     IconRefresh,
@@ -40,6 +42,7 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const { t } = useTranslation();
     const { settings } = useSettings();
     const isRegistered = settings.isRegistered;
+    const [showLicenseModal, setShowLicenseModal] = useState(false);
 
     return (
         <aside className="flex flex-col h-full bg-[var(--bg-primary)] border-r-4 border-[var(--border-main)] overflow-hidden">
@@ -120,6 +123,12 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                             >
                                 {t('about.purchaseLicense')}
                             </a>
+                            <button
+                                onClick={() => setShowLicenseModal(true)}
+                                className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-[var(--bg-secondary)] text-[var(--text-primary)] py-2 border-t border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                            >
+                                {t('license.enterLicense')}
+                            </button>
                         </div>
                     ) : (
                         <div className="flex flex-col gap-1.5 p-3 bg-[var(--bg-tertiary)] border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] overflow-hidden relative group">
@@ -145,6 +154,10 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                     <div className="absolute inset-0 bg-[var(--accent-warning)] translate-y-full group-hover:translate-y-0 transition-transform duration-200" />
                 </div>
             </div>
+            <LicenseActivation
+                open={showLicenseModal}
+                onClose={() => setShowLicenseModal(false)}
+            />
         </aside>
     );
 }

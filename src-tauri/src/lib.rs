@@ -1,6 +1,7 @@
 pub mod error_codes;
 pub mod input_validation;
 pub mod license;
+pub mod license_validation;
 pub mod logging;
 pub mod path_validation;
 pub mod sync_engine;
@@ -1509,6 +1510,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
             // 윈도우 위치 조정
             if let Some(main_window) = app.get_webview_window("main") {
@@ -1730,6 +1733,9 @@ pub fn run() {
             get_system_logs,
             get_task_logs,
             generate_licenses_report,
+            license_validation::activate_license_key,
+            license_validation::validate_license_key,
+            license_validation::get_license_status,
         ]);
 
     let app = builder

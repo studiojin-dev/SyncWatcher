@@ -246,6 +246,25 @@
       "networkError": "Network Error",
       "watchStartFailed": "Failed to start watch",
       "watchStopFailed": "Failed to stop watch"
+    },
+    "update": {
+      "title": "Update",
+      "available": "v{{version}} is available",
+      "downloading": "Downloading...",
+      "installing": "Installing... Please wait",
+      "error": "Update failed",
+      "later": "Later",
+      "updateNow": "Update Now"
+    },
+    "license": {
+      "title": "Activate License",
+      "enterKeyDescription": "Enter the license key from your purchase.",
+      "keyPlaceholder": "Enter license key",
+      "activate": "Activate",
+      "activating": "Activating...",
+      "activated": "License activated!",
+      "invalid": "Invalid license key.",
+      "enterLicense": "Enter License"
     }
   }
 }

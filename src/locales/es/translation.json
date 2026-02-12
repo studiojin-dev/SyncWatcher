@@ -249,6 +249,25 @@
       "networkError": "Error de Red",
       "watchStartFailed": "Error al iniciar vigilancia",
       "watchStopFailed": "Error al detener vigilancia"
+    },
+    "update": {
+      "title": "Actualización",
+      "available": "v{{version}} está disponible",
+      "downloading": "Descargando...",
+      "installing": "Instalando... Por favor espere",
+      "error": "Error de actualización",
+      "later": "Más tarde",
+      "updateNow": "Actualizar ahora"
+    },
+    "license": {
+      "title": "Activar licencia",
+      "enterKeyDescription": "Introduzca la clave de licencia de su compra.",
+      "keyPlaceholder": "Introducir clave de licencia",
+      "activate": "Activar",
+      "activating": "Activando...",
+      "activated": "¡Licencia activada!",
+      "invalid": "Clave de licencia no válida.",
+      "enterLicense": "Introducir licencia"
     }
   }
 }

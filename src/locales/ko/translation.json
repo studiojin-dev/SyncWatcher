@@ -249,6 +249,25 @@
       "networkError": "네트워크 오류",
       "watchStartFailed": "감시 시작 실패",
       "watchStopFailed": "감시 중지 실패"
+    },
+    "update": {
+      "title": "업데이트",
+      "available": "v{{version}} 업데이트가 있습니다",
+      "downloading": "다운로드 중...",
+      "installing": "설치 중... 잠시만 기다려 주세요",
+      "error": "업데이트 실패",
+      "later": "나중에",
+      "updateNow": "지금 업데이트"
+    },
+    "license": {
+      "title": "라이선스 활성화",
+      "enterKeyDescription": "구매 시 받은 라이선스 키를 입력하세요.",
+      "keyPlaceholder": "라이선스 키 입력",
+      "activate": "활성화",
+      "activating": "활성화 중...",
+      "activated": "라이선스가 활성화되었습니다!",
+      "invalid": "유효하지 않은 라이선스 키입니다.",
+      "enterLicense": "라이선스 입력"
     }
   }
 }

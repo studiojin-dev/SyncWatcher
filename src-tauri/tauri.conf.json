@@ -24,6 +24,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -32,5 +33,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU0ODExMEU1MkQxREIxN0YKUldSL3NSMHQ1UkNCNUE0VXQxSlR2MkZidjNjME04VkNId3YzOHJueFpNUjh5Vzc2STNSQUxtNnkK",
+      "endpoints": [
+        "https://github.com/studiojin-dev/SyncWatcher/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

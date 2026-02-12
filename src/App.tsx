@@ -12,6 +12,7 @@ import StartupProgressOverlay from './components/ui/StartupProgressOverlay';
 import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
+import UpdateChecker from './components/features/UpdateChecker';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
 // SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
 import SyncTasksView from './views/SyncTasksView';
@@ -40,6 +41,24 @@ function AppContent() {
   const isHandlingCloseRef = useRef(false);
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
+  const { updateSettings } = useSettings();
+
+  // 앱 시작 시 라이선스 검증
+  useEffect(() => {
+    if (!settingsLoaded) return;
+
+    const validateLicense = async () => {
+      try {
+        const result = await invoke<{ valid: boolean; error: string | null }>('validate_license_key');
+        updateSettings({ isRegistered: result?.valid === true });
+      } catch (err) {
+        console.error('[App] License validation failed:', err);
+        updateSettings({ isRegistered: false });
+      }
+    };
+
+    void validateLicense();
+  }, [settingsLoaded, updateSettings]);
 
   const dismissBackgroundIntro = useCallback(() => {
     setShowBackgroundIntro(false);
@@ -260,6 +279,7 @@ function AppContent() {
         initialRuntimeSync={initialRuntimeSync}
         visible={!startupComplete}
       />
+      <UpdateChecker />
     </>
   );
 }
