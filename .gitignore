@@ -69,3 +69,4 @@ temp/
 .next/
 out/
 build/
+.pnpm-store/
