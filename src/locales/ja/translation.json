@@ -46,12 +46,6 @@
       "source": "転送元",
       "target": "転送先",
       "enabled": "有効",
-      "deleteMissing": "欠落ファイルを削除",
-      "deleteMissingWarning": "警告：ソースで削除されたファイルはターゲットでも削除されます。",
-      "deleteRiskTitle": "欠落ファイル削除の警告",
-      "deleteRiskWatchEnable": "「欠落ファイルを削除」が有効なまま監視モードを有効化しようとしています。同期時にソースから消えたファイルがターゲットでも削除される可能性があります。",
-      "deleteRiskManualSync": "「欠落ファイルを削除」が有効な状態で手動同期を実行します。ソースにないファイルがターゲットで削除される可能性があります。",
-      "deleteRiskProceed": "このまま続行しますか？",
       "checksumMode": "チェックサムモード",
       "watchMode": "監視モード",
       "watchModeDesc": "ソースディレクトリを監視し、変更時に自動同期します。",
@@ -77,7 +71,29 @@
       "subPath": "サブパス",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "ボリュームがマウントされていません",
-      "uuidCopied": "UUIDをクリップボードにコピーしました"
+      "uuidCopied": "UUIDをクリップボードにコピーしました",
+      "errors": {
+        "sourceEqualsTarget": "ソースとターゲットのパスは重複できません。",
+        "targetIsSubdirOfSource": "ターゲットをソース配下に設定できません。",
+        "duplicateTarget": "ターゲットが他のタスクのターゲットと競合しています。",
+        "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。"
+      },
+      "warnings": {
+        "targetInWatchedSource": "ターゲットが他の監視ソースと重複し、同期ループの原因になる可能性があります。"
+      }
+    },
+    "orphan": {
+      "title": "孤立ファイル",
+      "search": "パスを検索...",
+      "scanning": "スキャン中...",
+      "noOrphans": "孤立ファイルは見つかりませんでした。",
+      "foundCount": "{{count}} 件検出",
+      "selectVisible": "表示項目を選択",
+      "deselectAll": "選択解除",
+      "deleteSelected": "選択項目を削除 ({{count}})",
+      "confirmDelete": "選択した {{count}} 件を削除しますか？",
+      "deleteSuccess": "削除 {{deleted}} 件、スキップ {{skipped}} 件、失敗 {{failed}} 件",
+      "deleteFailed": "選択した孤立ファイルの削除に失敗しました。"
     },
     "activityLog": {
       "title": "アクティビティログ",
@@ -172,8 +188,7 @@
       "security": {
         "title": "データ整合性",
         "description": "データの安全性と一貫性を確保",
-        "verifyAfterCopy": "コピー後の再チェックサムによるファイル検証（重要データ向け）",
-        "deleteMissing": "転送先にのみ存在するファイルをオプションで削除"
+        "verifyAfterCopy": "コピー後の再チェックサムによるファイル検証（重要データ向け）"
       },
       "preview": {
         "title": "プレビューモード",

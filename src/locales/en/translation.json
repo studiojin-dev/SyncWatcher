@@ -43,12 +43,6 @@
       "source": "Source",
       "target": "Target",
       "enabled": "Enabled",
-      "deleteMissing": "Delete Missing",
-      "deleteMissingWarning": "Warning: Files deleted in source will be deleted in target.",
-      "deleteRiskTitle": "Delete Missing Warning",
-      "deleteRiskWatchEnable": "Watch mode is about to run with Delete Missing enabled. Files removed from source can also be deleted in target during sync.",
-      "deleteRiskManualSync": "Manual sync will run with Delete Missing enabled. Files missing in source can be deleted in target.",
-      "deleteRiskProceed": "Do you want to continue?",
       "checksumMode": "Checksum Mode",
       "watchMode": "Watch Mode",
       "watchModeDesc": "Monitors source directory and auto-syncs on changes.",
@@ -74,7 +68,29 @@
       "subPath": "Sub Path",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "Volume not mounted",
-      "uuidCopied": "UUID copied to clipboard"
+      "uuidCopied": "UUID copied to clipboard",
+      "errors": {
+        "sourceEqualsTarget": "Source and target cannot overlap.",
+        "targetIsSubdirOfSource": "Target cannot be inside source.",
+        "duplicateTarget": "Target conflicts with another task target.",
+        "targetSubdirConflict": "Target cannot be parent/child of another task target."
+      },
+      "warnings": {
+        "targetInWatchedSource": "Target overlaps another watch source and may cause sync loops."
+      }
+    },
+    "orphan": {
+      "title": "Orphan Files",
+      "search": "Search path...",
+      "scanning": "Scanning...",
+      "noOrphans": "No orphan files found.",
+      "foundCount": "{{count}} items detected",
+      "selectVisible": "Select visible",
+      "deselectAll": "Clear selection",
+      "deleteSelected": "Delete selected ({{count}})",
+      "confirmDelete": "Delete {{count}} selected items?",
+      "deleteSuccess": "Deleted {{deleted}}, skipped {{skipped}}, failed {{failed}}",
+      "deleteFailed": "Failed to delete selected orphan files."
     },
     "activityLog": {
       "title": "Activity Log",
@@ -169,8 +185,7 @@
       "security": {
         "title": "Data Integrity",
         "description": "Ensure your data remains safe and consistent",
-        "verifyAfterCopy": "Verify files after copying with re-checksum (for critical data only)",
-        "deleteMissing": "Optionally delete files in target that don't exist in source"
+        "verifyAfterCopy": "Verify files after copying with re-checksum (for critical data only)"
       },
       "preview": {
         "title": "Preview Mode",

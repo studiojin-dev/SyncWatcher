@@ -6,7 +6,6 @@ export interface SyncTask {
     name: string;
     source: string;
     target: string;
-    deleteMissing: boolean;
     checksumMode: boolean;
     verifyAfterCopy?: boolean;
     exclusionSets?: string[];
@@ -26,6 +25,7 @@ interface PersistedSyncTask extends SyncTask {
     // Legacy fields that can still exist in old YAML files.
     enabled?: boolean;
     watching?: boolean;
+    deleteMissing?: boolean;
 }
 
 function normalizeTask(task: PersistedSyncTask): SyncTask {
@@ -34,7 +34,6 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         name: task.name,
         source: task.source,
         target: task.target,
-        deleteMissing: task.deleteMissing ?? false,
         checksumMode: task.checksumMode ?? false,
         verifyAfterCopy: task.verifyAfterCopy ?? true,
         exclusionSets: task.exclusionSets ?? [],
@@ -61,7 +60,9 @@ export function useSyncTasks() {
         }
 
         migrationCheckedRef.current = true;
-        const hasLegacyFields = storedTasks.some((task) => 'enabled' in task || 'watching' in task);
+        const hasLegacyFields = storedTasks.some((task) =>
+            'enabled' in task || 'watching' in task || 'deleteMissing' in task
+        );
         if (!hasLegacyFields) {
             return;
         }

@@ -116,7 +116,6 @@ function createTask(overrides: Partial<SyncTask> = {}): SyncTask {
     name: 'Task',
     source: '/src',
     target: '/dst',
-    deleteMissing: false,
     checksumMode: false,
     ...overrides,
   };

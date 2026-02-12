@@ -46,12 +46,6 @@
       "source": "Origen",
       "target": "Destino",
       "enabled": "Habilitado",
-      "deleteMissing": "Eliminar Faltantes",
-      "deleteMissingWarning": "Advertencia: Los archivos eliminados en el origen se eliminarán en el destino.",
-      "deleteRiskTitle": "Advertencia de eliminación",
-      "deleteRiskWatchEnable": "Vas a activar el modo vigilancia con \"Eliminar faltantes\" habilitado. Durante la sincronización, los archivos eliminados del origen también podrían eliminarse del destino.",
-      "deleteRiskManualSync": "La sincronización manual se ejecutará con \"Eliminar faltantes\" habilitado. Los archivos que no existan en el origen podrían eliminarse del destino.",
-      "deleteRiskProceed": "¿Desea continuar?",
       "checksumMode": "Modo Checksum",
       "watchMode": "Modo Vigilancia",
       "watchModeDesc": "Supervisa el directorio de origen y sincroniza automáticamente los cambios.",
@@ -77,7 +71,29 @@
       "subPath": "Subruta",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "Volumen no montado",
-      "uuidCopied": "UUID copiado al portapapeles"
+      "uuidCopied": "UUID copiado al portapapeles",
+      "errors": {
+        "sourceEqualsTarget": "La ruta de origen y destino no pueden superponerse.",
+        "targetIsSubdirOfSource": "El destino no puede estar dentro del origen.",
+        "duplicateTarget": "El destino entra en conflicto con otro destino de tarea.",
+        "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea."
+      },
+      "warnings": {
+        "targetInWatchedSource": "El destino se superpone con otro origen vigilado y puede causar bucles."
+      }
+    },
+    "orphan": {
+      "title": "Archivos huérfanos",
+      "search": "Buscar ruta...",
+      "scanning": "Escaneando...",
+      "noOrphans": "No se encontraron archivos huérfanos.",
+      "foundCount": "{{count}} elementos detectados",
+      "selectVisible": "Seleccionar visibles",
+      "deselectAll": "Quitar selección",
+      "deleteSelected": "Eliminar seleccionados ({{count}})",
+      "confirmDelete": "¿Eliminar {{count}} elementos seleccionados?",
+      "deleteSuccess": "Eliminados {{deleted}}, omitidos {{skipped}}, fallidos {{failed}}",
+      "deleteFailed": "No se pudieron eliminar los archivos huérfanos seleccionados."
     },
     "activityLog": {
       "title": "Registro de Actividad",
@@ -172,8 +188,7 @@
       "security": {
         "title": "Integridad de Datos",
         "description": "Asegure que sus datos permanezcan seguros y consistentes",
-        "verifyAfterCopy": "Verificar archivos después de copiar con re-checksum (solo para datos críticos)",
-        "deleteMissing": "Opcionalmente eliminar archivos en el destino que no existen en el origen"
+        "verifyAfterCopy": "Verificar archivos después de copiar con re-checksum (solo para datos críticos)"
       },
       "preview": {
         "title": "Modo Vista Previa",

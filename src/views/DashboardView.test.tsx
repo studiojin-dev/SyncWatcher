@@ -12,7 +12,19 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(),
 }));
 
+vi.mock('../hooks/useSettings', () => ({
+  useSettings: () => ({
+    settings: {
+      dataUnitSystem: 'binary',
+    },
+  }),
+}));
+
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => {},
+  },
   useTranslation: vi.fn(() => ({
     t: vi.fn((key: string, fallback?: string) => {
       const translations: Record<string, string> = {

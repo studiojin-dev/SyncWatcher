@@ -46,12 +46,6 @@
       "source": "源目录",
       "target": "目标目录",
       "enabled": "启用",
-      "deleteMissing": "删除缺失项",
-      "deleteMissingWarning": "警告：源中删除的文件将在目标中被删除。",
-      "deleteRiskTitle": "删除缺失项警告",
-      "deleteRiskWatchEnable": "即将以“删除缺失项”开启监控模式。同步时，源目录中消失的文件可能也会在目标目录被删除。",
-      "deleteRiskManualSync": "即将以“删除缺失项”执行手动同步。源目录中不存在的文件可能会在目标目录被删除。",
-      "deleteRiskProceed": "是否继续？",
       "checksumMode": "校验和模式",
       "watchMode": "监控模式",
       "watchModeDesc": "监控源目录并在更改时自动同步。",
@@ -77,7 +71,29 @@
       "subPath": "子路径",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "卷未挂载",
-      "uuidCopied": "UUID 已复制到剪贴板"
+      "uuidCopied": "UUID 已复制到剪贴板",
+      "errors": {
+        "sourceEqualsTarget": "源路径与目标路径不能重叠。",
+        "targetIsSubdirOfSource": "目标不能位于源目录内部。",
+        "duplicateTarget": "目标与其他任务目标路径冲突。",
+        "targetSubdirConflict": "目标不能成为其他任务目标的父/子路径。"
+      },
+      "warnings": {
+        "targetInWatchedSource": "目标与其他监控任务的源路径重叠，可能导致同步循环。"
+      }
+    },
+    "orphan": {
+      "title": "孤立文件",
+      "search": "搜索路径...",
+      "scanning": "扫描中...",
+      "noOrphans": "未发现孤立文件。",
+      "foundCount": "检测到 {{count}} 项",
+      "selectVisible": "选择可见项",
+      "deselectAll": "清除选择",
+      "deleteSelected": "删除已选 ({{count}})",
+      "confirmDelete": "确定删除已选的 {{count}} 项吗？",
+      "deleteSuccess": "已删除 {{deleted}}，跳过 {{skipped}}，失败 {{failed}}",
+      "deleteFailed": "删除所选孤立文件失败。"
     },
     "activityLog": {
       "title": "活动日志",
@@ -172,8 +188,7 @@
       "security": {
         "title": "数据完整性",
         "description": "确保您的数据保持安全和一致",
-        "verifyAfterCopy": "复制后使用重新校验和验证文件（仅针对关键数据）",
-        "deleteMissing": "可选地删除目标目录中不存在于源目录的文件"
+        "verifyAfterCopy": "复制后使用重新校验和验证文件（仅针对关键数据）"
       },
       "preview": {
         "title": "预览模式",

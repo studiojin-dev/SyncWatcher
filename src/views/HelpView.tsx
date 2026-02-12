@@ -40,7 +40,6 @@ function HelpView() {
       description: t('help.security.description'),
       features: [
         t('help.security.verifyAfterCopy'),
-        t('help.security.deleteMissing'),
       ],
     },
     {

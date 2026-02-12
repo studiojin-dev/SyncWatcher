@@ -46,12 +46,6 @@
       "source": "원본",
       "target": "대상",
       "enabled": "활성",
-      "deleteMissing": "누락된 항목 삭제",
-      "deleteMissingWarning": "주의: 원본에서 삭제된 파일이 대상에서도 삭제됩니다.",
-      "deleteRiskTitle": "누락된 항목 삭제 경고",
-      "deleteRiskWatchEnable": "누락된 항목 삭제가 켜진 상태에서 감시 모드를 활성화하려고 합니다. 동기화 시 원본에서 사라진 파일이 대상에서도 삭제될 수 있습니다.",
-      "deleteRiskManualSync": "누락된 항목 삭제가 켜진 상태로 수동 동기화를 실행합니다. 원본에 없는 파일이 대상에서 삭제될 수 있습니다.",
-      "deleteRiskProceed": "계속 진행하시겠습니까?",
       "checksumMode": "체크섬 모드",
       "watchMode": "감시 모드",
       "watchModeDesc": "소스 디렉토리를 감시하고 변경 시 자동 동기화합니다.",
@@ -77,7 +71,29 @@
       "subPath": "하위 경로",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "볼륨이 마운트되지 않음",
-      "uuidCopied": "UUID가 클립보드에 복사되었습니다"
+      "uuidCopied": "UUID가 클립보드에 복사되었습니다",
+      "errors": {
+        "sourceEqualsTarget": "원본과 대상 경로는 겹칠 수 없습니다.",
+        "targetIsSubdirOfSource": "대상은 원본 경로 내부에 둘 수 없습니다.",
+        "duplicateTarget": "다른 작업과 대상 경로가 충돌합니다.",
+        "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다."
+      },
+      "warnings": {
+        "targetInWatchedSource": "대상이 다른 감시 작업의 원본과 겹쳐 루프가 발생할 수 있습니다."
+      }
+    },
+    "orphan": {
+      "title": "삭제 후보 파일",
+      "search": "경로 검색...",
+      "scanning": "검사 중...",
+      "noOrphans": "삭제 후보가 없습니다.",
+      "foundCount": "{{count}}개 항목 발견",
+      "selectVisible": "보이는 항목 선택",
+      "deselectAll": "전체 해제",
+      "deleteSelected": "선택 삭제 ({{count}})",
+      "confirmDelete": "선택한 {{count}}개 항목을 삭제하시겠습니까?",
+      "deleteSuccess": "삭제 {{deleted}}개, 건너뜀 {{skipped}}개, 실패 {{failed}}개",
+      "deleteFailed": "삭제 후보 파일 삭제에 실패했습니다."
     },
     "activityLog": {
       "title": "활동 로그",
@@ -172,8 +188,7 @@
       "security": {
         "title": "데이터 무결성",
         "description": "데이터의 안전과 일관성 보장",
-        "verifyAfterCopy": "복사 후 재체크섬으로 파일 검증 (중요 데이터용)",
-        "deleteMissing": "대상에만 존재하는 파일 선택적 삭제"
+        "verifyAfterCopy": "복사 후 재체크섬으로 파일 검증 (중요 데이터용)"
       },
       "preview": {
         "title": "미리보기 모드",

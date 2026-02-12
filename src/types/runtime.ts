@@ -7,7 +7,6 @@ export interface RuntimeSyncTask {
     name: string;
     source: string;
     target: string;
-    deleteMissing: boolean;
     checksumMode: boolean;
     watchMode: boolean;
     autoUnmount: boolean;
@@ -54,7 +53,6 @@ export function toRuntimeTask(task: SyncTask): RuntimeSyncTask {
         name: task.name,
         source: task.source,
         target: task.target,
-        deleteMissing: task.deleteMissing,
         checksumMode: task.checksumMode,
         watchMode: task.watchMode ?? false,
         autoUnmount: task.autoUnmount ?? false,
