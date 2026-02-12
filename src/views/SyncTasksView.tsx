@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc } from '@tabler/icons-react';
+import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc, IconSearch } from '@tabler/icons-react';
 import { MultiSelect, Select } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
 import { open, ask } from '@tauri-apps/plugin-dialog';
@@ -9,10 +9,12 @@ import { useSyncTasksContext } from '../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../context/ExclusionSetsContext';
 import { useSyncTaskStatusStore } from '../hooks/useSyncTaskStatus';
 import { useSettings } from '../hooks/useSettings';
+import { toRuntimeTask } from '../types/runtime';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
 import { useToast } from '../components/ui/Toast';
 import YamlEditorModal from '../components/ui/YamlEditorModal';
 import TaskLogsModal from '../components/features/TaskLogsModal';
+import OrphanFilesModal from '../components/features/OrphanFilesModal';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
 import { formatBytes } from '../utils/formatBytes';
 
@@ -78,10 +80,6 @@ function SyncTasksView() {
     const [sourcePath, setSourcePath] = useState('');
     const [targetPath, setTargetPath] = useState('');
 
-    // Delete Missing state with warning
-    const [deleteMissing, setDeleteMissing] = useState(false);
-    const [showDeleteWarning, setShowDeleteWarning] = useState(false);
-
     // Watch Mode state
     const [watchMode, setWatchMode] = useState(false);
     const [autoUnmount, setAutoUnmount] = useState(false);
@@ -99,6 +97,26 @@ function SyncTasksView() {
 
     // Cancel confirmation state
     const [cancelConfirm, setCancelConfirm] = useState<{ type: 'sync' | 'dryRun'; taskId: string } | null>(null);
+    const [orphanTask, setOrphanTask] = useState<SyncTask | null>(null);
+    const orphanTaskId = orphanTask?.id ?? null;
+    const orphanSource = orphanTask?.source ?? null;
+    const orphanTarget = orphanTask?.target ?? null;
+    const orphanSetIdsKey = useMemo(
+        () => JSON.stringify(orphanTask?.exclusionSets ?? []),
+        [orphanTask?.exclusionSets]
+    );
+    const orphanExcludePatterns = useMemo(() => {
+        try {
+            const parsed = JSON.parse(orphanSetIdsKey);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+            const ids = parsed.filter((id): id is string => typeof id === 'string');
+            return getPatternsForSets(ids);
+        } catch {
+            return [];
+        }
+    }, [getPatternsForSets, orphanSetIdsKey]);
 
     const formatVolumeSize = useCallback((volume: VolumeInfo): string => {
         if (typeof volume.total_bytes !== 'number') {
@@ -125,7 +143,6 @@ function SyncTasksView() {
             setSelectedSets(editingTask.exclusionSets || []);
             setSourcePath(editingTask.source || '');
             setTargetPath(editingTask.target || '');
-            setDeleteMissing(editingTask.deleteMissing || false);
             setWatchMode(editingTask.watchMode || false);
             setAutoUnmount(editingTask.autoUnmount || false);
             // UUID 관련 상태 복원
@@ -136,7 +153,6 @@ function SyncTasksView() {
             setSelectedSets([]);
             setSourcePath('');
             setTargetPath('');
-            setDeleteMissing(false);
             setWatchMode(false);
             setAutoUnmount(false);
             // UUID 관련 상태 초기화
@@ -189,7 +205,6 @@ function SyncTasksView() {
             name: formData.get('name') as string,
             source: finalSource,
             target: targetPath || formData.get('target') as string,
-            deleteMissing,
             checksumMode: formData.get('checksumMode') === 'on',
             exclusionSets: selectedSets,
             watchMode: watchMode,
@@ -200,20 +215,18 @@ function SyncTasksView() {
             sourceSubPath: sourceType === 'uuid' ? sourceSubPath : undefined,
         };
 
-        if (taskData.watchMode && taskData.deleteMissing) {
-            const confirmed = await ask(
-                `${t('syncTasks.deleteRiskWatchEnable')}\n\n${t('syncTasks.deleteRiskProceed')}`,
-                {
-                    title: t('syncTasks.deleteRiskTitle'),
-                    kind: 'warning',
-                }
-            );
-            if (!confirmed) {
-                return;
-            }
-        }
-
         try {
+            const provisionalTask: SyncTask = editingTask
+                ? { ...editingTask, ...taskData }
+                : { id: crypto.randomUUID(), ...taskData };
+            const allTasks = editingTask
+                ? tasks.map((task) => (task.id === editingTask.id ? provisionalTask : task))
+                : [...tasks, provisionalTask];
+
+            await invoke('runtime_validate_tasks', {
+                tasks: allTasks.map(toRuntimeTask),
+            });
+
             if (editingTask) {
                 await updateTask(editingTask.id, taskData);
                 showToast(t('syncTasks.editTask') + ': ' + taskData.name, 'success');
@@ -238,20 +251,6 @@ function SyncTasksView() {
 
         if (syncing) return; // 다른 태스크가 실행 중이면 무시
 
-        if (task.deleteMissing) {
-            const confirmed = await ask(
-                `${t('syncTasks.deleteRiskManualSync')}\n\n${t('syncTasks.deleteRiskProceed')}`,
-                {
-                    title: t('syncTasks.deleteRiskTitle'),
-                    kind: 'warning',
-                }
-            );
-
-            if (!confirmed) {
-                return;
-            }
-        }
-
         try {
             setSyncing(task.id);
             showToast(t('syncTasks.startSync') + ': ' + task.name, 'info');
@@ -260,7 +259,6 @@ function SyncTasksView() {
                 taskId: task.id,
                 source: task.source,
                 target: task.target,
-                deleteMissing: task.deleteMissing,
                 checksumMode: task.checksumMode,
                 verifyAfterCopy: true,
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
@@ -294,20 +292,6 @@ function SyncTasksView() {
 
         const previousWatchMode = task.watchMode ?? false;
         const nextWatchMode = !previousWatchMode;
-
-        if (nextWatchMode && task.deleteMissing) {
-            const confirmed = await ask(
-                `${t('syncTasks.deleteRiskWatchEnable')}\n\n${t('syncTasks.deleteRiskProceed')}`,
-                {
-                    title: t('syncTasks.deleteRiskTitle'),
-                    kind: 'warning',
-                }
-            );
-
-            if (!confirmed) {
-                return;
-            }
-        }
 
         setWatchTogglePendingIds((prev) => {
             const next = new Set(prev);
@@ -358,7 +342,6 @@ function SyncTasksView() {
                 taskId: task.id,
                 source: task.source,
                 target: task.target,
-                deleteMissing: task.deleteMissing,
                 checksumMode: task.checksumMode,
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
             });
@@ -607,33 +590,6 @@ function SyncTasksView() {
                                 <div className="space-y-3 py-2">
                                     <label className="flex items-center gap-2 cursor-pointer select-none">
                                         <div className="relative">
-                                            <input
-                                                type="checkbox"
-                                                name="deleteMissing"
-                                                checked={deleteMissing}
-                                                onChange={(e) => {
-                                                    const checked = e.target.checked;
-                                                    setDeleteMissing(checked);
-                                                    if (checked) {
-                                                        setShowDeleteWarning(true);
-                                                    } else {
-                                                        setShowDeleteWarning(false);
-                                                    }
-                                                }}
-                                                className="peer sr-only"
-                                            />
-                                            <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--color-accent-error)] transition-colors"></div>
-                                            <div className="absolute inset-0 hidden peer-checked:flex items-center justify-center text-white pointer-events-none">✓</div>
-                                        </div>
-                                        <span className="font-bold text-sm uppercase">{t('syncTasks.deleteMissing')}</span>
-                                    </label>
-                                    {showDeleteWarning && (
-                                        <div className="ml-8 p-2 bg-[var(--color-accent-error)]/10 border-2 border-[var(--color-accent-error)] text-sm text-[var(--color-accent-error)] font-mono">
-                                            ⚠️ {t('syncTasks.deleteMissingWarning', { defaultValue: '주의: 원본 디렉토리에서 삭제된 파일을 대상 디렉토리에서 삭제합니다.' })}
-                                        </div>
-                                    )}
-                                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                                        <div className="relative">
                                             <input type="checkbox" name="checksumMode" defaultChecked={editingTask?.checksumMode} className="peer sr-only" />
                                             <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-main)] transition-colors"></div>
                                             <div className="absolute inset-0 hidden peer-checked:flex items-center justify-center text-white pointer-events-none">✓</div>
@@ -745,6 +701,17 @@ function SyncTasksView() {
                 />
             )}
 
+            {orphanTask && (
+                <OrphanFilesModal
+                    opened={!!orphanTaskId}
+                    taskId={orphanTaskId}
+                    source={orphanSource}
+                    target={orphanTarget}
+                    excludePatterns={orphanExcludePatterns}
+                    onClose={() => setOrphanTask(null)}
+                />
+            )}
+
             {/* Task List */}
             <div className="grid gap-6">
                 {tasks.map((task, index) => (
@@ -757,14 +724,6 @@ function SyncTasksView() {
                                             {task.name}
                                         </h3>
                                         <div className="flex gap-1.5 items-center">
-                                            {/* DEL Badge */}
-                                            <span className={`px-1.5 py-0.5 text-[10px] font-bold border-2 transition-colors ${task.deleteMissing
-                                                ? 'border-black bg-[var(--color-accent-error)] text-white'
-                                                : 'border-[var(--border-main)] bg-[var(--bg-secondary)] text-[var(--text-tertiary)] opacity-40 grayscale'
-                                                }`} title="Delete Missing">
-                                                DEL
-                                            </span>
-
                                             {/* CHK Badge */}
                                             <span className={`px-1.5 py-0.5 text-[10px] font-bold border-2 transition-colors ${task.checksumMode
                                                 ? 'border-black bg-[var(--color-accent-warning)] text-black'
@@ -841,6 +800,13 @@ function SyncTasksView() {
                                             onClick={() => handleDelete(task)}
                                         >
                                             DEL
+                                        </button>
+                                        <button
+                                            className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                                            onClick={() => setOrphanTask(task)}
+                                            title={t('orphan.title', { defaultValue: 'Orphan Files' })}
+                                        >
+                                            <IconSearch size={20} stroke={2} />
                                         </button>
                                         <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
                                         <button
