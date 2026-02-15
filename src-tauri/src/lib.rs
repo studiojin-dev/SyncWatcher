@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewWindow};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use sync_engine::{
@@ -147,6 +147,8 @@ pub struct AppState {
     queued_sync_tasks: Arc<RwLock<HashSet<String>>>,
     /// 런타임 큐 디스패처 실행 여부
     runtime_dispatcher_running: Arc<Mutex<bool>>,
+    /// 런타임 동기화 슬롯 해제 알림
+    runtime_sync_slot_released: Arc<Notify>,
     /// 초기 watchMode 일괄 동기화 실행 여부
     runtime_initial_watch_bootstrapped: Arc<AtomicBool>,
     /// 런타임이 관리 중인 watcher source 추적 (task_id -> source)
@@ -510,8 +512,14 @@ async fn acquire_runtime_sync_slot(task_id: &str, state: &AppState) -> RuntimeSy
 }
 
 async fn release_sync_slot(task_id: &str, state: &AppState) {
-    let mut syncing = state.syncing_tasks.write().await;
-    syncing.remove(task_id);
+    let removed = {
+        let mut syncing = state.syncing_tasks.write().await;
+        syncing.remove(task_id)
+    };
+
+    if removed {
+        state.runtime_sync_slot_released.notify_one();
+    }
 }
 
 async fn enqueue_runtime_sync_task(
@@ -577,7 +585,17 @@ async fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState
                 syncing.len()
             };
 
-            if current_syncing >= RUNTIME_SYNC_MAX_CONCURRENCY {
+            let has_queued = {
+                let queue = state.runtime_sync_queue.read().await;
+                !queue.is_empty()
+            };
+
+            if should_wait_for_runtime_slot(has_queued, current_syncing) {
+                state.runtime_sync_slot_released.notified().await;
+                continue;
+            }
+
+            if !has_queued {
                 break;
             }
 
@@ -604,41 +622,47 @@ async fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState
             !queue.is_empty()
         };
 
-        let current_syncing = {
-            let syncing = state.syncing_tasks.read().await;
-            syncing.len()
-        };
-
-        if should_reschedule_dispatcher(has_queued, current_syncing) {
+        if should_reschedule_runtime_dispatcher(has_queued) {
             schedule_runtime_sync_dispatcher(app.clone(), state.clone()).await;
         }
     });
 }
 
-fn should_reschedule_dispatcher(has_queued: bool, current_syncing: usize) -> bool {
-    has_queued && current_syncing < RUNTIME_SYNC_MAX_CONCURRENCY
+fn should_wait_for_runtime_slot(has_queued: bool, current_syncing: usize) -> bool {
+    has_queued && current_syncing >= RUNTIME_SYNC_MAX_CONCURRENCY
+}
+
+fn should_reschedule_runtime_dispatcher(has_queued: bool) -> bool {
+    has_queued
 }
 
 #[cfg(test)]
 mod runtime_dispatcher_tests {
-    use super::{should_reschedule_dispatcher, RUNTIME_SYNC_MAX_CONCURRENCY};
+    use super::{
+        should_reschedule_runtime_dispatcher, should_wait_for_runtime_slot,
+        RUNTIME_SYNC_MAX_CONCURRENCY,
+    };
 
     #[test]
-    fn reschedules_when_queue_has_work_and_slot_is_available() {
-        assert!(should_reschedule_dispatcher(true, 0));
-        assert!(should_reschedule_dispatcher(
+    fn waits_for_slot_release_only_when_full_and_queued() {
+        assert!(should_wait_for_runtime_slot(
+            true,
+            RUNTIME_SYNC_MAX_CONCURRENCY
+        ));
+        assert!(!should_wait_for_runtime_slot(
             true,
             RUNTIME_SYNC_MAX_CONCURRENCY - 1
+        ));
+        assert!(!should_wait_for_runtime_slot(
+            false,
+            RUNTIME_SYNC_MAX_CONCURRENCY
         ));
     }
 
     #[test]
-    fn does_not_reschedule_when_queue_empty_or_capacity_full() {
-        assert!(!should_reschedule_dispatcher(false, 0));
-        assert!(!should_reschedule_dispatcher(
-            true,
-            RUNTIME_SYNC_MAX_CONCURRENCY
-        ));
+    fn reschedules_only_when_queue_has_work_after_shutdown() {
+        assert!(should_reschedule_runtime_dispatcher(true));
+        assert!(!should_reschedule_runtime_dispatcher(false));
     }
 }
 
@@ -1981,6 +2005,7 @@ pub fn run() {
             runtime_sync_queue: Arc::new(RwLock::new(VecDeque::new())),
             queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_dispatcher_running: Arc::new(Mutex::new(false)),
+            runtime_sync_slot_released: Arc::new(Notify::new()),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
         })
