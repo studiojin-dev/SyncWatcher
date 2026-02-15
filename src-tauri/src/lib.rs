@@ -484,6 +484,20 @@ fn runtime_find_watch_task<'a>(
         .find(|task| task.id == task_id && task.watch_mode)
 }
 
+async fn is_runtime_watch_task_active(task_id: &str, state: &AppState) -> bool {
+    let managed = {
+        let sources = state.runtime_watch_sources.read().await;
+        sources.contains_key(task_id)
+    };
+
+    if !managed {
+        return false;
+    }
+
+    let manager = state.watcher_manager.read().await;
+    manager.get_watching_tasks().iter().any(|id| id == task_id)
+}
+
 async fn acquire_sync_slot(task_id: &str, state: &AppState) -> bool {
     let mut syncing = state.syncing_tasks.write().await;
     syncing.insert(task_id.to_string())
@@ -869,6 +883,10 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     let Some(task) = task else {
         return;
     };
+
+    if !is_runtime_watch_task_active(&task.id, &state).await {
+        return;
+    }
 
     match acquire_runtime_sync_slot(&task.id, &state).await {
         RuntimeSyncAcquireResult::Acquired => {}
