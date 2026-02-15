@@ -604,10 +604,42 @@ async fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState
             !queue.is_empty()
         };
 
-        if has_queued {
+        let current_syncing = {
+            let syncing = state.syncing_tasks.read().await;
+            syncing.len()
+        };
+
+        if should_reschedule_dispatcher(has_queued, current_syncing) {
             schedule_runtime_sync_dispatcher(app.clone(), state.clone()).await;
         }
     });
+}
+
+fn should_reschedule_dispatcher(has_queued: bool, current_syncing: usize) -> bool {
+    has_queued && current_syncing < RUNTIME_SYNC_MAX_CONCURRENCY
+}
+
+#[cfg(test)]
+mod runtime_dispatcher_tests {
+    use super::{should_reschedule_dispatcher, RUNTIME_SYNC_MAX_CONCURRENCY};
+
+    #[test]
+    fn reschedules_when_queue_has_work_and_slot_is_available() {
+        assert!(should_reschedule_dispatcher(true, 0));
+        assert!(should_reschedule_dispatcher(
+            true,
+            RUNTIME_SYNC_MAX_CONCURRENCY - 1
+        ));
+    }
+
+    #[test]
+    fn does_not_reschedule_when_queue_empty_or_capacity_full() {
+        assert!(!should_reschedule_dispatcher(false, 0));
+        assert!(!should_reschedule_dispatcher(
+            true,
+            RUNTIME_SYNC_MAX_CONCURRENCY
+        ));
+    }
 }
 
 async fn runtime_get_state_internal(state: &AppState) -> RuntimeState {
