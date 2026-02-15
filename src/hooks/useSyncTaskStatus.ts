@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export interface TaskStatus {
     taskId: string;
-    status: 'idle' | 'syncing' | 'dryRunning' | 'watching';
+    status: 'idle' | 'queued' | 'syncing' | 'dryRunning' | 'watching';
     lastLog?: {
         message: string;
         timestamp: string;
@@ -20,6 +20,8 @@ interface SyncTaskStatusStore {
     statuses: Map<string, TaskStatus>;
     /** 런타임에서 감시 중인 Task ID 집합 */
     watchingTaskIds: Set<string>;
+    /** 런타임 동기화 대기열에 있는 Task ID 집합 */
+    queuedTaskIds: Set<string>;
 
     /** 상태 업데이트 */
     setStatus: (taskId: string, status: TaskStatus['status']) => void;
@@ -39,6 +41,12 @@ interface SyncTaskStatusStore {
     /** 감시 상태 일괄 업데이트 */
     setWatchingTasks: (taskIds: string[]) => void;
 
+    /** 큐 상태 업데이트 */
+    setQueued: (taskId: string, queued: boolean) => void;
+
+    /** 큐 상태 일괄 업데이트 */
+    setQueuedTasks: (taskIds: string[]) => void;
+
     /** 상태 초기화 */
     clearStatus: (taskId: string) => void;
 }
@@ -50,6 +58,7 @@ interface SyncTaskStatusStore {
 export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => ({
     statuses: new Map<string, TaskStatus>(),
     watchingTaskIds: new Set<string>(),
+    queuedTaskIds: new Set<string>(),
 
     setStatus: (taskId, status) => {
         set((state) => {
@@ -96,6 +105,28 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
 
     setWatchingTasks: (taskIds) => {
         set({ watchingTaskIds: new Set(taskIds) });
+    },
+
+    setQueued: (taskId, queued) => {
+        set((state) => {
+            const nextQueued = new Set(state.queuedTaskIds);
+            if (queued) {
+                nextQueued.add(taskId);
+                const newStatuses = new Map(state.statuses);
+                const current = newStatuses.get(taskId) || { taskId, status: 'idle' as const };
+                if (current.status !== 'syncing') {
+                    newStatuses.set(taskId, { ...current, status: 'queued' });
+                }
+                return { queuedTaskIds: nextQueued, statuses: newStatuses };
+            }
+
+            nextQueued.delete(taskId);
+            return { queuedTaskIds: nextQueued };
+        });
+    },
+
+    setQueuedTasks: (taskIds) => {
+        set({ queuedTaskIds: new Set(taskIds) });
     },
 
     clearStatus: (taskId) => {

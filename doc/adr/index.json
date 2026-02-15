@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260215-0004",
+    "title": "Runtime watch-mode initial sync queue and concurrency limit",
+    "tags": [
+      "sync-task",
+      "watch-mode",
+      "runtime",
+      "concurrency",
+      "reliability",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-02-15",
+    "tldr": "Enqueue watch-mode tasks for one-time startup sync and process runtime-triggered sync through a bounded queue (max concurrency 2).",
+    "path": "doc/adr/ADR-20260215-0004-runtime-watch-sync-queue-and-concurrency.md"
+  },
+  {
     "id": "ADR-20260211-0003",
     "title": "Sync task target conflict policy and orphan cleanup workflow",
     "tags": [
