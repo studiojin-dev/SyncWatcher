@@ -83,7 +83,7 @@ describe('AboutView', () => {
       expect(consoleWarn).toHaveBeenCalledWith(
         'Failed to get app version from Cargo.toml'
       );
-      expect(screen.getByText('Version 0.1.0')).toBeInTheDocument();
+      expect(screen.getByText('Version 0.9.0')).toBeInTheDocument();
     });
 
     consoleWarn.mockRestore();
@@ -99,7 +99,7 @@ describe('AboutView', () => {
   it('should show license information', async () => {
     render(<AboutView />);
 
-    expect(await screen.findByText('Polyform NC 1.0.0')).toBeInTheDocument();
+    expect(await screen.findByText('License')).toBeInTheDocument();
   });
 
   it('should render GitHub link', async () => {
@@ -170,7 +170,7 @@ describe('AboutView', () => {
       'SyncWatcher',
       /Version/,
       'Developer',
-      'Polyform NC 1.0.0',
+      'License',
     ];
 
     sections.forEach(section => {

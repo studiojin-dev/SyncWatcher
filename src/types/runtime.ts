@@ -33,6 +33,7 @@ export interface RuntimeSettingsPayload {
 export interface RuntimeState {
     watchingTasks: string[];
     syncingTasks: string[];
+    queuedTasks: string[];
 }
 
 export interface RuntimeWatchStateEvent {
@@ -44,6 +45,12 @@ export interface RuntimeWatchStateEvent {
 export interface RuntimeSyncStateEvent {
     taskId: string;
     syncing: boolean;
+    reason?: string;
+}
+
+export interface RuntimeSyncQueueStateEvent {
+    taskId: string;
+    queued: boolean;
     reason?: string;
 }
 

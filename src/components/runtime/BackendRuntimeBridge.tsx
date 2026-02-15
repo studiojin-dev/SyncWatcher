@@ -9,6 +9,7 @@ import { useToast } from '../ui/Toast';
 import {
     RuntimeConfigPayload,
     RuntimeState,
+    RuntimeSyncQueueStateEvent,
     RuntimeSyncStateEvent,
     RuntimeWatchStateEvent,
     toRuntimeExclusionSet,
@@ -31,11 +32,19 @@ interface BackendRuntimeBridgeProps {
 function applyRuntimeSnapshotToStore(state: RuntimeState) {
     const store = useSyncTaskStatusStore.getState();
     store.setWatchingTasks(state.watchingTasks);
+    store.setQueuedTasks(state.queuedTasks);
 
     for (const taskId of state.watchingTasks) {
         const currentStatus = store.getStatus(taskId)?.status;
         if (currentStatus !== 'syncing') {
             store.setStatus(taskId, 'watching');
+        }
+    }
+
+    for (const taskId of state.queuedTasks) {
+        const currentStatus = store.getStatus(taskId)?.status;
+        if (currentStatus !== 'syncing') {
+            store.setStatus(taskId, 'queued');
         }
     }
 
@@ -81,12 +90,14 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             store.setWatching(taskId, watching);
             if (watching) {
                 watchingTasksRef.current.add(taskId);
-                if (store.getStatus(taskId)?.status !== 'syncing') {
+                const currentStatus = store.getStatus(taskId)?.status;
+                if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
                     store.setStatus(taskId, 'watching');
                 }
             } else {
                 watchingTasksRef.current.delete(taskId);
-                if (store.getStatus(taskId)?.status !== 'syncing') {
+                const currentStatus = store.getStatus(taskId)?.status;
+                if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
                     store.setStatus(taskId, 'idle');
                 }
             }
@@ -100,11 +111,32 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             }
         });
 
+        const unlistenQueueState = listen<RuntimeSyncQueueStateEvent>('runtime-sync-queue-state', (event) => {
+            const { taskId, queued, reason } = event.payload;
+            const store = useSyncTaskStatusStore.getState();
+
+            store.setQueued(taskId, queued);
+
+            if (!queued && store.getStatus(taskId)?.status === 'queued') {
+                const isWatching = watchingTasksRef.current.has(taskId);
+                store.setStatus(taskId, isWatching ? 'watching' : 'idle');
+            }
+
+            if (reason) {
+                store.setLastLog(taskId, {
+                    message: reason,
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'info',
+                });
+            }
+        });
+
         const unlistenSyncState = listen<RuntimeSyncStateEvent>('runtime-sync-state', (event) => {
             const { taskId, syncing, reason } = event.payload;
             const store = useSyncTaskStatusStore.getState();
 
             if (syncing) {
+                store.setQueued(taskId, false);
                 store.setStatus(taskId, 'syncing');
                 return;
             }
@@ -117,6 +149,12 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
                 });
             }
 
+            const isQueued = store.queuedTaskIds.has(taskId);
+            if (isQueued) {
+                store.setStatus(taskId, 'queued');
+                return;
+            }
+
             const isWatching = watchingTasksRef.current.has(taskId);
             store.setStatus(taskId, isWatching ? 'watching' : 'idle');
         });
@@ -124,6 +162,7 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
         return () => {
             unlistenProgress.then((fn) => fn());
             unlistenWatchState.then((fn) => fn());
+            unlistenQueueState.then((fn) => fn());
             unlistenSyncState.then((fn) => fn());
         };
     }, []);

@@ -3,14 +3,15 @@ mod integration_tests {
     use crate::logging::LogManager;
     use crate::watcher::WatcherManager;
     use crate::{
-        compute_volume_mount_diff, get_app_version, join_paths, progress_phase_to_log_category,
-        runtime_desired_watch_sources, DataUnitSystem, format_bytes_with_unit,
-        runtime_find_watch_task, runtime_get_state_internal, validate_runtime_tasks, AppState,
-        RuntimeSyncTask,
+        compute_volume_mount_diff, format_bytes_with_unit, get_app_version,
+        is_runtime_watch_task_active, join_paths, progress_phase_to_log_category,
+        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        validate_runtime_tasks, AppState, DataUnitSystem, RuntimeSyncTask,
     };
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use tokio::sync::{Mutex, Notify, RwLock};
 
     fn build_runtime_task(id: &str, source: &str, watch_mode: bool) -> RuntimeSyncTask {
         RuntimeSyncTask {
@@ -52,8 +53,25 @@ mod integration_tests {
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(Default::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
+            runtime_sync_queue: Arc::new(RwLock::new(VecDeque::new())),
+            queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
+            runtime_dispatcher_running: Arc::new(Mutex::new(false)),
+            runtime_sync_slot_released: Arc::new(Notify::new()),
+            runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    #[tokio::test]
+    async fn test_is_runtime_watch_task_active_requires_manager_and_source_tracking() {
+        let state = build_app_state();
+
+        {
+            let mut sources = state.runtime_watch_sources.write().await;
+            sources.insert("task-1".to_string(), "/tmp/source".to_string());
+        }
+
+        assert!(!is_runtime_watch_task_active("task-1", &state).await);
     }
 
     #[test]
@@ -221,25 +239,24 @@ mod integration_tests {
 
         let result = validate_runtime_tasks(&tasks);
         assert!(result.is_err());
-        assert!(result
-            .err()
-            .unwrap_or_default()
-            .contains("Watch loop risk"));
+        assert!(result.err().unwrap_or_default().contains("Watch loop risk"));
     }
 
     #[test]
     fn test_validate_runtime_tasks_rejects_non_watch_target_overlapping_watch_source() {
         let tasks = vec![
             build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
-            build_runtime_task_with_paths("manual-b", "/src/manual", "/media/incoming/export", false),
+            build_runtime_task_with_paths(
+                "manual-b",
+                "/src/manual",
+                "/media/incoming/export",
+                false,
+            ),
         ];
 
         let result = validate_runtime_tasks(&tasks);
         assert!(result.is_err());
-        assert!(result
-            .err()
-            .unwrap_or_default()
-            .contains("Watch loop risk"));
+        assert!(result.err().unwrap_or_default().contains("Watch loop risk"));
     }
 
     #[test]
@@ -251,10 +268,7 @@ mod integration_tests {
             progress_phase_to_log_category(&SyncPhase::Copying),
             Some(LogCategory::FileCopied)
         );
-        assert_eq!(
-            progress_phase_to_log_category(&SyncPhase::Scanning),
-            None
-        );
+        assert_eq!(progress_phase_to_log_category(&SyncPhase::Scanning), None);
         assert_eq!(progress_phase_to_log_category(&SyncPhase::Verifying), None);
     }
 
