@@ -126,7 +126,31 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
     },
 
     setQueuedTasks: (taskIds) => {
-        set({ queuedTaskIds: new Set(taskIds) });
+        set((state) => {
+            const nextQueued = new Set(taskIds);
+            const nextStatuses = new Map(state.statuses);
+
+            for (const taskId of nextQueued) {
+                const current = nextStatuses.get(taskId) || { taskId, status: 'idle' as const };
+                if (current.status !== 'syncing') {
+                    nextStatuses.set(taskId, { ...current, status: 'queued' });
+                }
+            }
+
+            for (const [taskId, current] of nextStatuses.entries()) {
+                if (current.status === 'queued' && !nextQueued.has(taskId)) {
+                    nextStatuses.set(taskId, {
+                        ...current,
+                        status: state.watchingTaskIds.has(taskId) ? 'watching' : 'idle',
+                    });
+                }
+            }
+
+            return {
+                queuedTaskIds: nextQueued,
+                statuses: nextStatuses,
+            };
+        });
     },
 
     clearStatus: (taskId) => {
