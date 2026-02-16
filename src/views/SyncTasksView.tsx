@@ -78,7 +78,7 @@ function SyncTasksView() {
     const [subView, setSubView] = useState<SubView>({ kind: 'list' });
 
     // 상태 스토어 연동
-    const { statuses, watchingTaskIds } = useSyncTaskStatusStore();
+    const { statuses, watchingTaskIds, queuedTaskIds } = useSyncTaskStatusStore();
 
     // Changing the logic: adding state for selected sets in form
     const [selectedSets, setSelectedSets] = useState<string[]>([]);
@@ -786,6 +786,11 @@ function SyncTasksView() {
                                         >
                                             <IconEye size={20} stroke={2} />
                                         </button>
+                                        {queuedTaskIds.has(task.id) && (
+                                            <span className="px-2 py-1 text-[10px] font-bold border-2 border-[var(--border-main)] bg-[var(--color-accent-warning)] text-black">
+                                                QUEUED
+                                            </span>
+                                        )}
                                         <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
                                         <button
                                             className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
