@@ -82,6 +82,19 @@
         "targetInWatchedSource": "目标与其他监控任务的源路径重叠，可能导致同步循环。"
       }
     },
+    "dryRun": {
+      "totalFiles": "文件总数",
+      "filesToCopy": "待复制文件",
+      "filesModified": "已修改文件",
+      "bytesToCopy": "待复制大小",
+      "newFile": "新增",
+      "modifiedFile": "已修改",
+      "noChanges": "未检测到变更。",
+      "colPath": "路径",
+      "colType": "类型",
+      "colSourceSize": "源文件大小",
+      "colTargetSize": "目标大小"
+    },
     "orphan": {
       "title": "孤立文件",
       "search": "搜索路径...",
@@ -92,7 +105,7 @@
       "deselectAll": "清除选择",
       "deleteSelected": "删除已选 ({{count}})",
       "confirmDelete": "确定删除已选的 {{count}} 项吗？",
-      "deleteSuccess": "已删除 {{deleted}}，跳过 {{skipped}}，失败 {{failed}}",
+      "deleteSuccess": "已删除文件 {{files}}，已删除目录 {{dirs}}，跳过 {{skipped}}，失败 {{failed}}",
       "deleteFailed": "删除所选孤立文件失败。"
     },
     "activityLog": {
@@ -214,6 +227,7 @@
       "confirm": "确认",
       "yes": "是",
       "no": "否",
+      "back": "返回",
       "cancel": "取消",
       "save": "保存",
       "delete": "删除",

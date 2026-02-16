@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
-import { IconX, IconRefresh, IconArrowDown } from '@tabler/icons-react';
+import { IconRefresh, IconArrowDown, IconArrowLeft } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { isTaskVisibleCategory } from '../../types/logCategories';
@@ -24,14 +24,14 @@ interface LogBatchEvent {
 interface TaskLogsModalProps {
     taskId: string;
     taskName: string;
-    onClose: () => void;
+    onBack: () => void;
 }
 
 function isTaskVisibleLog(entry: LogEntry): boolean {
     return isTaskVisibleCategory(entry.category);
 }
 
-export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsModalProps) {
+export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModalProps) {
     const { t } = useTranslation();
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [loading, setLoading] = useState(true);
@@ -115,9 +115,9 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+        <div className="w-full">
             <CardAnimation>
-                <div className="neo-box w-full max-w-4xl h-[700px] flex flex-col bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
+                <div className="neo-box w-full flex flex-col bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
                     {/* Header */}
                     <div className="flex justify-between items-center p-4 border-b-3 border-[var(--border-main)] bg-[var(--bg-secondary)]">
                         <div>
@@ -131,23 +131,24 @@ export default function TaskLogsModal({ taskId, taskName, onClose }: TaskLogsMod
                         <div className="flex gap-2 items-center">
                             <button
                                 onClick={() => setAutoScroll(!autoScroll)}
-                                className={`p-2 rounded-full transition-colors border-2 ${autoScroll ? 'bg-[var(--accent-main)] text-white border-black' : 'bg-transparent border-transparent text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]'}`}
+                                className={`p-2 transition-colors border-2 ${autoScroll ? 'bg-[var(--accent-main)] text-white border-[var(--border-main)]' : 'border-[var(--border-main)] text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]'}`}
                                 title="Auto Scroll"
                             >
                                 <IconArrowDown size={20} />
                             </button>
                             <button
                                 onClick={fetchLogs}
-                                className="p-2 hover:bg-[var(--bg-tertiary)] rounded-full transition-colors"
+                                className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                 title={t('common.refresh', { defaultValue: 'Refresh' })}
                             >
                                 <IconRefresh size={20} />
                             </button>
                             <button
-                                onClick={onClose}
-                                className="p-2 hover:bg-[var(--accent-error)] hover:text-white rounded-full transition-colors"
+                                onClick={onBack}
+                                className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs hover:bg-[var(--bg-tertiary)] inline-flex items-center gap-1"
                             >
-                                <IconX size={20} />
+                                <IconArrowLeft size={14} />
+                                {t('common.back', { defaultValue: 'Back' })}
                             </button>
                         </div>
                     </div>

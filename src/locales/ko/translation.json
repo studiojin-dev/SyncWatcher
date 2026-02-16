@@ -82,6 +82,19 @@
         "targetInWatchedSource": "대상이 다른 감시 작업의 원본과 겹쳐 루프가 발생할 수 있습니다."
       }
     },
+    "dryRun": {
+      "totalFiles": "총 파일 수",
+      "filesToCopy": "복사 대상 파일 수",
+      "filesModified": "수정 파일 수",
+      "bytesToCopy": "복사 용량",
+      "newFile": "신규",
+      "modifiedFile": "수정됨",
+      "noChanges": "변경 사항이 없습니다.",
+      "colPath": "경로",
+      "colType": "유형",
+      "colSourceSize": "소스 크기",
+      "colTargetSize": "타겟 크기"
+    },
     "orphan": {
       "title": "삭제 후보 파일",
       "search": "경로 검색...",
@@ -92,7 +105,7 @@
       "deselectAll": "전체 해제",
       "deleteSelected": "선택 삭제 ({{count}})",
       "confirmDelete": "선택한 {{count}}개 항목을 삭제하시겠습니까?",
-      "deleteSuccess": "삭제 {{deleted}}개, 건너뜀 {{skipped}}개, 실패 {{failed}}개",
+      "deleteSuccess": "파일 {{files}}개, 디렉토리 {{dirs}}개 삭제됨 (건너뜀 {{skipped}}개, 실패 {{failed}}개)",
       "deleteFailed": "삭제 후보 파일 삭제에 실패했습니다."
     },
     "activityLog": {
@@ -214,6 +227,7 @@
       "confirm": "확인",
       "yes": "예",
       "no": "아니요",
+      "back": "뒤로",
       "cancel": "취소",
       "save": "저장",
       "delete": "삭제",

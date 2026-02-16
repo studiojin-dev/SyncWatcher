@@ -110,6 +110,8 @@ pub struct DeleteOrphanFailure {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteOrphanResult {
     pub deleted_count: usize,
+    pub deleted_files_count: usize,
+    pub deleted_dirs_count: usize,
     pub skipped_count: usize,
     pub failures: Vec<DeleteOrphanFailure>,
 }

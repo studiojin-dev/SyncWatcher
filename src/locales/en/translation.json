@@ -79,6 +79,19 @@
         "targetInWatchedSource": "Target overlaps another watch source and may cause sync loops."
       }
     },
+    "dryRun": {
+      "totalFiles": "Total files",
+      "filesToCopy": "Files to copy",
+      "filesModified": "Modified files",
+      "bytesToCopy": "Bytes to copy",
+      "newFile": "New",
+      "modifiedFile": "Modified",
+      "noChanges": "No changes detected.",
+      "colPath": "Path",
+      "colType": "Type",
+      "colSourceSize": "Source Size",
+      "colTargetSize": "Target Size"
+    },
     "orphan": {
       "title": "Orphan Files",
       "search": "Search path...",
@@ -89,7 +102,7 @@
       "deselectAll": "Clear selection",
       "deleteSelected": "Delete selected ({{count}})",
       "confirmDelete": "Delete {{count}} selected items?",
-      "deleteSuccess": "Deleted {{deleted}}, skipped {{skipped}}, failed {{failed}}",
+      "deleteSuccess": "Deleted files {{files}}, directories {{dirs}}, skipped {{skipped}}, failed {{failed}}",
       "deleteFailed": "Failed to delete selected orphan files."
     },
     "activityLog": {
@@ -211,6 +224,7 @@
       "confirm": "Confirm",
       "yes": "Yes",
       "no": "No",
+      "back": "Back",
       "cancel": "Cancel",
       "save": "Save",
       "delete": "Delete",

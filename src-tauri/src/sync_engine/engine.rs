@@ -425,6 +425,34 @@ impl SyncEngine {
         Ok(orphans)
     }
 
+    /// Counts the number of descendant files and directories inside `path`.
+    ///
+    /// **Note**: The counts are a snapshot taken *before* the actual deletion. Between the
+    /// time this function returns and `remove_dir_all` completes, external processes may
+    /// add or remove entries, making the reported counts approximate. This is an inherent
+    /// limitation — the alternative (counting after deletion) is impossible.
+    async fn count_dir_contents(path: PathBuf) -> Result<(usize, usize)> {
+        tokio::task::spawn_blocking(move || {
+            let mut files_count = 0usize;
+            let mut dirs_count = 0usize;
+
+            for entry in WalkDir::new(&path).into_iter().filter_map(|entry| entry.ok()) {
+                if entry.path() == path.as_path() {
+                    continue;
+                }
+
+                if entry.file_type().is_dir() {
+                    dirs_count += 1;
+                } else {
+                    files_count += 1;
+                }
+            }
+
+            Ok((files_count, dirs_count))
+        })
+        .await?
+    }
+
     pub async fn delete_orphan_paths(&self, relative_paths: &[PathBuf]) -> Result<DeleteOrphanResult> {
         let target_canonical = tokio::fs::canonicalize(&self.target)
             .await
@@ -479,7 +507,8 @@ impl SyncEngine {
 
         reduced_targets.sort_by(|a, b| b.0.components().count().cmp(&a.0.components().count()));
 
-        let mut deleted_count = 0usize;
+        let mut deleted_files_count = 0usize;
+        let mut deleted_dirs_count = 0usize;
         let mut failures = Vec::new();
 
         for (relative, canonical) in reduced_targets {
@@ -498,14 +527,38 @@ impl SyncEngine {
                 }
             };
 
+            let mut dir_contents = None;
             let delete_result = if metadata.is_dir() {
+                match Self::count_dir_contents(canonical.clone()).await {
+                    Ok(counts) => {
+                        dir_contents = Some(counts);
+                    }
+                    Err(err) => {
+                        failures.push(DeleteOrphanFailure {
+                            path: relative.clone(),
+                            error: err.to_string(),
+                        });
+                        continue;
+                    }
+                }
                 tokio::fs::remove_dir_all(&canonical).await
             } else {
                 tokio::fs::remove_file(&canonical).await
             };
 
             match delete_result {
-                Ok(()) => deleted_count += 1,
+                Ok(()) => {
+                    if metadata.is_dir() {
+                        if let Some((descendant_files, descendant_dirs)) = dir_contents {
+                            deleted_files_count += descendant_files;
+                            deleted_dirs_count += descendant_dirs + 1;
+                        } else {
+                            deleted_dirs_count += 1;
+                        }
+                    } else {
+                        deleted_files_count += 1;
+                    }
+                }
                 Err(err) => failures.push(DeleteOrphanFailure {
                     path: relative,
                     error: err.to_string(),
@@ -513,8 +566,11 @@ impl SyncEngine {
             }
         }
 
+        let deleted_count = deleted_files_count + deleted_dirs_count;
         Ok(DeleteOrphanResult {
             deleted_count,
+            deleted_files_count,
+            deleted_dirs_count,
             skipped_count,
             failures,
         })
@@ -814,11 +870,40 @@ mod tests {
         ];
         let result = engine.delete_orphan_paths(&paths).await?;
 
-        assert_eq!(result.deleted_count, 2);
+        assert_eq!(result.deleted_files_count, 2);
+        assert_eq!(result.deleted_dirs_count, 1);
+        assert_eq!(result.deleted_count, 3);
         assert_eq!(result.failures.len(), 0);
         assert!(!target_dir.path().join("stale").exists());
         assert!(!target_dir.path().join("orphan.txt").exists());
         assert!(result.skipped_count >= 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_delete_orphan_paths_nested_directory_counts() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let root_orphan_dir = target_dir.path().join("stale");
+        let nested_dir = root_orphan_dir.join("nested").join("leaf");
+        let nested_file = nested_dir.join("old.txt");
+        let root_file = root_orphan_dir.join("root.txt");
+
+        fs::create_dir_all(&nested_dir).await?;
+        fs::write(&nested_file, b"nested").await?;
+        fs::write(&root_file, b"root").await?;
+        fs::write(source_dir.path().join("keep.txt"), b"keep").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let result = engine.delete_orphan_paths(&[PathBuf::from("stale")]).await?;
+
+        assert_eq!(result.deleted_files_count, 2);
+        assert_eq!(result.deleted_dirs_count, 3);
+        assert_eq!(result.deleted_count, 5);
+        assert_eq!(result.failures.len(), 0);
+        assert!(!target_dir.path().join("stale").exists());
 
         Ok(())
     }

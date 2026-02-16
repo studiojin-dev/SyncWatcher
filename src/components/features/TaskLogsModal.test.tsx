@@ -82,7 +82,7 @@ describe('TaskLogsModal', () => {
       },
     ]);
 
-    render(<TaskLogsModal taskId="task-1" taskName="Task 1" onClose={vi.fn()} />);
+    render(<TaskLogsModal taskId="task-1" taskName="Task 1" onBack={vi.fn()} />);
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith('get_task_logs', { taskId: 'task-1' });

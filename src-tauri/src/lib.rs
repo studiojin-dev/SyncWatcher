@@ -1109,7 +1109,9 @@ async fn delete_orphan_files(
     state.log_manager.log_with_category(
         "info",
         &format!(
-            "Orphan delete completed: deleted={}, skipped={}, failures={}",
+            "Orphan delete completed: files={}, dirs={}, total_deleted={}, skipped={}, failures={}",
+            result.deleted_files_count,
+            result.deleted_dirs_count,
             result.deleted_count,
             result.skipped_count,
             result.failures.len()

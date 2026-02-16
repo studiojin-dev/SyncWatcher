@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { ask } from '@tauri-apps/plugin-dialog';
-import { IconFolder, IconFile, IconRefresh, IconSearch, IconX, IconTrash } from '@tabler/icons-react';
+import { IconFolder, IconFile, IconRefresh, IconSearch, IconTrash, IconArrowLeft } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';
 import { useToast } from '../ui/Toast';
 
@@ -14,6 +14,8 @@ interface OrphanFile {
 
 interface DeleteOrphanResult {
     deleted_count: number;
+    deleted_files_count: number;
+    deleted_dirs_count: number;
     skipped_count: number;
     failures: Array<{ path: string; error: string }>;
 }
@@ -27,12 +29,11 @@ interface TreeNode {
 }
 
 interface OrphanFilesModalProps {
-    opened: boolean;
-    taskId: string | null;
-    source: string | null;
-    target: string | null;
+    taskId: string;
+    source: string;
+    target: string;
     excludePatterns: string[];
-    onClose: () => void;
+    onBack: () => void;
 }
 
 function buildTree(files: OrphanFile[]): TreeNode[] {
@@ -188,12 +189,11 @@ function renderTree(
 }
 
 export default function OrphanFilesModal({
-    opened,
     taskId,
     source,
     target,
     excludePatterns,
-    onClose,
+    onBack,
 }: OrphanFilesModalProps) {
     const { t } = useTranslation();
     const { showToast } = useToast();
@@ -216,10 +216,6 @@ export default function OrphanFilesModal({
     }, [excludePatternsKey]);
 
     const scanOrphans = useCallback(async () => {
-        if (!taskId || !source || !target) {
-            return;
-        }
-
         try {
             setLoading(true);
             const result = await invoke<OrphanFile[]>('find_orphan_files', {
@@ -238,11 +234,8 @@ export default function OrphanFilesModal({
     }, [showToast, source, stableExcludePatterns, target, taskId]);
 
     useEffect(() => {
-        if (!opened) {
-            return;
-        }
         void scanOrphans();
-    }, [opened, scanOrphans]);
+    }, [scanOrphans]);
 
     const tree = useMemo(() => buildTree(orphans), [orphans]);
     const filteredTree = useMemo(() => filterNodes(tree, query), [tree, query]);
@@ -278,7 +271,7 @@ export default function OrphanFilesModal({
     };
 
     const handleDeleteSelected = async () => {
-        if (!taskId || !target || selectedPaths.size === 0) {
+        if (selectedPaths.size === 0) {
             return;
         }
 
@@ -304,10 +297,11 @@ export default function OrphanFilesModal({
 
             showToast(
                 t('orphan.deleteSuccess', {
-                    deleted: result.deleted_count,
+                    files: result.deleted_files_count,
+                    dirs: result.deleted_dirs_count,
                     skipped: result.skipped_count,
                     failed: result.failures.length,
-                    defaultValue: `Deleted ${result.deleted_count}, skipped ${result.skipped_count}, failed ${result.failures.length}`,
+                    defaultValue: `Deleted files ${result.deleted_files_count}, dirs ${result.deleted_dirs_count}, skipped ${result.skipped_count}, failed ${result.failures.length}`,
                 }),
                 result.failures.length > 0 ? 'warning' : 'success'
             );
@@ -320,14 +314,10 @@ export default function OrphanFilesModal({
         }
     };
 
-    if (!opened || !taskId || !source || !target) {
-        return null;
-    }
-
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="w-full">
             <CardAnimation>
-                <div className="neo-box p-5 w-full max-w-3xl max-h-[80vh] bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] flex flex-col gap-4">
+                <div className="neo-box p-5 w-full bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] flex flex-col gap-4">
                     <div className="flex items-center justify-between">
                         <div>
                             <h3 className="text-xl font-heading font-bold uppercase">
@@ -342,10 +332,11 @@ export default function OrphanFilesModal({
                         </div>
                         <button
                             type="button"
-                            className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
-                            onClick={onClose}
+                            className="px-3 py-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] font-mono text-xs inline-flex items-center gap-1"
+                            onClick={onBack}
                         >
-                            <IconX size={18} />
+                            <IconArrowLeft size={14} />
+                            {t('common.back', { defaultValue: 'Back' })}
                         </button>
                     </div>
 
@@ -393,7 +384,7 @@ export default function OrphanFilesModal({
                         </div>
                     </div>
 
-                    <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-2 overflow-auto min-h-[260px]">
+                    <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-2 overflow-auto min-h-[260px] max-h-[520px]">
                         {loading ? (
                             <div className="font-mono text-sm text-[var(--text-secondary)]">{t('orphan.scanning', { defaultValue: 'Scanning...' })}</div>
                         ) : filteredTree.length === 0 ? (

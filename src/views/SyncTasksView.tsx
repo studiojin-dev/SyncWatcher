@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc, IconSearch } from '@tabler/icons-react';
 import { MultiSelect, Select } from '@mantine/core';
@@ -15,8 +15,10 @@ import { useToast } from '../components/ui/Toast';
 import YamlEditorModal from '../components/ui/YamlEditorModal';
 import TaskLogsModal from '../components/features/TaskLogsModal';
 import OrphanFilesModal from '../components/features/OrphanFilesModal';
+import DryRunResultView from '../components/features/DryRunResultView';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
 import { formatBytes } from '../utils/formatBytes';
+import type { DryRunResult } from '../types/syncEngine';
 
 /** Volume information from backend */
 interface VolumeInfo {
@@ -31,6 +33,12 @@ interface VolumeInfo {
 }
 
 const WATCH_STATE_TIMEOUT_MS = 3000;
+
+type SubView =
+    | { kind: 'list' }
+    | { kind: 'logs'; taskId: string; taskName: string }
+    | { kind: 'orphans'; taskId: string; source: string; target: string; excludePatterns: string[] }
+    | { kind: 'dryRun'; taskName: string; result: DryRunResult };
 
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
@@ -67,8 +75,7 @@ function SyncTasksView() {
     const [showForm, setShowForm] = useState(false);
     const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
     const [syncing, setSyncing] = useState<string | null>(null);
-
-    const [logsTask, setLogsTask] = useState<SyncTask | null>(null);
+    const [subView, setSubView] = useState<SubView>({ kind: 'list' });
 
     // 상태 스토어 연동
     const { statuses, watchingTaskIds } = useSyncTaskStatusStore();
@@ -97,26 +104,6 @@ function SyncTasksView() {
 
     // Cancel confirmation state
     const [cancelConfirm, setCancelConfirm] = useState<{ type: 'sync' | 'dryRun'; taskId: string } | null>(null);
-    const [orphanTask, setOrphanTask] = useState<SyncTask | null>(null);
-    const orphanTaskId = orphanTask?.id ?? null;
-    const orphanSource = orphanTask?.source ?? null;
-    const orphanTarget = orphanTask?.target ?? null;
-    const orphanSetIdsKey = useMemo(
-        () => JSON.stringify(orphanTask?.exclusionSets ?? []),
-        [orphanTask?.exclusionSets]
-    );
-    const orphanExcludePatterns = useMemo(() => {
-        try {
-            const parsed = JSON.parse(orphanSetIdsKey);
-            if (!Array.isArray(parsed)) {
-                return [];
-            }
-            const ids = parsed.filter((id): id is string => typeof id === 'string');
-            return getPatternsForSets(ids);
-        } catch {
-            return [];
-        }
-    }, [getPatternsForSets, orphanSetIdsKey]);
 
     const formatVolumeSize = useCallback((volume: VolumeInfo): string => {
         if (typeof volume.total_bytes !== 'number') {
@@ -338,15 +325,19 @@ function SyncTasksView() {
         try {
             setDryRunning(task.id);
             showToast(t('syncTasks.dryRun') + '...', 'info');
-            const result = await invoke('sync_dry_run', {
+            const result = await invoke<DryRunResult>('sync_dry_run', {
                 taskId: task.id,
                 source: task.source,
                 target: task.target,
                 checksumMode: task.checksumMode,
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
             });
-            console.log('Dry run result:', result);
             showToast(t('syncTasks.dryRun') + ' ' + t('common.success'), 'success');
+            setSubView({
+                kind: 'dryRun',
+                taskName: task.name,
+                result,
+            });
         } catch (err) {
             console.error('Dry run failed:', err);
             showToast(String(err), 'error');
@@ -692,28 +683,35 @@ function SyncTasksView() {
                 </div>
             )}
 
-            {/* Task Logs Modal */}
-            {logsTask && (
+            {subView.kind === 'logs' ? (
                 <TaskLogsModal
-                    taskId={logsTask.id}
-                    taskName={logsTask.name}
-                    onClose={() => setLogsTask(null)}
+                    taskId={subView.taskId}
+                    taskName={subView.taskName}
+                    onBack={() => setSubView({ kind: 'list' })}
                 />
-            )}
+            ) : null}
 
-            {orphanTask && (
+            {subView.kind === 'orphans' ? (
                 <OrphanFilesModal
-                    opened={!!orphanTaskId}
-                    taskId={orphanTaskId}
-                    source={orphanSource}
-                    target={orphanTarget}
-                    excludePatterns={orphanExcludePatterns}
-                    onClose={() => setOrphanTask(null)}
+                    taskId={subView.taskId}
+                    source={subView.source}
+                    target={subView.target}
+                    excludePatterns={subView.excludePatterns}
+                    onBack={() => setSubView({ kind: 'list' })}
                 />
-            )}
+            ) : null}
+
+            {subView.kind === 'dryRun' ? (
+                <DryRunResultView
+                    taskName={subView.taskName}
+                    result={subView.result}
+                    onBack={() => setSubView({ kind: 'list' })}
+                />
+            ) : null}
 
             {/* Task List */}
-            <div className="grid gap-6">
+            {subView.kind === 'list' ? (
+                <div className="grid gap-6">
                 {tasks.map((task, index) => (
                     <CardAnimation key={task.id} index={index}>
                         <div className="neo-box p-5 relative transition-opacity">
@@ -803,7 +801,13 @@ function SyncTasksView() {
                                         </button>
                                         <button
                                             className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                                            onClick={() => setOrphanTask(task)}
+                                            onClick={() => setSubView({
+                                                kind: 'orphans',
+                                                taskId: task.id,
+                                                source: task.source,
+                                                target: task.target,
+                                                excludePatterns: getPatternsForSets(task.exclusionSets || []),
+                                            })}
                                             title={t('orphan.title', { defaultValue: 'Orphan Files' })}
                                         >
                                             <IconSearch size={20} stroke={2} />
@@ -811,7 +815,11 @@ function SyncTasksView() {
                                         <div className="w-[2px] h-auto bg-[var(--border-main)] mx-1"></div>
                                         <button
                                             className="p-2 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                                            onClick={() => setLogsTask(task)}
+                                            onClick={() => setSubView({
+                                                kind: 'logs',
+                                                taskId: task.id,
+                                                taskName: task.name,
+                                            })}
                                             title="View Logs"
                                         >
                                             <IconList size={20} stroke={2} />
@@ -860,7 +868,8 @@ function SyncTasksView() {
                         </div>
                     </CardAnimation>
                 ))}
-            </div>
+                </div>
+            ) : null}
         </div >
     );
 }

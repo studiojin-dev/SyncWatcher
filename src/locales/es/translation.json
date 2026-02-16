@@ -82,6 +82,19 @@
         "targetInWatchedSource": "El destino se superpone con otro origen vigilado y puede causar bucles."
       }
     },
+    "dryRun": {
+      "totalFiles": "Archivos totales",
+      "filesToCopy": "Archivos por copiar",
+      "filesModified": "Archivos modificados",
+      "bytesToCopy": "Bytes por copiar",
+      "newFile": "Nuevo",
+      "modifiedFile": "Modificado",
+      "noChanges": "No se detectaron cambios.",
+      "colPath": "Ruta",
+      "colType": "Tipo",
+      "colSourceSize": "Tamaño de origen",
+      "colTargetSize": "Tamaño de destino"
+    },
     "orphan": {
       "title": "Archivos huérfanos",
       "search": "Buscar ruta...",
@@ -92,7 +105,7 @@
       "deselectAll": "Quitar selección",
       "deleteSelected": "Eliminar seleccionados ({{count}})",
       "confirmDelete": "¿Eliminar {{count}} elementos seleccionados?",
-      "deleteSuccess": "Eliminados {{deleted}}, omitidos {{skipped}}, fallidos {{failed}}",
+      "deleteSuccess": "Archivos eliminados {{files}}, directorios eliminados {{dirs}}, omitidos {{skipped}}, fallidos {{failed}}",
       "deleteFailed": "No se pudieron eliminar los archivos huérfanos seleccionados."
     },
     "activityLog": {
@@ -214,6 +227,7 @@
       "confirm": "Confirmar",
       "yes": "Sí",
       "no": "No",
+      "back": "Volver",
       "cancel": "Cancelar",
       "save": "Guardar",
       "delete": "Eliminar",
