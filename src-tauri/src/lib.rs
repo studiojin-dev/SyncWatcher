@@ -577,22 +577,22 @@ async fn dequeue_runtime_sync_task(state: &AppState) -> Option<String> {
     next
 }
 
-async fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
-    let should_start = {
-        let mut running = state.runtime_dispatcher_running.lock().await;
-        if *running {
-            false
-        } else {
-            *running = true;
-            true
-        }
-    };
-
-    if !should_start {
-        return;
-    }
-
+fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
     tauri::async_runtime::spawn(async move {
+        let should_start = {
+            let mut running = state.runtime_dispatcher_running.lock().await;
+            if *running {
+                false
+            } else {
+                *running = true;
+                true
+            }
+        };
+
+        if !should_start {
+            return;
+        }
+
         loop {
             let current_syncing = {
                 let syncing = state.syncing_tasks.read().await;
@@ -637,7 +637,7 @@ async fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState
         };
 
         if should_reschedule_runtime_dispatcher(has_queued) {
-            schedule_runtime_sync_dispatcher(app.clone(), state.clone()).await;
+            schedule_runtime_sync_dispatcher(app.clone(), state.clone());
         }
     });
 }
@@ -903,7 +903,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
             .await;
 
             if queued {
-                schedule_runtime_sync_dispatcher(app.clone(), state.clone()).await;
+                schedule_runtime_sync_dispatcher(app.clone(), state.clone());
             }
             return;
         }
@@ -940,7 +940,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     let reason = result.err();
     emit_runtime_sync_state(&app, &task.id, false, reason);
 
-    schedule_runtime_sync_dispatcher(app, state).await;
+    schedule_runtime_sync_dispatcher(app, state);
 }
 
 async fn start_watch_internal(
@@ -983,7 +983,7 @@ async fn start_watch_internal(
                     .await;
 
                     if queued {
-                        schedule_runtime_sync_dispatcher(app_for_sync, state_for_sync).await;
+                        schedule_runtime_sync_dispatcher(app_for_sync, state_for_sync);
                     }
                 });
             }
@@ -1131,7 +1131,7 @@ async fn enqueue_initial_runtime_watch_syncs(app: tauri::AppHandle, state: AppSt
     }
 
     if enqueued_any {
-        schedule_runtime_sync_dispatcher(app, state).await;
+        schedule_runtime_sync_dispatcher(app, state);
     }
 }
 
