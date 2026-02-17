@@ -9,6 +9,36 @@ import InitialBootOverlay from './components/ui/InitialBootOverlay';
 
 const App = lazy(() => import('./App'));
 
+const comboboxContrastStyles = {
+  dropdown: {
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+  },
+  options: {
+    backgroundColor: 'var(--bg-primary)',
+    color: 'var(--text-primary)',
+  },
+  option: {
+    color: 'var(--text-primary)',
+    backgroundColor: 'var(--bg-primary)',
+    '&:hover:not([data-combobox-selected], [data-combobox-disabled])': {
+      backgroundColor: 'var(--bg-tertiary)',
+    },
+    '&[data-combobox-selected]': {
+      backgroundColor: 'var(--accent-main)',
+      color: '#ffffff',
+    },
+    '&[data-combobox-disabled]': {
+      color: 'var(--text-secondary)',
+      backgroundColor: 'var(--bg-primary)',
+      opacity: 0.6,
+    },
+  },
+  empty: {
+    color: 'var(--text-secondary)',
+  },
+};
+
 // Mantine theme customization to match design system
 const theme = createTheme({
   fontFamily: 'Pretendard Variable, Pretendard, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
@@ -21,6 +51,12 @@ const theme = createTheme({
         input: {
           fontSize: '11px',
         },
+        ...comboboxContrastStyles,
+      },
+    },
+    MultiSelect: {
+      styles: {
+        ...comboboxContrastStyles,
       },
     },
     Switch: {
