@@ -2,7 +2,7 @@
 
 macOS-native file synchronization utility with automatic SD card/USB detection and real-time backup capabilities.
 
-**Aiming to launch v1.0 in Jan 2026.**
+**v1.0 is in active development.**
 
 ## Overview
 

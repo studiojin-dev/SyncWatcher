@@ -220,6 +220,10 @@ describe('useYamlStore', () => {
       defaultData,
     }));
 
+    await waitFor(() => {
+      expect(result.current.loaded).toBe(true);
+    });
+
     const newData = { key: 'direct update', nested: { item: false } };
 
     act(() => {

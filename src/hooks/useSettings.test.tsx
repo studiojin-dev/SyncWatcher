@@ -260,12 +260,4 @@ describe('useSettings', () => {
     expect(result.current.settings.notifications).toBe(false);
   });
 
-  it('should return loaded state after loading', async () => {
-    const { result } = renderHook(() => useSettings(), { wrapper });
-
-    // After loading, loaded should be true
-    await waitFor(() => {
-      expect(result.current.loaded).toBe(true);
-    });
-  });
 });

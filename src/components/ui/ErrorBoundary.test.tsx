@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -11,6 +11,16 @@ const ThrowError = ({ shouldThrow }: { shouldThrow: boolean }) => {
 };
 
 describe('ErrorBoundary', () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
   it('should render children when there is no error', () => {
     render(
       <ErrorBoundary>
@@ -23,7 +33,6 @@ describe('ErrorBoundary', () => {
 
   it('should catch errors and display fallback UI', () => {
     const onError = vi.fn();
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     render(
       <ErrorBoundary onError={onError}>
@@ -35,13 +44,10 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
     // Check for error message in the paragraph (not stack trace)
     expect(screen.getByText('Test error', { selector: 'p' })).toBeInTheDocument();
-
-    consoleError.mockRestore();
   });
 
   it('should call onError callback when error occurs', () => {
     const onError = vi.fn();
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     render(
       <ErrorBoundary onError={onError}>
@@ -56,8 +62,6 @@ describe('ErrorBoundary', () => {
         componentStack: expect.stringContaining('ThrowError'),
       })
     );
-
-    consoleError.mockRestore();
   });
 
   it('should render custom fallback when provided', () => {
@@ -108,14 +112,4 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText(/Error: Test error/)).toBeInTheDocument();
   });
 
-  it('should render error message correctly', () => {
-    render(
-      <ErrorBoundary>
-        <ThrowError shouldThrow={true} />
-      </ErrorBoundary>
-    );
-
-    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
-    expect(screen.getByText('Test error')).toBeInTheDocument();
-  });
 });

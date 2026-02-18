@@ -79,62 +79,38 @@ describe('YamlEditorModal', () => {
     expect(screen.getByText('Jump to Error Line')).toBeInTheDocument();
   });
 
-  it('should validate valid YAML', async () => {
-    const validYaml = '- name: Task 1\n  source: /path1\n  target: /path2';
-    const errorWithValidYaml: YamlParseError = {
+  it.each([
+    {
+      caseName: 'valid YAML',
+      rawContent: '- name: Task 1\n  source: /path1\n  target: /path2',
+      validationText: 'Valid YAML',
+      saveDisabled: false,
+    },
+    {
+      caseName: 'invalid YAML',
+      rawContent: ': : :\ninvalid: [[[[',
+      validationText: 'Validation Error',
+      saveDisabled: true,
+    },
+  ])('should validate $caseName and update save button state', async ({ rawContent, validationText, saveDisabled }) => {
+    const testError: YamlParseError = {
       ...mockError,
-      rawContent: validYaml
+      rawContent
     };
 
-    renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={errorWithValidYaml} />);
+    renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={testError} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Valid YAML')).toBeInTheDocument();
+      expect(screen.getByText(validationText)).toBeInTheDocument();
     });
-  });
 
-  it('should show validation error for invalid YAML', async () => {
-    const invalidYaml = ': : :\ninvalid: [[[[';
-    const errorWithInvalidYaml: YamlParseError = {
-      ...mockError,
-      rawContent: invalidYaml
-    };
-
-    renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={errorWithInvalidYaml} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Validation Error')).toBeInTheDocument();
-    });
-  });
-
-  it('should enable save button when YAML is valid', async () => {
-    const validYaml = '- name: Task 1\n  source: /path1\n  target: /path2';
-    const errorWithValidYaml: YamlParseError = {
-      ...mockError,
-      rawContent: validYaml
-    };
-
-    renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={errorWithValidYaml} />);
-
-    await waitFor(() => {
-      const saveButton = screen.getByText('Save & Reload');
-      expect(saveButton).toBeEnabled();
-    });
-  });
-
-  it('should disable save button when YAML is invalid', async () => {
-    const invalidYaml = ': : :\ninvalid: [[[[';
-    const errorWithInvalidYaml: YamlParseError = {
-      ...mockError,
-      rawContent: invalidYaml
-    };
-
-    renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={errorWithInvalidYaml} />);
-
-    await waitFor(() => {
-      const saveButton = screen.getByRole('button', { name: /Save & Reload/ });
+    const saveButton = screen.getByRole('button', { name: /Save & Reload/ });
+    if (saveDisabled) {
       expect(saveButton).toHaveAttribute('data-disabled');
-    });
+      return;
+    }
+
+    expect(saveButton).toBeEnabled();
   });
 
   it('should call invoke to open external editor', async () => {
