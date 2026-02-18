@@ -35,6 +35,15 @@ pub struct VolumeInfo {
     pub disk_uuid: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct VolumeMetadata {
+    volume_uuid: Option<String>,
+    disk_uuid: Option<String>,
+    internal: Option<bool>,
+    ejectable: Option<bool>,
+    removable_media: Option<bool>,
+}
+
 pub struct DiskMonitor;
 
 impl Default for DiskMonitor {
@@ -48,9 +57,9 @@ impl DiskMonitor {
         Self
     }
 
-    /// 마운트 포인트로부터 Volume UUID와 Disk/Partition UUID를 획득합니다.
+    /// 마운트 포인트 메타데이터를 획득합니다.
     /// `diskutil info -plist <mount_point>` 명령을 사용합니다.
-    fn get_volume_uuid(mount_point: &Path) -> (Option<String>, Option<String>) {
+    fn get_volume_metadata(mount_point: &Path) -> Option<VolumeMetadata> {
         use std::process::Command;
 
         let output = Command::new("diskutil")
@@ -60,33 +69,34 @@ impl DiskMonitor {
             .output();
 
         let Ok(output) = output else {
-            return (None, None);
+            return None;
         };
 
         if !output.status.success() {
-            return (None, None);
+            return None;
         }
 
-        Self::parse_volume_uuids_from_plist(&output.stdout)
+        Self::parse_volume_metadata_from_plist(&output.stdout)
     }
 
     /// `diskutil info -plist` 출력(XML) 파싱 로직 (순수 함수)
     /// 테스트를 위해 분리됨
-    fn parse_volume_uuids_from_plist(data: &[u8]) -> (Option<String>, Option<String>) {
-        if let Ok(value) = plist::from_bytes::<plist::Value>(data) {
-            if let Some(dict) = value.as_dictionary() {
-                let volume_uuid = dict.get("VolumeUUID")
-                    .and_then(|v| v.as_string())
-                    .map(|s| s.to_string());
-                
-                let disk_uuid = dict.get("DiskPartitionUUID")
-                    .and_then(|v| v.as_string())
-                    .map(|s| s.to_string());
-
-                return (volume_uuid, disk_uuid);
-            }
-        }
-        (None, None)
+    fn parse_volume_metadata_from_plist(data: &[u8]) -> Option<VolumeMetadata> {
+        let value = plist::from_bytes::<plist::Value>(data).ok()?;
+        let dict = value.as_dictionary()?;
+        Some(VolumeMetadata {
+            volume_uuid: dict
+                .get("VolumeUUID")
+                .and_then(|v| v.as_string())
+                .map(|s| s.to_string()),
+            disk_uuid: dict
+                .get("DiskPartitionUUID")
+                .and_then(|v| v.as_string())
+                .map(|s| s.to_string()),
+            internal: parse_optional_bool(dict, "Internal"),
+            ejectable: parse_optional_bool(dict, "Ejectable"),
+            removable_media: parse_optional_bool(dict, "RemovableMedia"),
+        })
     }
 
     /// 볼륨 목록을 조회합니다.
@@ -103,14 +113,17 @@ impl DiskMonitor {
             }
 
             let is_network = is_network_mount(entry.flags);
-            let is_removable = is_removable_mount(&entry, is_network);
-
-            // UUID 조회는 로컬 볼륨에서만 best-effort로 수행.
-            let (volume_uuid, disk_uuid) = if is_network {
-                (None, None)
+            // 로컬 볼륨에서만 diskutil 메타데이터를 조회한다.
+            let metadata = if is_network {
+                None
             } else {
-                Self::get_volume_uuid(&entry.mount_point)
+                Self::get_volume_metadata(&entry.mount_point)
             };
+            let is_removable = is_removable_mount(&entry, is_network, metadata.as_ref());
+            let (volume_uuid, disk_uuid) = metadata
+                .as_ref()
+                .map(|m| (m.volume_uuid.clone(), m.disk_uuid.clone()))
+                .unwrap_or((None, None));
 
             volumes.push(volume_info_from_mount(
                 &entry,
@@ -169,6 +182,10 @@ impl DiskMonitor {
             return Err(anyhow::anyhow!("Path contains shell metacharacters"));
         }
 
+        let removable_volumes = Self::new().get_removable_volumes()?;
+        let removable_mount_root = find_matching_removable_mount_root(path, &removable_volumes)
+            .ok_or_else(|| anyhow::anyhow!("Unmount denied: not a mounted removable volume"))?;
+
         let max_retries = 3;
         let mut last_error = String::new();
 
@@ -176,7 +193,7 @@ impl DiskMonitor {
             // 6. Pass PathBuf directly, not string (safer)
             let output = Command::new("diskutil")
                 .arg("unmount")
-                .arg(path)  // Pass PathBuf directly
+                .arg(&removable_mount_root)  // Always unmount by resolved removable root
                 .output()
                 .map_err(|e| anyhow::anyhow!("diskutil execution failed: {}", e))?;
 
@@ -214,6 +231,22 @@ struct MountEntry {
 
 const ROOT_MOUNT: &str = "/";
 const VOLUMES_ROOT: &str = "/Volumes/";
+
+fn parse_optional_bool(dict: &plist::Dictionary, key: &str) -> Option<bool> {
+    dict.get(key).and_then(|value| {
+        if let Some(boolean) = value.as_boolean() {
+            return Some(boolean);
+        }
+
+        value
+            .as_string()
+            .and_then(|s| match s.trim().to_ascii_lowercase().as_str() {
+                "true" | "yes" | "1" => Some(true),
+                "false" | "no" | "0" => Some(false),
+                _ => None,
+            })
+    })
+}
 
 fn c_char_buffer_to_string(buffer: &[nix::libc::c_char]) -> String {
     let bytes: Vec<u8> = buffer
@@ -277,7 +310,11 @@ fn is_network_mount(flags: u32) -> bool {
     flags & nix::libc::MNT_LOCAL as u32 == 0
 }
 
-fn is_removable_mount(entry: &MountEntry, is_network: bool) -> bool {
+fn is_removable_mount(
+    entry: &MountEntry,
+    is_network: bool,
+    metadata: Option<&VolumeMetadata>,
+) -> bool {
     if is_network {
         return false;
     }
@@ -290,7 +327,30 @@ fn is_removable_mount(entry: &MountEntry, is_network: bool) -> bool {
         return false;
     }
 
-    entry.mount_from.starts_with("/dev/")
+    if !entry.mount_from.starts_with("/dev/disk") {
+        return false;
+    }
+
+    let Some(metadata) = metadata else {
+        return false;
+    };
+
+    metadata.internal == Some(false)
+        && (metadata.ejectable == Some(true) || metadata.removable_media == Some(true))
+}
+
+fn find_matching_removable_mount_root(path: &Path, removable_volumes: &[VolumeInfo]) -> Option<PathBuf> {
+    removable_volumes
+        .iter()
+        .filter_map(|volume| {
+            let mount_point = &volume.mount_point;
+            if path == mount_point || path.starts_with(mount_point) {
+                Some(mount_point.clone())
+            } else {
+                None
+            }
+        })
+        .max_by_key(|mount_point| mount_point.components().count())
 }
 
 fn volume_info_from_mount(
@@ -398,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_volume_uuids() {
+    fn test_parse_volume_metadata() {
         // Mock output of `diskutil info -plist`
         // Based on user provided example (though user provided `list -plist`, the structure keys are consistent)
         let xml = r#"
@@ -412,19 +472,35 @@ mod tests {
             <string>D47B2E09-AF70-3B66-B96F-D51909930EEA</string>
             <key>DiskPartitionUUID</key>
             <string>F7E6416E-BAD0-4304-8B13-E3268A1A1A07</string>
+            <key>Internal</key>
+            <false/>
+            <key>Ejectable</key>
+            <true/>
+            <key>RemovableMedia</key>
+            <true/>
             <key>DeviceIdentifier</key>
             <string>disk8s1</string>
         </dict>
         </plist>
         "#;
 
-        let (vol_uuid, disk_uuid) = DiskMonitor::parse_volume_uuids_from_plist(xml.as_bytes());
-        assert_eq!(vol_uuid, Some("D47B2E09-AF70-3B66-B96F-D51909930EEA".to_string()));
-        assert_eq!(disk_uuid, Some("F7E6416E-BAD0-4304-8B13-E3268A1A1A07".to_string()));
+        let metadata = DiskMonitor::parse_volume_metadata_from_plist(xml.as_bytes())
+            .expect("metadata should parse");
+        assert_eq!(
+            metadata.volume_uuid,
+            Some("D47B2E09-AF70-3B66-B96F-D51909930EEA".to_string())
+        );
+        assert_eq!(
+            metadata.disk_uuid,
+            Some("F7E6416E-BAD0-4304-8B13-E3268A1A1A07".to_string())
+        );
+        assert_eq!(metadata.internal, Some(false));
+        assert_eq!(metadata.ejectable, Some(true));
+        assert_eq!(metadata.removable_media, Some(true));
     }
 
     #[test]
-    fn test_parse_volume_uuids_missing() {
+    fn test_parse_volume_metadata_missing_fields() {
         let xml = r#"
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -436,9 +512,13 @@ mod tests {
         </plist>
         "#;
 
-        let (vol_uuid, disk_uuid) = DiskMonitor::parse_volume_uuids_from_plist(xml.as_bytes());
-        assert_eq!(vol_uuid, None);
-        assert_eq!(disk_uuid, None);
+        let metadata = DiskMonitor::parse_volume_metadata_from_plist(xml.as_bytes())
+            .expect("metadata should parse");
+        assert_eq!(metadata.volume_uuid, None);
+        assert_eq!(metadata.disk_uuid, None);
+        assert_eq!(metadata.internal, None);
+        assert_eq!(metadata.ejectable, None);
+        assert_eq!(metadata.removable_media, None);
     }
 
     #[test]
@@ -480,5 +560,115 @@ mod tests {
         assert_eq!(volume.total_bytes, None);
         assert_eq!(volume.available_bytes, None);
         assert!(!volume.is_removable);
+    }
+
+    #[test]
+    fn test_is_removable_mount_requires_external_metadata() {
+        let entry = MountEntry {
+            mount_point: PathBuf::from("/Volumes/USB"),
+            mount_from: "/dev/disk8s1".to_string(),
+            flags: nix::libc::MNT_LOCAL as u32,
+            block_size: 4096,
+            blocks: 100,
+            blocks_available: 40,
+        };
+
+        let removable_by_ejectable = VolumeMetadata {
+            internal: Some(false),
+            ejectable: Some(true),
+            removable_media: Some(false),
+            ..VolumeMetadata::default()
+        };
+        assert!(is_removable_mount(
+            &entry,
+            false,
+            Some(&removable_by_ejectable)
+        ));
+
+        let removable_by_media_flag = VolumeMetadata {
+            internal: Some(false),
+            ejectable: Some(false),
+            removable_media: Some(true),
+            ..VolumeMetadata::default()
+        };
+        assert!(is_removable_mount(
+            &entry,
+            false,
+            Some(&removable_by_media_flag)
+        ));
+
+        let internal_volume = VolumeMetadata {
+            internal: Some(true),
+            ejectable: Some(true),
+            removable_media: Some(true),
+            ..VolumeMetadata::default()
+        };
+        assert!(!is_removable_mount(&entry, false, Some(&internal_volume)));
+        assert!(!is_removable_mount(&entry, false, None));
+        assert!(!is_removable_mount(&entry, true, Some(&removable_by_ejectable)));
+
+        let non_disk_entry = MountEntry {
+            mount_from: "/dev/apfs".to_string(),
+            ..entry.clone()
+        };
+        assert!(!is_removable_mount(
+            &non_disk_entry,
+            false,
+            Some(&removable_by_ejectable)
+        ));
+
+        let non_volumes_entry = MountEntry {
+            mount_point: PathBuf::from("/Users/kimjeongjin"),
+            ..entry
+        };
+        assert!(!is_removable_mount(
+            &non_volumes_entry,
+            false,
+            Some(&removable_by_ejectable)
+        ));
+    }
+
+    #[test]
+    fn test_find_matching_removable_mount_root() {
+        let removable_volumes = vec![
+            VolumeInfo {
+                name: "USB".to_string(),
+                path: PathBuf::from("/Volumes/USB"),
+                mount_point: PathBuf::from("/Volumes/USB"),
+                total_bytes: None,
+                available_bytes: None,
+                is_network: false,
+                is_removable: true,
+                volume_uuid: None,
+                disk_uuid: None,
+            },
+            VolumeInfo {
+                name: "USB-NESTED".to_string(),
+                path: PathBuf::from("/Volumes/USB/DCIM"),
+                mount_point: PathBuf::from("/Volumes/USB/DCIM"),
+                total_bytes: None,
+                available_bytes: None,
+                is_network: false,
+                is_removable: true,
+                volume_uuid: None,
+                disk_uuid: None,
+            },
+        ];
+
+        let matched = find_matching_removable_mount_root(
+            Path::new("/Volumes/USB/DCIM/100MSDCF"),
+            &removable_volumes,
+        );
+        assert_eq!(matched, Some(PathBuf::from("/Volumes/USB/DCIM")));
+
+        let matched_root =
+            find_matching_removable_mount_root(Path::new("/Volumes/USB"), &removable_volumes);
+        assert_eq!(matched_root, Some(PathBuf::from("/Volumes/USB")));
+
+        let unmatched = find_matching_removable_mount_root(
+            Path::new("/Volumes/INTERNAL/Documents"),
+            &removable_volumes,
+        );
+        assert_eq!(unmatched, None);
     }
 }

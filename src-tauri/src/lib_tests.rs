@@ -4,13 +4,17 @@ mod integration_tests {
     use crate::watcher::WatcherManager;
     use crate::{
         compute_volume_mount_diff, format_bytes_with_unit, get_app_version,
+        handle_volume_watch_event, handle_volume_watch_tick,
         is_runtime_watch_task_active, join_paths, progress_phase_to_log_category,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
         validate_runtime_tasks, AppState, DataUnitSystem, RuntimeSyncTask,
+        volume_watch_next_tick_delay,
+        VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
     use tokio::sync::{Mutex, Notify, RwLock};
 
     fn build_runtime_task(id: &str, source: &str, watch_mode: bool) -> RuntimeSyncTask {
@@ -286,6 +290,66 @@ mod integration_tests {
 
         assert_eq!(mounted, vec!["/Volumes/USB_NEW".to_string()]);
         assert_eq!(unmounted, vec!["/Volumes/USB_OLD".to_string()]);
+    }
+
+    #[test]
+    fn test_volume_emit_debounce_immediate_and_trailing() {
+        let debounce = Duration::from_millis(500);
+        let base = Instant::now();
+        let mut state = VolumeEmitDebounceState::new();
+
+        // First event emits immediately.
+        assert!(handle_volume_watch_event(&mut state, base, debounce));
+
+        // Burst event inside debounce window does not emit immediately.
+        assert!(!handle_volume_watch_event(
+            &mut state,
+            base + Duration::from_millis(100),
+            debounce
+        ));
+
+        // Tick before debounce window ends should not emit.
+        assert!(!handle_volume_watch_tick(
+            &mut state,
+            base + Duration::from_millis(450),
+            debounce
+        ));
+
+        // Tick after debounce window ends emits one trailing refresh.
+        assert!(handle_volume_watch_tick(
+            &mut state,
+            base + Duration::from_millis(650),
+            debounce
+        ));
+
+        // No pending event means no extra emit.
+        assert!(!handle_volume_watch_tick(
+            &mut state,
+            base + Duration::from_millis(900),
+            debounce
+        ));
+    }
+
+    #[test]
+    fn test_volume_watch_next_tick_delay_only_when_trailing_pending() {
+        let debounce = Duration::from_millis(500);
+        let now = Instant::now();
+        let mut state = VolumeEmitDebounceState::new();
+
+        assert_eq!(volume_watch_next_tick_delay(&state, now, debounce), None);
+
+        state.trailing_pending = true;
+        state.last_emit_at = Some(now - Duration::from_millis(200));
+        assert_eq!(
+            volume_watch_next_tick_delay(&state, now, debounce),
+            Some(Duration::from_millis(300))
+        );
+
+        state.last_emit_at = Some(now - Duration::from_millis(800));
+        assert_eq!(
+            volume_watch_next_tick_delay(&state, now, debounce),
+            Some(Duration::from_millis(0))
+        );
     }
 
     #[test]

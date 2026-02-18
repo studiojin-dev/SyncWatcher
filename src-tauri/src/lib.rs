@@ -270,6 +270,81 @@ pub(crate) fn compute_volume_mount_diff(
     (mounted, unmounted)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VolumeEmitDebounceState {
+    last_emit_at: Option<Instant>,
+    trailing_pending: bool,
+}
+
+impl VolumeEmitDebounceState {
+    pub(crate) fn new() -> Self {
+        Self {
+            last_emit_at: None,
+            trailing_pending: false,
+        }
+    }
+}
+
+fn volume_emit_window_elapsed(
+    last_emit_at: Option<Instant>,
+    now: Instant,
+    debounce_duration: Duration,
+) -> bool {
+    last_emit_at
+        .map(|last| now.duration_since(last) >= debounce_duration)
+        .unwrap_or(true)
+}
+
+pub(crate) fn handle_volume_watch_event(
+    state: &mut VolumeEmitDebounceState,
+    now: Instant,
+    debounce_duration: Duration,
+) -> bool {
+    if volume_emit_window_elapsed(state.last_emit_at, now, debounce_duration) {
+        state.last_emit_at = Some(now);
+        state.trailing_pending = false;
+        true
+    } else {
+        state.trailing_pending = true;
+        false
+    }
+}
+
+pub(crate) fn handle_volume_watch_tick(
+    state: &mut VolumeEmitDebounceState,
+    now: Instant,
+    debounce_duration: Duration,
+) -> bool {
+    if !state.trailing_pending {
+        return false;
+    }
+
+    if volume_emit_window_elapsed(state.last_emit_at, now, debounce_duration) {
+        state.last_emit_at = Some(now);
+        state.trailing_pending = false;
+        true
+    } else {
+        false
+    }
+}
+
+fn volume_watch_next_tick_delay(
+    state: &VolumeEmitDebounceState,
+    now: Instant,
+    debounce_duration: Duration,
+) -> Option<Duration> {
+    if !state.trailing_pending {
+        return None;
+    }
+
+    let Some(last_emit_at) = state.last_emit_at else {
+        return Some(Duration::from_millis(0));
+    };
+
+    let elapsed = now.saturating_duration_since(last_emit_at);
+    Some(debounce_duration.saturating_sub(elapsed))
+}
+
 fn emit_runtime_watch_state(
     app: &tauri::AppHandle,
     task_id: &str,
@@ -1471,11 +1546,12 @@ fn resolve_path_by_uuid(disk_uuid: String) -> Result<std::path::PathBuf, String>
 /// Removable 디스크를 언마운트합니다.
 #[tauri::command]
 async fn unmount_volume(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    DiskMonitor::unmount_volume(&path).map_err(|e| e.to_string())?;
+    let resolved_path = resolve_path_with_uuid(path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    DiskMonitor::unmount_volume(&resolved_path).map_err(|e| e.to_string())?;
 
     state.log_manager.log_with_category(
         "success",
-        &format!("Volume unmounted: {}", path.display()),
+        &format!("Volume unmounted: {}", resolved_path.display()),
         None,
         LogCategory::VolumeUnmounted,
     );
@@ -1906,7 +1982,7 @@ pub fn run() {
 
                 let result = catch_unwind(AssertUnwindSafe(|| {
                     use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
-                    use std::sync::mpsc::channel;
+                    use std::sync::mpsc::{channel, RecvTimeoutError};
                     use std::time::Duration as StdDuration;
 
                     let removable_mounts = || -> HashSet<String> {
@@ -1950,52 +2026,87 @@ pub fn run() {
 
                     println!("[VolumesWatcher] Started watching /Volumes");
 
-                    // 이벤트 디바운싱을 위한 마지막 emit 시간
-                    let mut last_emit: Option<std::time::Instant> = None;
                     let debounce_duration = StdDuration::from_millis(500);
+                    let mut emit_state = VolumeEmitDebounceState::new();
+
+                    let mut refresh_and_emit = || {
+                        let current_removable_mounts = removable_mounts();
+                        let (mounted, unmounted) = compute_volume_mount_diff(
+                            &previous_removable_mounts,
+                            &current_removable_mounts,
+                        );
+
+                        for mount_path in mounted {
+                            volume_log_manager.log_with_category(
+                                "info",
+                                &format!("Volume mounted: {}", mount_path),
+                                None,
+                                LogCategory::VolumeMounted,
+                            );
+                        }
+
+                        for mount_path in unmounted {
+                            volume_log_manager.log_with_category(
+                                "info",
+                                &format!("Volume unmounted: {}", mount_path),
+                                None,
+                                LogCategory::VolumeUnmounted,
+                            );
+                        }
+
+                        previous_removable_mounts = current_removable_mounts;
+                        let _ = app_handle.emit("volumes-changed", ());
+                    };
 
                     loop {
-                        match rx.recv() {
+                        let now = Instant::now();
+                        let next_tick = volume_watch_next_tick_delay(&emit_state, now, debounce_duration);
+
+                        if let Some(delay) = next_tick {
+                            if delay.is_zero() {
+                                if handle_volume_watch_tick(
+                                    &mut emit_state,
+                                    now,
+                                    debounce_duration,
+                                ) {
+                                    refresh_and_emit();
+                                }
+                                continue;
+                            }
+                        }
+
+                        let recv_result = if let Some(delay) = next_tick {
+                            rx.recv_timeout(delay)
+                        } else {
+                            match rx.recv() {
+                                Ok(value) => Ok(value),
+                                Err(_) => Err(RecvTimeoutError::Disconnected),
+                            }
+                        };
+
+                        match recv_result {
                             Ok(Ok(_event)) => {
-                                // 디바운스: 500ms 내 중복 이벤트 무시
-                                let should_emit = last_emit
-                                    .map(|last| last.elapsed() >= debounce_duration)
-                                    .unwrap_or(true);
-                                if should_emit {
-                                    last_emit = Some(std::time::Instant::now());
-                                    let current_removable_mounts = removable_mounts();
-                                    let (mounted, unmounted) = compute_volume_mount_diff(
-                                        &previous_removable_mounts,
-                                        &current_removable_mounts,
-                                    );
-
-                                    for mount_path in mounted {
-                                        volume_log_manager.log_with_category(
-                                            "info",
-                                            &format!("Volume mounted: {}", mount_path),
-                                            None,
-                                            LogCategory::VolumeMounted,
-                                        );
-                                    }
-
-                                    for mount_path in unmounted {
-                                        volume_log_manager.log_with_category(
-                                            "info",
-                                            &format!("Volume unmounted: {}", mount_path),
-                                            None,
-                                            LogCategory::VolumeUnmounted,
-                                        );
-                                    }
-
-                                    previous_removable_mounts = current_removable_mounts;
-                                    let _ = app_handle.emit("volumes-changed", ());
+                                if handle_volume_watch_event(
+                                    &mut emit_state,
+                                    Instant::now(),
+                                    debounce_duration,
+                                ) {
+                                    refresh_and_emit();
                                 }
                             }
                             Ok(Err(e)) => {
                                 eprintln!("[VolumesWatcher] Watch error: {}", e);
                             }
-                            Err(_) => {
-                                // 채널 닫힘 - 종료
+                            Err(RecvTimeoutError::Timeout) => {
+                                if handle_volume_watch_tick(
+                                    &mut emit_state,
+                                    Instant::now(),
+                                    debounce_duration,
+                                ) {
+                                    refresh_and_emit();
+                                }
+                            }
+                            Err(RecvTimeoutError::Disconnected) => {
                                 break;
                             }
                         }
