@@ -235,6 +235,11 @@
         "description": "변경 없이 결과 확인",
         "whatIf": "복사/업데이트/삭제될 파일의 상세 차이 표시",
         "noChanges": "미리보기 모드에서는 실제 파일 작업이 수행되지 않음"
+      },
+      "feedback": {
+        "title": "문의사항, 건의사항",
+        "description": "사용 중 문의나 기능 제안은 GitHub Discussions에 남겨주세요.",
+        "linkText": "GitHub Discussions 열기"
       }
     },
     "about": {

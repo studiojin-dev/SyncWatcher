@@ -235,6 +235,11 @@
         "description": "查看如果不进行更改会发生什么",
         "whatIf": "显示将被复制/更新/删除的文件的详细差异",
         "noChanges": "预览模式下不执行实际文件操作"
+      },
+      "feedback": {
+        "title": "问题反馈与建议",
+        "description": "欢迎在 GitHub Discussions 提交问题或功能建议。",
+        "linkText": "打开 GitHub Discussions"
       }
     },
     "about": {

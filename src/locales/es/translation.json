@@ -235,6 +235,11 @@
         "description": "Vea lo que sucedería sin realizar cambios",
         "whatIf": "Muestra una diferencia detallada de los archivos que se copiarán/actualizarán/eliminarán",
         "noChanges": "No se realizan operaciones de archivos reales en el modo de vista previa"
+      },
+      "feedback": {
+        "title": "Consultas y sugerencias",
+        "description": "Comparte tus consultas o propuestas de mejora en GitHub Discussions.",
+        "linkText": "Abrir GitHub Discussions"
       }
     },
     "about": {

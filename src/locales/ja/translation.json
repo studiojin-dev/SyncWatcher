@@ -235,6 +235,11 @@
         "description": "変更を行わずに何が起こるかを確認",
         "whatIf": "コピー/更新/削除されるファイルの詳細な差分を表示",
         "noChanges": "プレビューモードでは実際のファイル操作は行われません"
+      },
+      "feedback": {
+        "title": "お問い合わせ・ご提案",
+        "description": "ご質問や機能提案は GitHub Discussions に投稿してください。",
+        "linkText": "GitHub Discussions を開く"
       }
     },
     "about": {

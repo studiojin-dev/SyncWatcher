@@ -1,5 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { IconDatabase, IconShield, IconRefresh, IconEye } from '@tabler/icons-react';
+import {
+  IconDatabase,
+  IconShield,
+  IconRefresh,
+  IconEye,
+  IconBrandGithub,
+} from '@tabler/icons-react';
 
 function HelpView() {
   const { t } = useTranslation();
@@ -54,12 +60,11 @@ function HelpView() {
   ];
 
   return (
-
     <div className="fade-in max-w-4xl">
       <header className="mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
         <h1 className="text-3xl font-heading font-black uppercase mb-1">{t('help.title')}</h1>
         <div className="font-mono text-xs border-l-4 border-[var(--accent-info)] pl-3">
-             // USER_MANUAL_DB
+          // USER_MANUAL_DB
         </div>
       </header>
 
@@ -92,9 +97,31 @@ function HelpView() {
           );
         })}
       </div>
+
+      <section className="neo-box mt-6 p-6 bg-[var(--bg-primary)]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold uppercase mb-1">
+              {t('help.feedback.title')}
+            </h2>
+            <p className="text-sm text-[var(--text-secondary)]">
+              {t('help.feedback.description')}
+            </p>
+          </div>
+
+          <a
+            href="https://github.com/studiojin-dev/SyncWatcher/discussions"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 py-3 px-4 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+          >
+            <IconBrandGithub size={20} />
+            <span>{t('help.feedback.linkText')}</span>
+          </a>
+        </div>
+      </section>
     </div>
   );
-
 }
 
 export default HelpView;

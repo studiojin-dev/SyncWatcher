@@ -232,6 +232,11 @@
         "description": "See what would happen without making changes",
         "whatIf": "Shows a detailed diff of files to be copied/updated/deleted",
         "noChanges": "No actual file operations are performed in preview mode"
+      },
+      "feedback": {
+        "title": "Questions & Suggestions",
+        "description": "Share questions or feature suggestions in GitHub Discussions.",
+        "linkText": "Open GitHub Discussions"
       }
     },
     "about": {
