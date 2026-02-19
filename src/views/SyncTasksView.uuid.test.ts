@@ -4,6 +4,7 @@ import {
     buildUuidSourceToken,
     inferUuidTypeFromVolumes,
     parseUuidSourceToken,
+    toUuidSubPath,
 } from './syncTaskUuid';
 
 describe('SyncTasksView UUID helpers', () => {
@@ -113,5 +114,15 @@ describe('SyncTasksView UUID helpers', () => {
         expect(inferUuidTypeFromVolumes('shared-uuid', volumes)).toBe('disk');
         expect(inferUuidTypeFromVolumes('volume-only', volumes)).toBe('volume');
         expect(inferUuidTypeFromVolumes('missing', volumes)).toBeNull();
+    });
+
+    it('converts selected directory path to UUID sub path', () => {
+        expect(toUuidSubPath('/Volumes/CARD', '/Volumes/CARD')).toBe('/');
+        expect(toUuidSubPath('/Volumes/CARD', '/Volumes/CARD/DCIM')).toBe('/DCIM');
+        expect(toUuidSubPath('/Volumes/CARD', '/Volumes/CARD/DCIM/100MSDCF')).toBe('/DCIM/100MSDCF');
+    });
+
+    it('returns null when selected path is outside mount point', () => {
+        expect(toUuidSubPath('/Volumes/CARD', '/Users/kimjeongjin/Desktop')).toBeNull();
     });
 });

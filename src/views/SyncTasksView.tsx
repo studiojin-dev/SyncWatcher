@@ -33,6 +33,7 @@ import {
     inferUuidTypeFromVolumes,
     parseUuidOptionValue,
     parseUuidSourceToken,
+    toUuidSubPath,
     type SourceUuidType,
 } from './syncTaskUuid';
 
@@ -150,6 +151,12 @@ function SyncTasksView() {
     const selectedUuidOptionValue = sourceUuid && sourceUuidType
         ? buildUuidOptionValue(sourceUuidType, sourceUuid)
         : null;
+    const selectedUuidOption = useMemo(() => {
+        if (!selectedUuidOptionValue) {
+            return null;
+        }
+        return uuidSourceOptions.find((option) => option.value === selectedUuidOptionValue) || null;
+    }, [selectedUuidOptionValue, uuidSourceOptions]);
 
     // 볼륨 목록 로드
     const loadVolumes = useCallback(async () => {
@@ -277,6 +284,50 @@ function SyncTasksView() {
             }
         } catch (err) {
             console.error('Failed to open directory picker:', err);
+            showToast('Failed to open directory picker', 'error');
+        }
+    };
+
+    const browseSourceSubPath = async () => {
+        if (sourceType !== 'uuid') {
+            return;
+        }
+
+        const mountPoint = selectedUuidOption?.mountPoint;
+        if (!mountPoint) {
+            showToast(t('syncTasks.volumeNotMounted', { defaultValue: '볼륨이 마운트되지 않음' }), 'warning');
+            return;
+        }
+
+        const normalizedSubPath = sourceSubPath.replace(/^\/+/, '');
+        const defaultPath = normalizedSubPath
+            ? `${mountPoint}/${normalizedSubPath}`
+            : mountPoint;
+
+        try {
+            const selected = await open({
+                directory: true,
+                multiple: false,
+                title: t('syncTasks.subPath', { defaultValue: '하위 경로' }),
+                defaultPath,
+            });
+
+            if (!selected || typeof selected !== 'string') {
+                return;
+            }
+
+            const resolvedSubPath = toUuidSubPath(mountPoint, selected);
+            if (resolvedSubPath === null) {
+                showToast(
+                    t('syncTasks.subPathOutsideVolume', { defaultValue: '선택한 경로가 현재 볼륨 내부가 아닙니다.' }),
+                    'warning'
+                );
+                return;
+            }
+
+            setSourceSubPath(resolvedSubPath);
+        } catch (err) {
+            console.error('Failed to open sub path picker:', err);
             showToast('Failed to open directory picker', 'error');
         }
     };
@@ -723,13 +774,26 @@ function SyncTasksView() {
                                                 <label className="block text-xs font-bold mb-1 uppercase font-mono text-[var(--text-secondary)]">
                                                     {t('syncTasks.subPath', { defaultValue: '하위 경로' })}
                                                 </label>
-                                                <input
-                                                    name="sourceSubPath"
-                                                    value={sourceSubPath}
-                                                    onChange={(e) => setSourceSubPath(e.target.value)}
-                                                    className="neo-input font-mono text-sm"
-                                                    placeholder={t('syncTasks.subPathPlaceholder', { defaultValue: '/DCIM/100MSDCF' })}
-                                                />
+                                                <div className="flex gap-2">
+                                                    <input
+                                                        name="sourceSubPath"
+                                                        value={sourceSubPath}
+                                                        onChange={(e) => setSourceSubPath(e.target.value)}
+                                                        className="neo-input font-mono text-sm flex-1"
+                                                        placeholder={t('syncTasks.subPathPlaceholder', { defaultValue: '/DCIM/100MSDCF' })}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            void browseSourceSubPath();
+                                                        }}
+                                                        className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
+                                                        title={t('syncTasks.subPath', { defaultValue: '하위 경로' })}
+                                                        disabled={!selectedUuidOption}
+                                                    >
+                                                        <IconFolder size={18} />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     )}

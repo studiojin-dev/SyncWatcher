@@ -28,6 +28,18 @@ const VOLUME_UUID_PREFIX = '[VOLUME_UUID:';
 const LEGACY_UUID_PREFIX = '[UUID:';
 const UUID_OPTION_SEPARATOR = '::';
 
+function normalizeFsPath(path: string): string {
+    if (!path) {
+        return '';
+    }
+
+    if (path === '/') {
+        return '/';
+    }
+
+    return path.replace(/\/+$/, '');
+}
+
 function parseTokenWithPrefix(
     source: string,
     prefix: string,
@@ -72,6 +84,31 @@ export function parseUuidOptionValue(value: string): { uuidType: SourceUuidType;
 export function buildUuidSourceToken(uuidType: SourceUuidType, uuid: string, subPath: string): string {
     const prefix = uuidType === 'disk' ? DISK_UUID_PREFIX : VOLUME_UUID_PREFIX;
     return `${prefix}${uuid}]${subPath}`;
+}
+
+export function toUuidSubPath(mountPoint: string, selectedPath: string): string | null {
+    const normalizedMount = normalizeFsPath(mountPoint);
+    const normalizedSelected = normalizeFsPath(selectedPath);
+
+    if (!normalizedMount || !normalizedSelected) {
+        return null;
+    }
+
+    if (normalizedSelected === normalizedMount) {
+        return '/';
+    }
+
+    const mountPrefix = normalizedMount === '/' ? '/' : `${normalizedMount}/`;
+    if (!normalizedSelected.startsWith(mountPrefix)) {
+        return null;
+    }
+
+    const relative = normalizedSelected.slice(mountPrefix.length);
+    if (!relative) {
+        return '/';
+    }
+
+    return `/${relative}`;
 }
 
 export function parseUuidSourceToken(source: string): ParsedUuidSourceToken | null {
