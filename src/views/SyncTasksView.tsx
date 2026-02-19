@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc, IconSearch } from '@tabler/icons-react';
 import { MultiSelect, Select } from '@mantine/core';
@@ -26,6 +26,15 @@ import type {
     DryRunResult,
     SyncExecutionResult,
 } from '../types/syncEngine';
+import {
+    buildUuidOptionValue,
+    buildUuidSourceOptions,
+    buildUuidSourceToken,
+    inferUuidTypeFromVolumes,
+    parseUuidOptionValue,
+    parseUuidSourceToken,
+    type SourceUuidType,
+} from './syncTaskUuid';
 
 /** Volume information from backend */
 interface VolumeInfo {
@@ -105,6 +114,7 @@ function SyncTasksView() {
     // UUID source selection state
     const [sourceType, setSourceType] = useState<'path' | 'uuid'>('path');
     const [sourceUuid, setSourceUuid] = useState<string>('');
+    const [sourceUuidType, setSourceUuidType] = useState<SourceUuidType | ''>('');
     const [sourceSubPath, setSourceSubPath] = useState<string>('');
     const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
     const [loadingVolumes, setLoadingVolumes] = useState(false);
@@ -133,8 +143,16 @@ function SyncTasksView() {
         return formatBytes(volume.total_bytes, settings.dataUnitSystem);
     }, [settings.dataUnitSystem, t]);
 
+    const uuidSourceOptions = useMemo(
+        () => buildUuidSourceOptions(volumes, formatVolumeSize),
+        [formatVolumeSize, volumes]
+    );
+    const selectedUuidOptionValue = sourceUuid && sourceUuidType
+        ? buildUuidOptionValue(sourceUuidType, sourceUuid)
+        : null;
+
     // 볼륨 목록 로드
-    const loadVolumes = async () => {
+    const loadVolumes = useCallback(async () => {
         try {
             setLoadingVolumes(true);
             const result = await invoke<VolumeInfo[]>('get_removable_volumes');
@@ -144,19 +162,34 @@ function SyncTasksView() {
         } finally {
             setLoadingVolumes(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
         if (editingTask) {
+            const parsedSourceToken = parseUuidSourceToken(editingTask.source || '');
+            const tokenUuidType =
+                parsedSourceToken?.tokenType === 'disk' || parsedSourceToken?.tokenType === 'volume'
+                    ? parsedSourceToken.tokenType
+                    : '';
+            const resolvedSourceType: 'path' | 'uuid' =
+                editingTask.sourceType || (parsedSourceToken ? 'uuid' : 'path');
+            const resolvedSourceUuid = editingTask.sourceUuid || parsedSourceToken?.uuid || '';
+            const resolvedSourceSubPath = editingTask.sourceSubPath ?? parsedSourceToken?.subPath ?? '';
+
             setSelectedSets(editingTask.exclusionSets || []);
             setSourcePath(editingTask.source || '');
             setTargetPath(editingTask.target || '');
             setWatchMode(editingTask.watchMode || false);
             setAutoUnmount(editingTask.autoUnmount || false);
             // UUID 관련 상태 복원
-            setSourceType(editingTask.sourceType || 'path');
-            setSourceUuid(editingTask.sourceUuid || '');
-            setSourceSubPath(editingTask.sourceSubPath || '');
+            setSourceType(resolvedSourceType);
+            setSourceUuid(resolvedSourceType === 'uuid' ? resolvedSourceUuid : '');
+            setSourceUuidType(
+                resolvedSourceType === 'uuid'
+                    ? (editingTask.sourceUuidType || tokenUuidType)
+                    : ''
+            );
+            setSourceSubPath(resolvedSourceType === 'uuid' ? resolvedSourceSubPath : '');
         } else {
             setSelectedSets([]);
             setSourcePath('');
@@ -166,16 +199,47 @@ function SyncTasksView() {
             // UUID 관련 상태 초기화
             setSourceType('path');
             setSourceUuid('');
+            setSourceUuidType('');
             setSourceSubPath('');
         }
     }, [editingTask, showForm]);
 
+    useEffect(() => {
+        if (!showForm || sourceType !== 'uuid' || !sourceUuid || sourceUuidType) {
+            return;
+        }
+
+        const inferredType = inferUuidTypeFromVolumes(sourceUuid, volumes);
+        if (inferredType) {
+            setSourceUuidType(inferredType);
+        }
+    }, [showForm, sourceType, sourceUuid, sourceUuidType, volumes]);
+
     // 폼이 열릴 때 볼륨 목록 로드
     useEffect(() => {
         if (showForm) {
-            loadVolumes();
+            void loadVolumes();
         }
-    }, [showForm]);
+    }, [showForm, loadVolumes]);
+
+    // 폼이 열려 있는 동안 디스크 변경 이벤트 수신 시 목록 갱신
+    useEffect(() => {
+        if (!showForm) {
+            return;
+        }
+
+        const unlistenPromise = listen('volumes-changed', () => {
+            void loadVolumes();
+        });
+
+        return () => {
+            void unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((error) => {
+                    console.warn('Failed to unlisten volumes-changed', error);
+                });
+        };
+    }, [showForm, loadVolumes]);
 
     useEffect(() => {
         void loadConflictSessions();
@@ -223,9 +287,22 @@ function SyncTasksView() {
 
         // UUID 모드일 때 source 경로 결정
         let finalSource = sourcePath || formData.get('source') as string;
-        if (sourceType === 'uuid' && sourceUuid) {
-            // UUID 모드에서는 placeholder 값 저장 (실제 경로는 동기화 시 resolve)
-            finalSource = `[UUID:${sourceUuid}]${sourceSubPath}`;
+        const resolvedSourceUuidType: SourceUuidType | undefined = sourceType === 'uuid'
+            ? (sourceUuidType || inferUuidTypeFromVolumes(sourceUuid, volumes) || 'disk')
+            : undefined;
+
+        if (sourceType === 'uuid') {
+            if (!sourceUuid) {
+                showToast(
+                    t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' }),
+                    'warning'
+                );
+                return;
+            }
+
+            const selectedUuidType = resolvedSourceUuidType || 'disk';
+            // UUID 모드에서는 token 값 저장 (실제 경로는 동기화 시 resolve)
+            finalSource = buildUuidSourceToken(selectedUuidType, sourceUuid, sourceSubPath);
         }
 
         const taskData = {
@@ -239,6 +316,7 @@ function SyncTasksView() {
             // UUID 관련 필드
             sourceType: sourceType,
             sourceUuid: sourceType === 'uuid' ? sourceUuid : undefined,
+            sourceUuidType: sourceType === 'uuid' ? resolvedSourceUuidType : undefined,
             sourceSubPath: sourceType === 'uuid' ? sourceSubPath : undefined,
         };
 
@@ -592,18 +670,31 @@ function SyncTasksView() {
                                         <div className="space-y-2">
                                             <Select
                                                 placeholder={loadingVolumes ? '로딩 중...' : t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' })}
-                                                data={volumes.map(v => ({
-                                                    value: v.disk_uuid || '',
-                                                    label: `${v.name} (${formatVolumeSize(v)})`,
-                                                    disabled: !v.disk_uuid,
+                                                data={uuidSourceOptions.map((option) => ({
+                                                    value: option.value,
+                                                    label: option.label,
                                                 }))}
-                                                value={sourceUuid}
+                                                value={selectedUuidOptionValue}
                                                 onChange={(value) => {
-                                                    setSourceUuid(value || '');
+                                                    if (!value) {
+                                                        setSourceUuid('');
+                                                        setSourceUuidType('');
+                                                        return;
+                                                    }
+
+                                                    const parsedOption = parseUuidOptionValue(value);
+                                                    if (!parsedOption) {
+                                                        setSourceUuid('');
+                                                        setSourceUuidType('');
+                                                        return;
+                                                    }
+
+                                                    setSourceUuid(parsedOption.uuid);
+                                                    setSourceUuidType(parsedOption.uuidType);
                                                     // 선택된 볼륨의 마운트 포인트를 sourcePath에도 저장
-                                                    const vol = volumes.find(v => v.disk_uuid === value);
-                                                    if (vol) {
-                                                        setSourcePath(vol.mount_point);
+                                                    const option = uuidSourceOptions.find((candidate) => candidate.value === value);
+                                                    if (option) {
+                                                        setSourcePath(option.mountPoint);
                                                     }
                                                 }}
                                                 searchable
@@ -623,7 +714,9 @@ function SyncTasksView() {
                                             />
                                             {sourceUuid && (
                                                 <div className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-secondary)] p-2 border-2 border-dashed border-[var(--border-main)]">
-                                                    <span className="font-bold">UUID:</span> {sourceUuid}
+                                                    <span className="font-bold">
+                                                        {sourceUuidType === 'volume' ? 'Volume UUID' : 'Disk UUID'}:
+                                                    </span> {sourceUuid}
                                                 </div>
                                             )}
                                             <div>

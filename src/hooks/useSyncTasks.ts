@@ -17,6 +17,8 @@ export interface SyncTask {
     sourceType?: 'path' | 'uuid';
     /** UUID 기반 소스일 때 사용할 Disk UUID */
     sourceUuid?: string;
+    /** UUID 기반 소스일 때 UUID 타입 */
+    sourceUuidType?: 'disk' | 'volume';
     /** UUID 볼륨 내 하위 경로 (예: /DCIM/100MSDCF) */
     sourceSubPath?: string;
 }
@@ -41,6 +43,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         autoUnmount: task.autoUnmount ?? false,
         sourceType: task.sourceType,
         sourceUuid: task.sourceUuid,
+        sourceUuidType: task.sourceUuidType,
         sourceSubPath: task.sourceSubPath,
     };
 }

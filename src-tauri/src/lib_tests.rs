@@ -6,6 +6,7 @@ mod integration_tests {
         compute_volume_mount_diff, format_bytes_with_unit, get_app_version,
         handle_volume_watch_event, handle_volume_watch_tick,
         is_runtime_watch_task_active, join_paths, progress_phase_to_log_category,
+        parse_uuid_source_path,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
         validate_runtime_tasks, AppState, DataUnitSystem, RuntimeSyncTask,
         volume_watch_next_tick_delay,
@@ -263,6 +264,55 @@ mod integration_tests {
         let result = validate_runtime_tasks(&tasks);
         assert!(result.is_err());
         assert!(result.err().unwrap_or_default().contains("Watch loop risk"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_allows_new_uuid_tokens() {
+        let tasks = vec![
+            build_runtime_task_with_paths("disk", "[DISK_UUID:disk-a]/DCIM", "/dst/disk", false),
+            build_runtime_task_with_paths(
+                "volume",
+                "[VOLUME_UUID:volume-a]/DCIM",
+                "/dst/volume",
+                false,
+            ),
+            build_runtime_task_with_paths("legacy", "[UUID:legacy-a]/DCIM", "/dst/legacy", false),
+        ];
+
+        assert!(validate_runtime_tasks(&tasks).is_ok());
+    }
+
+    #[test]
+    fn test_parse_uuid_source_path_handles_token_variants() {
+        let disk = parse_uuid_source_path("[DISK_UUID:disk-a]/DCIM/100");
+        assert!(disk.is_some());
+        let disk = disk.unwrap();
+        assert_eq!(disk.uuid, "disk-a");
+        assert_eq!(disk.sub_path, "/DCIM/100");
+
+        let volume = parse_uuid_source_path("[VOLUME_UUID:volume-a]/MOV");
+        assert!(volume.is_some());
+        let volume = volume.unwrap();
+        assert_eq!(volume.uuid, "volume-a");
+        assert_eq!(volume.sub_path, "/MOV");
+
+        let legacy = parse_uuid_source_path("[UUID:legacy-a]/RAW");
+        assert!(legacy.is_some());
+        let legacy = legacy.unwrap();
+        assert_eq!(legacy.uuid, "legacy-a");
+        assert_eq!(legacy.sub_path, "/RAW");
+    }
+
+    #[test]
+    fn test_parse_uuid_source_path_edge_cases() {
+        let empty_uuid = parse_uuid_source_path("[DISK_UUID:]/DCIM");
+        assert!(empty_uuid.is_some());
+        let empty_uuid = empty_uuid.unwrap();
+        assert_eq!(empty_uuid.uuid, "");
+        assert_eq!(empty_uuid.sub_path, "/DCIM");
+
+        assert!(parse_uuid_source_path("[DISK_UUID:abc/without-bracket").is_none());
+        assert!(parse_uuid_source_path("[CUSTOM_UUID:abc]/DCIM").is_none());
     }
 
     #[test]

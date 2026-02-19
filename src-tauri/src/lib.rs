@@ -765,27 +765,92 @@ async fn read_text_preview(path: &str, max_bytes: usize) -> (Option<String>, boo
     }
 }
 
-fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
-    if path_str.starts_with("[UUID:") {
-        if let Some(end_idx) = path_str.find(']') {
-            let uuid_part = &path_str[6..end_idx];
-            let sub_path = &path_str[end_idx + 1..];
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UuidTokenType {
+    Disk,
+    Volume,
+    Legacy,
+}
 
-            let monitor = DiskMonitor::new();
-            let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+struct ParsedUuidSourcePath<'a> {
+    token_type: UuidTokenType,
+    uuid: &'a str,
+    sub_path: &'a str,
+}
 
-            let volume = volumes
-                .into_iter()
-                .find(|v| v.disk_uuid.as_deref() == Some(uuid_part))
-                .ok_or_else(|| {
-                    format!("Volume with UUID {} not found (not mounted?)", uuid_part)
-                })?;
+fn parse_uuid_source_path(path_str: &str) -> Option<ParsedUuidSourcePath<'_>> {
+    let token = if path_str.starts_with("[DISK_UUID:") {
+        Some(("[DISK_UUID:", UuidTokenType::Disk))
+    } else if path_str.starts_with("[VOLUME_UUID:") {
+        Some(("[VOLUME_UUID:", UuidTokenType::Volume))
+    } else if path_str.starts_with("[UUID:") {
+        Some(("[UUID:", UuidTokenType::Legacy))
+    } else {
+        None
+    }?;
 
-            let clean_sub_path = sub_path.trim_start_matches('/');
-            return Ok(volume.mount_point.join(clean_sub_path));
-        }
+    let (prefix, token_type) = token;
+    let end_idx = path_str.find(']')?;
+
+    Some(ParsedUuidSourcePath {
+        token_type,
+        uuid: &path_str[prefix.len()..end_idx],
+        sub_path: &path_str[end_idx + 1..],
+    })
+}
+
+fn has_uuid_source_prefix(path_str: &str) -> bool {
+    path_str.starts_with("[DISK_UUID:")
+        || path_str.starts_with("[VOLUME_UUID:")
+        || path_str.starts_with("[UUID:")
+}
+
+fn uuid_token_label(token_type: UuidTokenType) -> &'static str {
+    match token_type {
+        UuidTokenType::Disk => "DISK_UUID",
+        UuidTokenType::Volume => "VOLUME_UUID",
+        UuidTokenType::Legacy => "UUID",
     }
-    Ok(PathBuf::from(path_str))
+}
+
+fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
+    let Some(parsed) = parse_uuid_source_path(path_str) else {
+        return Ok(PathBuf::from(path_str));
+    };
+
+    let monitor = DiskMonitor::new();
+    let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
+
+    let volume = match parsed.token_type {
+        UuidTokenType::Disk => volumes
+            .iter()
+            .find(|v| v.disk_uuid.as_deref() == Some(parsed.uuid))
+            .cloned(),
+        UuidTokenType::Volume => volumes
+            .iter()
+            .find(|v| v.volume_uuid.as_deref() == Some(parsed.uuid))
+            .cloned(),
+        UuidTokenType::Legacy => volumes
+            .iter()
+            .find(|v| v.disk_uuid.as_deref() == Some(parsed.uuid))
+            .cloned()
+            .or_else(|| {
+                volumes
+                    .iter()
+                    .find(|v| v.volume_uuid.as_deref() == Some(parsed.uuid))
+                    .cloned()
+            }),
+    }
+    .ok_or_else(|| {
+        format!(
+            "Volume with {} {} not found (not mounted?)",
+            uuid_token_label(parsed.token_type),
+            parsed.uuid
+        )
+    })?;
+
+    let clean_sub_path = parsed.sub_path.trim_start_matches('/');
+    Ok(volume.mount_point.join(clean_sub_path))
 }
 
 fn resolve_runtime_exclude_patterns(
@@ -844,7 +909,7 @@ fn resolved_path_key(path: &str) -> Result<String, String> {
     match resolve_path_with_uuid(path) {
         Ok(resolved) => Ok(path_key_for_compare(&resolved)),
         Err(err) => {
-            if path.starts_with("[UUID:") {
+            if has_uuid_source_prefix(path) {
                 Ok(path_key_for_compare(&PathBuf::from(path)))
             } else {
                 Err(err)
