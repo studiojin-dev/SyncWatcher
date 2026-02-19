@@ -1,11 +1,13 @@
 use crate::sync_engine::types::{
-    DeleteOrphanFailure, DeleteOrphanResult, DryRunResult, FileDiff, FileDiffKind, FileMetadata,
-    OrphanFile, SyncOptions, SyncResult,
+    ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunResult, FileDiff,
+    FileDiffKind, FileMetadata, OrphanFile, SyncOptions, SyncResult,
+    TargetNewerConflictCandidate,
 };
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
@@ -20,6 +22,22 @@ pub struct SyncEngine {
 impl SyncEngine {
     pub fn new(source: PathBuf, target: PathBuf) -> Self {
         Self { source, target }
+    }
+
+    fn system_time_to_unix_ms(value: Option<SystemTime>) -> Option<i64> {
+        value.and_then(|time| {
+            time.duration_since(SystemTime::UNIX_EPOCH)
+                .ok()
+                .map(|duration| duration.as_millis() as i64)
+        })
+    }
+
+    fn snapshot_from_metadata(meta: &FileMetadata) -> ConflictFileSnapshot {
+        ConflictFileSnapshot {
+            size: meta.size,
+            modified_unix_ms: Self::system_time_to_unix_ms(Some(meta.modified)),
+            created_unix_ms: Self::system_time_to_unix_ms(meta.created),
+        }
     }
 
     async fn calculate_checksum(&self, path: &Path) -> Result<String> {
@@ -147,6 +165,7 @@ impl SyncEngine {
                     size: metadata.len(),
                     modified: metadata.modified()
                         .unwrap_or(std::time::SystemTime::UNIX_EPOCH), // Fallback if modified time unavailable
+                    created: metadata.created().ok(),
                     is_file: metadata.is_file(),
                 });
             }
@@ -156,7 +175,10 @@ impl SyncEngine {
         .await?
     }
 
-    pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
+    async fn compare_dirs_internal(
+        &self,
+        options: &SyncOptions,
+    ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)> {
         // 1. Canonicalize source to resolve symlinks and .. (TOCTOU protection)
         let source_canonical = tokio::fs::canonicalize(&self.source)
             .await
@@ -220,18 +242,38 @@ impl SyncEngine {
 
         let mut diffs = Vec::new();
         let mut bytes_to_copy = 0u64;
+        let mut target_newer_conflicts = Vec::new();
 
         for (path, source_meta) in &source_map {
             if let Some(target_meta) = target_map.get(path) {
                 if source_meta.is_file {
+                    if target_meta.modified > source_meta.modified {
+                        target_newer_conflicts.push(TargetNewerConflictCandidate {
+                            path: path.clone(),
+                            source_path: source_canonical.join(path),
+                            target_path: target_canonical
+                                .as_ref()
+                                .map(|target| target.join(path))
+                                .unwrap_or_else(|| self.target.join(path)),
+                            source: Self::snapshot_from_metadata(source_meta),
+                            target: Self::snapshot_from_metadata(target_meta),
+                        });
+                        continue;
+                    }
+
                     // 1. First check metadata (fastest)
                     let mut needs_copy = source_meta.size != target_meta.size
                         || source_meta.modified > target_meta.modified;
 
                     // 2. If metadata matches but checksum mode is on, check content (slower but accurate)
                     if !needs_copy && options.checksum_mode {
-                        let source_hash = self.calculate_checksum(&self.source.join(path)).await?;
-                        let target_hash = self.calculate_checksum(&self.target.join(path)).await?;
+                        let source_hash =
+                            self.calculate_checksum(&source_canonical.join(path)).await?;
+                        let target_hash = if let Some(target) = target_canonical.as_ref() {
+                            self.calculate_checksum(&target.join(path)).await?
+                        } else {
+                            self.calculate_checksum(&self.target.join(path)).await?
+                        };
 
                         if source_hash != target_hash {
                             needs_copy = true;
@@ -274,13 +316,29 @@ impl SyncEngine {
 
         let total_files = source_files.iter().filter(|f| f.is_file).count();
 
-        Ok(DryRunResult {
-            diffs,
-            total_files,
-            files_to_copy,
-            files_modified,
-            bytes_to_copy,
-        })
+        Ok((
+            DryRunResult {
+                diffs,
+                total_files,
+                files_to_copy,
+                files_modified,
+                bytes_to_copy,
+            },
+            target_newer_conflicts,
+        ))
+    }
+
+    pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
+        let (dry_run, _) = self.compare_dirs_internal(options).await?;
+        Ok(dry_run)
+    }
+
+    pub async fn target_newer_conflicts(
+        &self,
+        options: &SyncOptions,
+    ) -> Result<Vec<TargetNewerConflictCandidate>> {
+        let (_, conflicts) = self.compare_dirs_internal(options).await?;
+        Ok(conflicts)
     }
 
     pub async fn dry_run(&self, options: &SyncOptions) -> Result<DryRunResult> {
@@ -292,7 +350,7 @@ impl SyncEngine {
         options: &SyncOptions,
         progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
     ) -> Result<SyncResult> {
-        let dry_run = self.compare_dirs(options).await?;
+        let (dry_run, _) = self.compare_dirs_internal(options).await?;
 
         let mut result = SyncResult {
             files_copied: 0,
@@ -653,6 +711,47 @@ mod tests {
         let result = engine.sync_files(&options, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_target_newer_conflict_is_not_copied() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let relative = PathBuf::from("media/photo.jpg");
+        let source_file = source_dir.path().join(&relative);
+        let target_file = target_dir.path().join(&relative);
+        fs::create_dir_all(source_file.parent().unwrap()).await?;
+        fs::create_dir_all(target_file.parent().unwrap()).await?;
+
+        fs::write(&source_file, b"source-v1").await?;
+        fs::write(&target_file, b"target-v2").await?;
+
+        let source_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let target_time = source_time + std::time::Duration::from_secs(60);
+        filetime::set_file_mtime(&source_file, filetime::FileTime::from_system_time(source_time))?;
+        filetime::set_file_mtime(&target_file, filetime::FileTime::from_system_time(target_time))?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions::default();
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+
+        let conflicts = engine.target_newer_conflicts(&options).await?;
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].path, relative);
+
+        let sync_result = engine.sync_files(&options, |_| {}).await?;
+        assert_eq!(sync_result.files_copied, 0);
+
+        let target_content = fs::read(&target_file).await?;
+        assert_eq!(target_content, b"target-v2");
         Ok(())
     }
 

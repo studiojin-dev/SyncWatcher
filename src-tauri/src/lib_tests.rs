@@ -12,7 +12,7 @@ mod integration_tests {
         VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tokio::sync::{Mutex, Notify, RwLock};
@@ -63,6 +63,8 @@ mod integration_tests {
             runtime_sync_slot_released: Arc::new(Notify::new()),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
+            conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
+            conflict_review_seq: Arc::new(AtomicU64::new(0)),
         }
     }
 

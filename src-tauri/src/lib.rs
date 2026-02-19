@@ -13,15 +13,18 @@ mod lib_tests;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewWindow};
+use std::time::{Duration, Instant, SystemTime};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use sync_engine::{
-    types::{DeleteOrphanResult, OrphanFile, SyncResult},
+    types::{DeleteOrphanResult, OrphanFile, SyncResult, TargetNewerConflictCandidate},
     DryRunResult, SyncEngine, SyncOptions,
 };
 use system_integration::DiskMonitor;
@@ -153,6 +156,10 @@ pub struct AppState {
     runtime_initial_watch_bootstrapped: Arc<AtomicBool>,
     /// 런타임이 관리 중인 watcher source 추적 (task_id -> source)
     runtime_watch_sources: Arc<RwLock<HashMap<String, String>>>,
+    /// 타겟 최신 파일 충돌 검토 세션
+    conflict_review_sessions: Arc<RwLock<HashMap<String, ConflictReviewSession>>>,
+    /// 충돌 세션/랜덤 토큰 생성 시퀀스
+    conflict_review_seq: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -231,6 +238,166 @@ struct RuntimeSyncQueueStateEvent {
     task_id: String,
     queued: bool,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum ConflictSessionOrigin {
+    Manual,
+    Watch,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum ConflictItemStatus {
+    Pending,
+    ForceCopied,
+    SafeCopied,
+    Skipped,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictFileInfo {
+    size: u64,
+    modified_unix_ms: Option<i64>,
+    created_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TargetNewerConflictItem {
+    id: String,
+    relative_path: String,
+    source_path: String,
+    target_path: String,
+    source: ConflictFileInfo,
+    target: ConflictFileInfo,
+    status: ConflictItemStatus,
+    note: Option<String>,
+    resolved_at_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictReviewSession {
+    id: String,
+    task_id: String,
+    task_name: String,
+    source_root: String,
+    target_root: String,
+    origin: ConflictSessionOrigin,
+    created_at_unix_ms: i64,
+    items: Vec<TargetNewerConflictItem>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictSessionSummary {
+    id: String,
+    task_id: String,
+    task_name: String,
+    source_root: String,
+    target_root: String,
+    origin: ConflictSessionOrigin,
+    created_at_unix_ms: i64,
+    total_count: usize,
+    pending_count: usize,
+    resolved_count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictSessionDetail {
+    id: String,
+    task_id: String,
+    task_name: String,
+    source_root: String,
+    target_root: String,
+    origin: ConflictSessionOrigin,
+    created_at_unix_ms: i64,
+    total_count: usize,
+    pending_count: usize,
+    resolved_count: usize,
+    items: Vec<TargetNewerConflictItem>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictReviewQueueChangedEvent {
+    sessions: Vec<ConflictSessionSummary>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictReviewOpenSessionEvent {
+    session_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictReviewSessionUpdatedEvent {
+    session_id: String,
+    pending_count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ConflictResolutionAction {
+    ForceCopy,
+    RenameThenCopy,
+    Skip,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictResolutionRequest {
+    item_id: String,
+    action: ConflictResolutionAction,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictResolutionFailure {
+    item_id: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictResolutionResult {
+    session_id: String,
+    requested_count: usize,
+    processed_count: usize,
+    pending_count: usize,
+    failures: Vec<ConflictResolutionFailure>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseConflictReviewSessionResult {
+    closed: bool,
+    had_pending: bool,
+    skipped_count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncExecutionResult {
+    sync_result: SyncResult,
+    conflict_session_id: Option<String>,
+    conflict_count: usize,
+    has_pending_conflicts: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConflictPreviewPayload {
+    kind: String,
+    source_text: Option<String>,
+    target_text: Option<String>,
+    source_truncated: bool,
+    target_truncated: bool,
 }
 
 const RUNTIME_SYNC_MAX_CONCURRENCY: usize = 2;
@@ -385,6 +552,217 @@ fn emit_runtime_sync_queue_state(
         reason,
     };
     let _ = app.emit("runtime-sync-queue-state", &event);
+}
+
+fn unix_now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn system_time_to_unix_ms(value: SystemTime) -> Option<i64> {
+    value
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis() as i64)
+}
+
+fn conflict_file_info_changed(before: &ConflictFileInfo, current: &ConflictFileInfo) -> bool {
+    before.size != current.size
+        || before.modified_unix_ms != current.modified_unix_ms
+        || before.created_unix_ms != current.created_unix_ms
+}
+
+fn pending_conflict_count(items: &[TargetNewerConflictItem]) -> usize {
+    items
+        .iter()
+        .filter(|item| item.status == ConflictItemStatus::Pending)
+        .count()
+}
+
+fn to_conflict_summary(session: &ConflictReviewSession) -> ConflictSessionSummary {
+    let pending_count = pending_conflict_count(&session.items);
+    let total_count = session.items.len();
+    ConflictSessionSummary {
+        id: session.id.clone(),
+        task_id: session.task_id.clone(),
+        task_name: session.task_name.clone(),
+        source_root: session.source_root.clone(),
+        target_root: session.target_root.clone(),
+        origin: session.origin.clone(),
+        created_at_unix_ms: session.created_at_unix_ms,
+        total_count,
+        pending_count,
+        resolved_count: total_count.saturating_sub(pending_count),
+    }
+}
+
+fn to_conflict_detail(session: &ConflictReviewSession) -> ConflictSessionDetail {
+    let summary = to_conflict_summary(session);
+    ConflictSessionDetail {
+        id: summary.id,
+        task_id: summary.task_id,
+        task_name: summary.task_name,
+        source_root: summary.source_root,
+        target_root: summary.target_root,
+        origin: summary.origin,
+        created_at_unix_ms: summary.created_at_unix_ms,
+        total_count: summary.total_count,
+        pending_count: summary.pending_count,
+        resolved_count: summary.resolved_count,
+        items: session.items.clone(),
+    }
+}
+
+async fn list_conflict_session_summaries_internal(
+    state: &AppState,
+) -> Vec<ConflictSessionSummary> {
+    let sessions = state.conflict_review_sessions.read().await;
+    let mut summaries: Vec<ConflictSessionSummary> =
+        sessions.values().map(to_conflict_summary).collect();
+    summaries.sort_by(|a, b| b.created_at_unix_ms.cmp(&a.created_at_unix_ms));
+    summaries
+}
+
+async fn emit_conflict_review_queue_changed(app: &tauri::AppHandle, state: &AppState) {
+    let sessions = list_conflict_session_summaries_internal(state).await;
+    let _ = app.emit(
+        "conflict-review-queue-changed",
+        &ConflictReviewQueueChangedEvent { sessions },
+    );
+}
+
+fn conflict_file_info_from_candidate(
+    snapshot: &sync_engine::ConflictFileSnapshot,
+) -> ConflictFileInfo {
+    ConflictFileInfo {
+        size: snapshot.size,
+        modified_unix_ms: snapshot.modified_unix_ms,
+        created_unix_ms: snapshot.created_unix_ms,
+    }
+}
+
+fn build_conflict_item(
+    index: usize,
+    candidate: &TargetNewerConflictCandidate,
+) -> TargetNewerConflictItem {
+    TargetNewerConflictItem {
+        id: format!("item-{:06}", index),
+        relative_path: candidate.path.to_string_lossy().to_string(),
+        source_path: candidate.source_path.to_string_lossy().to_string(),
+        target_path: candidate.target_path.to_string_lossy().to_string(),
+        source: conflict_file_info_from_candidate(&candidate.source),
+        target: conflict_file_info_from_candidate(&candidate.target),
+        status: ConflictItemStatus::Pending,
+        note: None,
+        resolved_at_unix_ms: None,
+    }
+}
+
+fn session_id_for_task(task_id: &str, seq: u64) -> String {
+    let ts = unix_now_ms();
+    format!("conflict-{task_id}-{ts}-{seq}")
+}
+
+fn random_suffix_token(seed: u64) -> String {
+    const ALPHANUM: &[u8; 36] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut value = if seed == 0 { 1 } else { seed };
+    let mut out = [b'A'; 3];
+    for slot in &mut out {
+        let index = (value % 36) as usize;
+        *slot = ALPHANUM[index];
+        value /= 36;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+fn safe_copy_timestamp_label(modified_unix_ms: Option<i64>) -> String {
+    let dt = modified_unix_ms
+        .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+        .unwrap_or_else(chrono::Utc::now);
+    dt.format("%Y%m%d_%H%M%S").to_string()
+}
+
+async fn read_current_conflict_file_info(path: &Path) -> Result<ConflictFileInfo, String> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| format!("Failed to read file metadata '{}': {e}", path.display()))?;
+
+    Ok(ConflictFileInfo {
+        size: metadata.len(),
+        modified_unix_ms: metadata.modified().ok().and_then(system_time_to_unix_ms),
+        created_unix_ms: metadata.created().ok().and_then(system_time_to_unix_ms),
+    })
+}
+
+async fn copy_file_preserve(source: &Path, target: &Path) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Failed to create parent directory: {e}"))?;
+    }
+
+    tokio::fs::copy(source, target)
+        .await
+        .map_err(|e| format!("Failed to copy file: {e}"))?;
+
+    let meta = tokio::fs::metadata(source)
+        .await
+        .map_err(|e| format!("Failed to read source metadata: {e}"))?;
+    tokio::fs::set_permissions(target, meta.permissions())
+        .await
+        .map_err(|e| format!("Failed to preserve permissions: {e}"))?;
+
+    if let Ok(modified) = meta.modified() {
+        let _ = filetime::set_file_mtime(target, filetime::FileTime::from_system_time(modified));
+    }
+
+    Ok(())
+}
+
+fn preview_kind_for_path(path: &str) -> &'static str {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    let Some(ext) = ext else {
+        return "other";
+    };
+
+    let image_ext = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "heic"];
+    let video_ext = ["mp4", "mov", "m4v", "avi", "mkv", "webm"];
+    let text_ext = [
+        "txt", "md", "json", "yaml", "yml", "toml", "xml", "log", "rs", "ts", "tsx", "js",
+        "jsx", "css", "html", "csv", "ini",
+    ];
+    let document_ext = ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "pages", "numbers", "key"];
+
+    if image_ext.contains(&ext.as_str()) {
+        "image"
+    } else if video_ext.contains(&ext.as_str()) {
+        "video"
+    } else if text_ext.contains(&ext.as_str()) {
+        "text"
+    } else if document_ext.contains(&ext.as_str()) {
+        "document"
+    } else {
+        "other"
+    }
+}
+
+async fn read_text_preview(path: &str, max_bytes: usize) -> (Option<String>, bool) {
+    let Ok(file) = tokio::fs::File::open(path).await else {
+        return (None, false);
+    };
+    let mut reader = tokio::io::BufReader::new(file);
+    let mut buffer = vec![0u8; max_bytes.saturating_add(1)];
+    let Ok(read_count) = tokio::io::AsyncReadExt::read(&mut reader, &mut buffer).await else {
+        return (None, false);
+    };
+    let truncated = read_count > max_bytes;
+    let content = &buffer[..read_count.min(max_bytes)];
+    match std::str::from_utf8(content) {
+        Ok(text) => (Some(text.to_string()), truncated),
+        Err(_) => (None, false),
+    }
 }
 
 fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
@@ -776,8 +1154,100 @@ async fn runtime_get_state_internal(state: &AppState) -> RuntimeState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncOrigin {
+    Manual,
+    Watch,
+}
+
+async fn create_conflict_review_session(
+    task_id: &str,
+    task_name: &str,
+    source_root: &Path,
+    target_root: &Path,
+    candidates: &[TargetNewerConflictCandidate],
+    origin: SyncOrigin,
+    state: &AppState,
+    app: &tauri::AppHandle,
+) -> Option<String> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let seq = state.conflict_review_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let session_id = session_id_for_task(task_id, seq);
+    let items = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| build_conflict_item(index + 1, candidate))
+        .collect();
+
+    let session = ConflictReviewSession {
+        id: session_id.clone(),
+        task_id: task_id.to_string(),
+        task_name: task_name.to_string(),
+        source_root: source_root.to_string_lossy().to_string(),
+        target_root: target_root.to_string_lossy().to_string(),
+        origin: if origin == SyncOrigin::Watch {
+            ConflictSessionOrigin::Watch
+        } else {
+            ConflictSessionOrigin::Manual
+        },
+        created_at_unix_ms: unix_now_ms(),
+        items,
+    };
+
+    {
+        let mut sessions = state.conflict_review_sessions.write().await;
+        sessions.insert(session_id.clone(), session);
+    }
+
+    state.log_manager.log_with_category(
+        "warning",
+        &format!(
+            "Target newer conflicts detected: {} item(s). Session: {}",
+            candidates.len(),
+            session_id
+        ),
+        Some(task_id.to_string()),
+        LogCategory::Other,
+    );
+
+    emit_conflict_review_queue_changed(app, state).await;
+    Some(session_id)
+}
+
+async fn maybe_notify_conflict_for_watch(
+    app: &tauri::AppHandle,
+    task_name: &str,
+    conflict_count: usize,
+) {
+    let Some(main_window) = app.get_webview_window("main") else {
+        return;
+    };
+    let main_visible = main_window.is_visible().unwrap_or(true);
+    if main_visible {
+        return;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app
+            .notification()
+            .builder()
+            .title("SyncWatcher")
+            .body(&format!(
+                "Watch conflict detected in '{}': {} file(s) need review.",
+                task_name, conflict_count
+            ))
+            .show();
+    }
+}
+
 async fn execute_sync_internal(
     task_id: String,
+    task_name: String,
     source: PathBuf,
     target: PathBuf,
     checksum_mode: bool,
@@ -786,7 +1256,8 @@ async fn execute_sync_internal(
     app: tauri::AppHandle,
     state: AppState,
     sync_slot_pre_acquired: bool,
-) -> Result<SyncResult, String> {
+    sync_origin: SyncOrigin,
+) -> Result<SyncExecutionResult, String> {
     if !sync_slot_pre_acquired && !acquire_sync_slot(&task_id, &state).await {
         return Err("Task is already syncing".to_string());
     }
@@ -815,7 +1286,7 @@ async fn execute_sync_internal(
             LogCategory::SyncStarted,
         );
 
-        let engine = SyncEngine::new(source, target);
+        let engine = SyncEngine::new(source.clone(), target.clone());
         let options = SyncOptions {
             checksum_mode,
             preserve_permissions: true,
@@ -823,6 +1294,11 @@ async fn execute_sync_internal(
             verify_after_copy,
             exclude_patterns,
         };
+
+        let target_newer_conflicts = engine
+            .target_newer_conflicts(&options)
+            .await
+            .map_err(|e| format!("{:#}", e))?;
 
         // 동기화 실행 (취소 토큰과 함께)
         let task_id_clone = task_id.clone();
@@ -927,6 +1403,29 @@ async fn execute_sync_internal(
                     Some(task_id.clone()),
                     LogCategory::SyncCompleted,
                 );
+
+                let conflict_session_id = create_conflict_review_session(
+                    &task_id,
+                    &task_name,
+                    &source,
+                    &target,
+                    &target_newer_conflicts,
+                    sync_origin,
+                    &state,
+                    &app,
+                )
+                .await;
+                if conflict_session_id.is_some() && sync_origin == SyncOrigin::Watch {
+                    maybe_notify_conflict_for_watch(&app, &task_name, target_newer_conflicts.len())
+                        .await;
+                }
+
+                Ok(SyncExecutionResult {
+                    sync_result: res.clone(),
+                    conflict_session_id,
+                    conflict_count: target_newer_conflicts.len(),
+                    has_pending_conflicts: !target_newer_conflicts.is_empty(),
+                })
             }
             Err(e) => {
                 let msg = format!("Sync failed: {:#}", e);
@@ -936,10 +1435,9 @@ async fn execute_sync_internal(
                     Some(task_id.clone()),
                     LogCategory::SyncError,
                 );
+                Err(format!("{:#}", e))
             }
         }
-
-        result.map_err(|e| format!("{:#}", e))
     }
     .await;
 
@@ -989,6 +1487,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     let exclude_patterns = resolve_runtime_exclude_patterns(&task, &runtime_config.exclusion_sets);
     let result = execute_sync_internal(
         task.id.clone(),
+        task.name.clone(),
         PathBuf::from(task.source.clone()),
         PathBuf::from(task.target.clone()),
         task.checksum_mode,
@@ -997,18 +1496,28 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         app.clone(),
         state.clone(),
         true,
+        SyncOrigin::Watch,
     )
     .await;
 
-    if result.is_ok() && task.auto_unmount {
-        if let Ok(source_path) = resolve_path_with_uuid(&task.source) {
-            if let Err(err) = DiskMonitor::unmount_volume(&source_path) {
-                state.log_manager.log(
-                    "warning",
-                    &format!("Auto unmount failed: {}", err),
-                    Some(task.id.clone()),
-                );
+    if let Ok(exec_result) = &result {
+        if task.auto_unmount && !exec_result.has_pending_conflicts {
+            if let Ok(source_path) = resolve_path_with_uuid(&task.source) {
+                if let Err(err) = DiskMonitor::unmount_volume(&source_path) {
+                    state.log_manager.log(
+                        "warning",
+                        &format!("Auto unmount failed: {}", err),
+                        Some(task.id.clone()),
+                    );
+                }
             }
+        } else if task.auto_unmount && exec_result.has_pending_conflicts {
+            state.log_manager.log_with_category(
+                "warning",
+                "Auto unmount skipped because conflict review is pending",
+                Some(task.id.clone()),
+                LogCategory::Other,
+            );
         }
     }
 
@@ -1514,6 +2023,436 @@ async fn delete_orphan_files(
 }
 
 #[tauri::command]
+async fn list_conflict_review_sessions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ConflictSessionSummary>, String> {
+    Ok(list_conflict_session_summaries_internal(state.inner()).await)
+}
+
+#[tauri::command]
+async fn get_conflict_review_session(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ConflictSessionDetail, String> {
+    let sessions = state.conflict_review_sessions.read().await;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Conflict session not found: {session_id}"))?;
+    Ok(to_conflict_detail(session))
+}
+
+#[tauri::command]
+async fn open_conflict_review_window(
+    session_id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    {
+        let sessions = state.conflict_review_sessions.read().await;
+        if !sessions.contains_key(&session_id) {
+            return Err(format!("Conflict session not found: {session_id}"));
+        }
+    }
+
+    if let Some(window) = app.get_webview_window("conflict-review") {
+        let _ = window.emit(
+            "conflict-review-open-session",
+            ConflictReviewOpenSessionEvent {
+                session_id: session_id.clone(),
+            },
+        );
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let url = WebviewUrl::App(format!("index.html?view=conflict-review&sessionId={session_id}").into());
+    let window = WebviewWindowBuilder::new(&app, "conflict-review", url)
+        .title("SyncWatcher - Conflict Review")
+        .inner_size(1320.0, 900.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("Failed to open conflict review window: {e}"))?;
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+#[tauri::command]
+async fn resolve_conflict_items(
+    session_id: String,
+    resolutions: Vec<ConflictResolutionRequest>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ConflictResolutionResult, String> {
+    if resolutions.is_empty() {
+        let pending_count = {
+            let sessions = state.conflict_review_sessions.read().await;
+            let session = sessions
+                .get(&session_id)
+                .ok_or_else(|| format!("Conflict session not found: {session_id}"))?;
+            pending_conflict_count(&session.items)
+        };
+        return Ok(ConflictResolutionResult {
+            session_id,
+            requested_count: 0,
+            processed_count: 0,
+            pending_count,
+            failures: Vec::new(),
+        });
+    }
+
+    {
+        let sessions = state.conflict_review_sessions.read().await;
+        if !sessions.contains_key(&session_id) {
+            return Err(format!("Conflict session not found: {session_id}"));
+        }
+    }
+
+    let mut processed_count = 0usize;
+    let mut failures = Vec::new();
+
+    for request in &resolutions {
+        let item_snapshot = {
+            let sessions = state.conflict_review_sessions.read().await;
+            let Some(session) = sessions.get(&session_id) else {
+                break;
+            };
+            session
+                .items
+                .iter()
+                .find(|item| item.id == request.item_id)
+                .cloned()
+                .map(|item| (item, session.task_id.clone()))
+        };
+
+        let Some((item_snapshot, session_task_id)) = item_snapshot else {
+            failures.push(ConflictResolutionFailure {
+                item_id: request.item_id.clone(),
+                message: "Conflict item not found".to_string(),
+            });
+            continue;
+        };
+
+        if item_snapshot.status != ConflictItemStatus::Pending {
+            continue;
+        }
+
+        let source_path = PathBuf::from(&item_snapshot.source_path);
+        let target_path = PathBuf::from(&item_snapshot.target_path);
+
+        match (
+            read_current_conflict_file_info(&source_path).await,
+            read_current_conflict_file_info(&target_path).await,
+        ) {
+            (Ok(current_source), Ok(current_target)) => {
+                let source_changed = conflict_file_info_changed(&item_snapshot.source, &current_source);
+                let target_changed = conflict_file_info_changed(&item_snapshot.target, &current_target);
+                if source_changed || target_changed {
+                    state.log_manager.log_with_category(
+                        "warning",
+                        &format!(
+                            "Conflict item changed since detection: {} (source_changed={}, target_changed={})",
+                            item_snapshot.relative_path, source_changed, target_changed
+                        ),
+                        Some(session_task_id.clone()),
+                        LogCategory::Other,
+                    );
+                }
+            }
+            (Err(source_err), Err(target_err)) => {
+                state.log_manager.log_with_category(
+                    "warning",
+                    &format!(
+                        "Conflict preflight metadata check failed for source and target ({}): source_error='{}', target_error='{}'",
+                        item_snapshot.relative_path, source_err, target_err
+                    ),
+                    Some(session_task_id.clone()),
+                    LogCategory::Other,
+                );
+            }
+            (Err(source_err), _) => {
+                state.log_manager.log_with_category(
+                    "warning",
+                    &format!(
+                        "Conflict preflight metadata check failed for source ({}): {}",
+                        item_snapshot.relative_path, source_err
+                    ),
+                    Some(session_task_id.clone()),
+                    LogCategory::Other,
+                );
+            }
+            (_, Err(target_err)) => {
+                state.log_manager.log_with_category(
+                    "warning",
+                    &format!(
+                        "Conflict preflight metadata check failed for target ({}): {}",
+                        item_snapshot.relative_path, target_err
+                    ),
+                    Some(session_task_id.clone()),
+                    LogCategory::Other,
+                );
+            }
+        }
+
+        let apply_result: Result<(ConflictItemStatus, Option<String>), String> = match request.action {
+            ConflictResolutionAction::Skip => Ok((
+                ConflictItemStatus::Skipped,
+                Some("User chose to skip this conflict item.".to_string()),
+            )),
+            ConflictResolutionAction::ForceCopy => {
+                copy_file_preserve(&source_path, &target_path)
+                    .await
+                    .map(|_| {
+                        (
+                            ConflictItemStatus::ForceCopied,
+                            Some("Copied source file to target (force overwrite).".to_string()),
+                        )
+                    })
+            }
+            ConflictResolutionAction::RenameThenCopy => {
+                let source_path = source_path.clone();
+                let target_path = target_path.clone();
+                let parent = match target_path.parent() {
+                    Some(value) => value.to_path_buf(),
+                    None => {
+                        Err("Target file parent directory is invalid".to_string())?
+                    }
+                };
+                tokio::fs::create_dir_all(&parent)
+                    .await
+                    .map_err(|e| format!("Failed to ensure target parent directory: {e}"))?;
+
+                if tokio::fs::metadata(&target_path).await.is_err() {
+                    Err("Target file does not exist for safe copy rename".to_string())?;
+                }
+
+                let file_name = source_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("file");
+                let (stem, ext) = match file_name.rsplit_once('.') {
+                    Some((left, right)) if !left.is_empty() && !right.is_empty() => {
+                        (left.to_string(), Some(right.to_string()))
+                    }
+                    _ => (file_name.to_string(), None),
+                };
+                let timestamp = safe_copy_timestamp_label(item_snapshot.source.modified_unix_ms);
+
+                let mut renamed_to: Option<PathBuf> = None;
+                for attempt in 0..20u64 {
+                    let seq = state.conflict_review_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                    let seed = (unix_now_ms() as u64)
+                        .wrapping_add(seq)
+                        .wrapping_add(attempt);
+                    let suffix = random_suffix_token(seed);
+                    let backup_name = if let Some(ext) = ext.as_deref() {
+                        format!("{stem}_{timestamp}_{suffix}.{ext}")
+                    } else {
+                        format!("{stem}_{timestamp}_{suffix}")
+                    };
+                    let backup_path = parent.as_path().join(backup_name);
+                    if tokio::fs::metadata(&backup_path).await.is_ok() {
+                        continue;
+                    }
+
+                    tokio::fs::rename(&target_path, &backup_path)
+                        .await
+                        .map_err(|e| format!("Failed to rename target file: {e}"))?;
+                    renamed_to = Some(backup_path);
+                    break;
+                }
+
+                let renamed_to = match renamed_to {
+                    Some(value) => value,
+                    None => Err("Failed to generate non-conflicting backup file name".to_string())?,
+                };
+
+                copy_file_preserve(&source_path, &target_path)
+                    .await
+                    .map(|_| {
+                        (
+                            ConflictItemStatus::SafeCopied,
+                            Some(format!(
+                                "Renamed existing target to '{}' and copied source file.",
+                                renamed_to.to_string_lossy()
+                            )),
+                        )
+                    })
+                    .map_err(|e| {
+                        format!(
+                            "Target was renamed to '{}' but source copy failed: {}",
+                            renamed_to.to_string_lossy(),
+                            e
+                        )
+                    })
+            }
+        };
+
+        match apply_result {
+            Ok((next_status, note)) => {
+                processed_count += 1;
+                let mut sessions = state.conflict_review_sessions.write().await;
+                if let Some(session) = sessions.get_mut(&session_id) {
+                    if let Some(item) = session
+                        .items
+                        .iter_mut()
+                        .find(|item| item.id == request.item_id)
+                    {
+                        item.status = next_status;
+                        item.note = note;
+                        item.resolved_at_unix_ms = Some(unix_now_ms());
+                    }
+                }
+            }
+            Err(error) => {
+                failures.push(ConflictResolutionFailure {
+                    item_id: request.item_id.clone(),
+                    message: error.clone(),
+                });
+                let mut sessions = state.conflict_review_sessions.write().await;
+                if let Some(session) = sessions.get_mut(&session_id) {
+                    if let Some(item) = session
+                        .items
+                        .iter_mut()
+                        .find(|item| item.id == request.item_id)
+                    {
+                        item.note = Some(error);
+                    }
+                }
+            }
+        }
+    }
+
+    let pending_count = {
+        let sessions = state.conflict_review_sessions.read().await;
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Conflict session not found: {session_id}"))?;
+        pending_conflict_count(&session.items)
+    };
+
+    emit_conflict_review_queue_changed(&app, state.inner()).await;
+    let _ = app.emit(
+        "conflict-review-session-updated",
+        ConflictReviewSessionUpdatedEvent {
+            session_id: session_id.clone(),
+            pending_count,
+        },
+    );
+
+    Ok(ConflictResolutionResult {
+        session_id,
+        requested_count: resolutions.len(),
+        processed_count,
+        pending_count,
+        failures,
+    })
+}
+
+#[tauri::command]
+async fn close_conflict_review_session(
+    session_id: String,
+    force_skip_pending: bool,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<CloseConflictReviewSessionResult, String> {
+    let mut sessions = state.conflict_review_sessions.write().await;
+    let Some(session) = sessions.get_mut(&session_id) else {
+        return Err(format!("Conflict session not found: {session_id}"));
+    };
+
+    let had_pending = pending_conflict_count(&session.items) > 0;
+    if had_pending && !force_skip_pending {
+        return Ok(CloseConflictReviewSessionResult {
+            closed: false,
+            had_pending: true,
+            skipped_count: 0,
+        });
+    }
+
+    let mut skipped_count = 0usize;
+    if had_pending && force_skip_pending {
+        for item in &mut session.items {
+            if item.status == ConflictItemStatus::Pending {
+                item.status = ConflictItemStatus::Skipped;
+                item.note = Some("Skipped when session closed with pending items.".to_string());
+                item.resolved_at_unix_ms = Some(unix_now_ms());
+                skipped_count += 1;
+            }
+        }
+    }
+
+    sessions.remove(&session_id);
+    drop(sessions);
+
+    emit_conflict_review_queue_changed(&app, state.inner()).await;
+    let _ = app.emit(
+        "conflict-review-session-updated",
+        ConflictReviewSessionUpdatedEvent {
+            session_id,
+            pending_count: 0,
+        },
+    );
+
+    Ok(CloseConflictReviewSessionResult {
+        closed: true,
+        had_pending,
+        skipped_count,
+    })
+}
+
+#[tauri::command]
+async fn get_conflict_item_preview(
+    session_id: String,
+    item_id: String,
+    max_bytes: Option<usize>,
+    state: tauri::State<'_, AppState>,
+) -> Result<ConflictPreviewPayload, String> {
+    let (source_path, target_path) = {
+        let sessions = state.conflict_review_sessions.read().await;
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Conflict session not found: {session_id}"))?;
+        let item = session
+            .items
+            .iter()
+            .find(|entry| entry.id == item_id)
+            .ok_or_else(|| format!("Conflict item not found: {item_id}"))?;
+        (item.source_path.clone(), item.target_path.clone())
+    };
+
+    let max_bytes = max_bytes.unwrap_or(64 * 1024).clamp(1024, 512 * 1024);
+    let mut kind = preview_kind_for_path(&source_path).to_string();
+
+    let mut source_text = None;
+    let mut target_text = None;
+    let mut source_truncated = false;
+    let mut target_truncated = false;
+
+    if kind == "text" {
+        let (left, left_truncated) = read_text_preview(&source_path, max_bytes).await;
+        let (right, right_truncated) = read_text_preview(&target_path, max_bytes).await;
+        source_text = left;
+        target_text = right;
+        source_truncated = left_truncated;
+        target_truncated = right_truncated;
+        if source_text.is_none() || target_text.is_none() {
+            kind = "other".to_string();
+        }
+    }
+
+    Ok(ConflictPreviewPayload {
+        kind,
+        source_text,
+        target_text,
+        source_truncated,
+        target_truncated,
+    })
+}
+
+#[tauri::command]
 fn list_volumes() -> Result<Vec<system_integration::VolumeInfo>, String> {
     let monitor = DiskMonitor::new();
     monitor.list_volumes().map_err(|e| e.to_string())
@@ -1562,6 +2501,7 @@ async fn unmount_volume(path: PathBuf, state: tauri::State<'_, AppState>) -> Res
 #[tauri::command]
 async fn start_sync(
     task_id: String,
+    task_name: Option<String>,
     source: PathBuf,
     target: PathBuf,
     checksum_mode: bool,
@@ -1569,9 +2509,10 @@ async fn start_sync(
     exclude_patterns: Vec<String>,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-) -> Result<SyncResult, String> {
-    execute_sync_internal(
+) -> Result<SyncExecutionResult, String> {
+    let result = execute_sync_internal(
         task_id,
+        task_name.unwrap_or_else(|| "Manual Sync".to_string()),
         source,
         target,
         checksum_mode,
@@ -1580,8 +2521,11 @@ async fn start_sync(
         app,
         state.inner().clone(),
         false,
+        SyncOrigin::Manual,
     )
-    .await
+    .await?;
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2139,6 +3083,8 @@ pub fn run() {
             runtime_sync_slot_released: Arc::new(Notify::new()),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
+            conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
+            conflict_review_seq: Arc::new(AtomicU64::new(0)),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -2146,6 +3092,12 @@ pub fn run() {
             sync_dry_run,
             find_orphan_files,
             delete_orphan_files,
+            list_conflict_review_sessions,
+            get_conflict_review_session,
+            open_conflict_review_window,
+            resolve_conflict_items,
+            close_conflict_review_session,
+            get_conflict_item_preview,
             list_volumes,
             get_removable_volumes,
             resolve_path_by_uuid,

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { IconPlus, IconPlayerPlay, IconEye, IconFolder, IconList, IconPlayerStop, IconFlask, IconDisc, IconSearch } from '@tabler/icons-react';
 import { MultiSelect, Select } from '@mantine/core';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open, ask } from '@tauri-apps/plugin-dialog';
 import { SyncTask } from '../hooks/useSyncTasks';
 import { useSyncTasksContext } from '../context/SyncTasksContext';
@@ -16,9 +17,15 @@ import YamlEditorModal from '../components/ui/YamlEditorModal';
 import TaskLogsModal from '../components/features/TaskLogsModal';
 import OrphanFilesModal from '../components/features/OrphanFilesModal';
 import DryRunResultView from '../components/features/DryRunResultView';
+import ConflictSessionListPanel from '../components/features/ConflictSessionListPanel';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
 import { formatBytes } from '../utils/formatBytes';
-import type { DryRunResult } from '../types/syncEngine';
+import type {
+    ConflictReviewQueueChangedEvent,
+    ConflictSessionSummary,
+    DryRunResult,
+    SyncExecutionResult,
+} from '../types/syncEngine';
 
 /** Volume information from backend */
 interface VolumeInfo {
@@ -104,6 +111,20 @@ function SyncTasksView() {
 
     // Cancel confirmation state
     const [cancelConfirm, setCancelConfirm] = useState<{ type: 'sync' | 'dryRun'; taskId: string } | null>(null);
+    const [conflictSessions, setConflictSessions] = useState<ConflictSessionSummary[]>([]);
+    const [conflictSessionsLoading, setConflictSessionsLoading] = useState(false);
+
+    const loadConflictSessions = useCallback(async () => {
+        try {
+            setConflictSessionsLoading(true);
+            const sessions = await invoke<ConflictSessionSummary[]>('list_conflict_review_sessions');
+            setConflictSessions(sessions);
+        } catch (error) {
+            console.error('Failed to load conflict sessions:', error);
+        } finally {
+            setConflictSessionsLoading(false);
+        }
+    }, []);
 
     const formatVolumeSize = useCallback((volume: VolumeInfo): string => {
         if (typeof volume.total_bytes !== 'number') {
@@ -155,6 +176,25 @@ function SyncTasksView() {
             loadVolumes();
         }
     }, [showForm]);
+
+    useEffect(() => {
+        void loadConflictSessions();
+
+        const unlistenPromise = listen<ConflictReviewQueueChangedEvent>(
+            'conflict-review-queue-changed',
+            (event) => {
+                setConflictSessions(event.payload.sessions);
+            }
+        );
+
+        return () => {
+            void unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((error) => {
+                    console.warn('Failed to unlisten conflict-review-queue-changed', error);
+                });
+        };
+    }, [loadConflictSessions]);
 
     const browseDirectory = async (type: 'source' | 'target') => {
         try {
@@ -242,8 +282,9 @@ function SyncTasksView() {
             setSyncing(task.id);
             showToast(t('syncTasks.startSync') + ': ' + task.name, 'info');
 
-            await invoke('start_sync', {
+            const execution = await invoke<SyncExecutionResult>('start_sync', {
                 taskId: task.id,
+                taskName: task.name,
                 source: task.source,
                 target: task.target,
                 checksumMode: task.checksumMode,
@@ -251,17 +292,54 @@ function SyncTasksView() {
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
             });
 
-            showToast(t('sync.syncComplete'), 'success');
+            if (execution.hasPendingConflicts) {
+                showToast(
+                    t('conflict.detectedAfterSync', {
+                        count: execution.conflictCount,
+                        defaultValue: `동기화 완료. ${execution.conflictCount}개 항목은 타겟이 더 최신하여 검토가 필요합니다.`,
+                    }),
+                    'warning'
+                );
+                await loadConflictSessions();
+
+                if (execution.conflictSessionId) {
+                    const openNow = await ask(
+                        t('conflict.openNowPrompt', {
+                            defaultValue: '지금 검토 창을 열어 처리하시겠습니까?',
+                        }),
+                        {
+                            title: t('conflict.queueTitle', { defaultValue: '확인이 필요한 목록' }),
+                            kind: 'warning',
+                        }
+                    );
+                    if (openNow) {
+                        await invoke('open_conflict_review_window', {
+                            sessionId: execution.conflictSessionId,
+                        });
+                    }
+                }
+            } else {
+                showToast(t('sync.syncComplete'), 'success');
+            }
 
             // 동기화 성공 후 autoUnmount 처리
             if (task.autoUnmount) {
-                try {
-                    await invoke('unmount_volume', { path: task.source });
-                    showToast(t('syncTasks.unmountSuccess', { defaultValue: '볼륨이 안전하게 제거되었습니다.' }), 'success');
-                } catch (unmountErr) {
-                    console.error('Auto unmount failed:', unmountErr);
-                    // unmount 실패는 동기화 실패는 아니므로 경고만 표시
-                    showToast(t('syncTasks.unmountFailed', { defaultValue: '볼륨 제거 실패' }), 'warning');
+                if (execution.hasPendingConflicts) {
+                    showToast(
+                        t('conflict.autoUnmountSkipped', {
+                            defaultValue: '충돌 검토가 남아 있어 자동 unmount를 생략했습니다.',
+                        }),
+                        'warning'
+                    );
+                } else {
+                    try {
+                        await invoke('unmount_volume', { path: task.source });
+                        showToast(t('syncTasks.unmountSuccess', { defaultValue: '볼륨이 안전하게 제거되었습니다.' }), 'success');
+                    } catch (unmountErr) {
+                        console.error('Auto unmount failed:', unmountErr);
+                        // unmount 실패는 동기화 실패는 아니므로 경고만 표시
+                        showToast(t('syncTasks.unmountFailed', { defaultValue: '볼륨 제거 실패' }), 'warning');
+                    }
                 }
             }
         } catch (err) {
@@ -270,7 +348,7 @@ function SyncTasksView() {
         } finally {
             setSyncing(null);
         }
-    }, [syncing, showToast, t, getPatternsForSets]);
+    }, [getPatternsForSets, loadConflictSessions, showToast, syncing, t]);
 
     const handleToggleWatchMode = useCallback(async (task: SyncTask) => {
         if (watchTogglePendingIds.has(task.id)) {
@@ -388,6 +466,14 @@ function SyncTasksView() {
             setCancelConfirm(null);
         }
     };
+
+    const handleOpenConflictSession = useCallback(async (sessionId: string) => {
+        try {
+            await invoke('open_conflict_review_window', { sessionId });
+        } catch (error) {
+            showToast(getErrorMessage(error), 'error');
+        }
+    }, [showToast]);
 
     return (
         <div className="space-y-8">
@@ -712,6 +798,16 @@ function SyncTasksView() {
             {/* Task List */}
             {subView.kind === 'list' ? (
                 <div className="grid gap-6">
+                <ConflictSessionListPanel
+                    sessions={conflictSessions}
+                    loading={conflictSessionsLoading}
+                    onRefresh={() => {
+                        void loadConflictSessions();
+                    }}
+                    onOpenSession={(sessionId) => {
+                        void handleOpenConflictSession(sessionId);
+                    }}
+                />
                 {tasks.map((task, index) => (
                     <CardAnimation key={task.id} index={index}>
                         <div className="neo-box p-5 relative transition-opacity">

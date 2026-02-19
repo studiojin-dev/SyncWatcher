@@ -60,6 +60,22 @@ pub struct SyncResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConflictFileSnapshot {
+    pub size: u64,
+    pub modified_unix_ms: Option<i64>,
+    pub created_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetNewerConflictCandidate {
+    pub path: PathBuf,
+    pub source_path: PathBuf,
+    pub target_path: PathBuf,
+    pub source: ConflictFileSnapshot,
+    pub target: ConflictFileSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DryRunResult {
     pub diffs: Vec<FileDiff>,
     pub total_files: usize,
@@ -91,6 +107,7 @@ pub struct FileMetadata {
     pub path: PathBuf,
     pub size: u64,
     pub modified: std::time::SystemTime,
+    pub created: Option<std::time::SystemTime>,
     pub is_file: bool,
 }
 

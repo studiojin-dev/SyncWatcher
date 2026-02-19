@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -14,6 +15,7 @@ import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import UpdateChecker from './components/features/UpdateChecker';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
+import ConflictReviewWindow from './components/features/ConflictReviewWindow';
 // SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
 import SyncTasksView from './views/SyncTasksView';
 import type { RuntimeState } from './types/runtime';
@@ -25,6 +27,14 @@ const AboutView = lazy(() => import('./views/AboutView'));
 
 const BACKGROUND_INTRO_STORAGE_KEY = 'syncwatcher_bg_intro_shown';
 type CloseIntent = 'window-close' | 'tray-quit';
+
+function getCurrentWindowLabel(): string {
+  try {
+    return getCurrentWebviewWindow().label;
+  } catch {
+    return 'main';
+  }
+}
 
 /**
  * SyncWatcher App - Main application component
@@ -285,6 +295,20 @@ function AppContent() {
 }
 
 function App() {
+  const windowLabel = getCurrentWindowLabel();
+
+  if (windowLabel === 'conflict-review') {
+    return (
+      <ErrorBoundary>
+        <SettingsProvider>
+          <ToastProvider>
+            <ConflictReviewWindow />
+          </ToastProvider>
+        </SettingsProvider>
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <SettingsProvider>

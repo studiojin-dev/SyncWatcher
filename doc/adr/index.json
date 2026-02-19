@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260219-0005",
+    "title": "Target-newer conflict deferred review in dedicated window",
+    "tags": [
+      "sync-task",
+      "safety",
+      "conflict-review",
+      "watch-mode",
+      "ux",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-02-19",
+    "tldr": "When target files are newer than source, skip auto-copy and defer handling to an explicit review session in a separate conflict-review window.",
+    "path": "doc/adr/ADR-20260219-0005-target-newer-conflict-review-window.md"
+  },
+  {
     "id": "ADR-20260215-0004",
     "title": "Runtime watch-mode initial sync queue and concurrency limit",
     "tags": [
