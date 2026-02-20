@@ -101,11 +101,12 @@ jobs:
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ github.ref_name }}
           IS_PRERELEASE: ${{ needs.tag_gate.outputs.is_prerelease }}
         run: |
           if [[ "$IS_PRERELEASE" == "true" ]]; then
-            gh release edit "$TAG_NAME" --draft=false --prerelease=true
+            gh release edit "$TAG_NAME" --draft=false --prerelease
           else
-            gh release edit "$TAG_NAME" --draft=false --prerelease=false
+            gh release edit "$TAG_NAME" --draft=false
           fi
