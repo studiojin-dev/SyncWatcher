@@ -236,7 +236,8 @@
       "feedback": {
         "title": "Questions & Suggestions",
         "description": "Share questions or feature suggestions in GitHub Discussions.",
-        "linkText": "Open GitHub Discussions"
+        "linkText": "Questions/Suggestions (Discussions)",
+        "issueLinkText": "Report Bugs (Issues)"
       }
     },
     "about": {

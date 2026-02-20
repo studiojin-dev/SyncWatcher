@@ -239,7 +239,8 @@
       "feedback": {
         "title": "お問い合わせ・ご提案",
         "description": "ご質問や機能提案は GitHub Discussions に投稿してください。",
-        "linkText": "GitHub Discussions を開く"
+        "linkText": "質問・提案 (Discussions)",
+        "issueLinkText": "バグ報告 (Issues)"
       }
     },
     "about": {

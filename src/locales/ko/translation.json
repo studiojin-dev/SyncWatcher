@@ -239,7 +239,8 @@
       "feedback": {
         "title": "문의사항, 건의사항",
         "description": "사용 중 문의나 기능 제안은 GitHub Discussions에 남겨주세요.",
-        "linkText": "GitHub Discussions 열기"
+        "linkText": "문의/건의 (Discussions)",
+        "issueLinkText": "버그 신고 (Issues)"
       }
     },
     "about": {

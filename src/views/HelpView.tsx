@@ -109,15 +109,27 @@ function HelpView() {
             </p>
           </div>
 
-          <a
-            href="https://github.com/studiojin-dev/SyncWatcher/discussions"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 py-3 px-4 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
-          >
-            <IconBrandGithub size={20} />
-            <span>{t('help.feedback.linkText')}</span>
-          </a>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a
+              href="https://github.com/studiojin-dev/SyncWatcher/discussions"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 py-3 px-4 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+            >
+              <IconBrandGithub size={20} />
+              <span>{t('help.feedback.linkText')}</span>
+            </a>
+
+            <a
+              href="https://github.com/studiojin-dev/SyncWatcher/issues"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 py-3 px-4 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+            >
+              <IconBrandGithub size={20} />
+              <span>{t('help.feedback.issueLinkText')}</span>
+            </a>
+          </div>
         </div>
       </section>
     </div>

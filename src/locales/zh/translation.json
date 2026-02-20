@@ -239,7 +239,8 @@
       "feedback": {
         "title": "问题反馈与建议",
         "description": "欢迎在 GitHub Discussions 提交问题或功能建议。",
-        "linkText": "打开 GitHub Discussions"
+        "linkText": "问题/建议 (Discussions)",
+        "issueLinkText": "提交 Bug (Issues)"
       }
     },
     "about": {

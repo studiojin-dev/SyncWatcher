@@ -239,7 +239,8 @@
       "feedback": {
         "title": "Consultas y sugerencias",
         "description": "Comparte tus consultas o propuestas de mejora en GitHub Discussions.",
-        "linkText": "Abrir GitHub Discussions"
+        "linkText": "Consultas/Sugerencias (Discussions)",
+        "issueLinkText": "Reportar errores (Issues)"
       }
     },
     "about": {
