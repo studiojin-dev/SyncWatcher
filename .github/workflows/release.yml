@@ -9,28 +9,39 @@ jobs:
   tag_gate:
     runs-on: ubuntu-latest
     outputs:
-      is_stable: ${{ steps.check_tag.outputs.is_stable }}
+      is_release: ${{ steps.check_tag.outputs.is_release }}
+      is_prerelease: ${{ steps.check_tag.outputs.is_prerelease }}
+      release_channel: ${{ steps.check_tag.outputs.release_channel }}
     steps:
-      - name: Check stable tag pattern
+      - name: Classify release tag
         id: check_tag
         shell: bash
         run: |
           tag="${GITHUB_REF_NAME}"
           if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "release_channel=stable" >> "$GITHUB_OUTPUT"
             echo "Stable release tag detected: $tag"
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta(\.[0-9]+)?$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "release_channel=beta" >> "$GITHUB_OUTPUT"
+            echo "Beta pre-release tag detected: $tag"
           else
-            echo "is_stable=false" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "release_channel=skip" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Log skip reason for non-stable tag
-        if: steps.check_tag.outputs.is_stable == 'false'
+      - name: Log skip reason for non-release tag
+        if: steps.check_tag.outputs.is_release == 'false'
         run: |
-          echo "Skipping release job because tag is not stable semver: ${GITHUB_REF_NAME}"
+          echo "Skipping release job because tag is not release semver/beta: ${GITHUB_REF_NAME}"
 
   release:
     needs: tag_gate
-    if: needs.tag_gate.outputs.is_stable == 'true'
+    if: needs.tag_gate.outputs.is_release == 'true'
     permissions:
       contents: write
     strategy:
@@ -77,5 +88,5 @@ jobs:
           releaseName: "SyncWatcher ${{ github.ref_name }}"
           releaseBody: "See the assets to download this version and install."
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           args: ${{ matrix.args }}
