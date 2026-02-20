@@ -205,6 +205,54 @@
     },
     "help": {
       "title": "Ayuda y Documentación",
+      "safetyChecklist": {
+        "title": "Checklist de Seguridad Clave",
+        "description": "Revise estas restricciones antes de activar flujos de trabajo muy automatizados.",
+        "checksumCost": "El modo checksum calcula hashes completos cuando los metadatos coinciden, por lo que aumenta la carga de CPU y disco.",
+        "networkTargetSlow": "Si el destino es un volumen de red, las fases de checksum y verificación posterior pueden tardar mucho más.",
+        "deleteMissingRemoved": "La eliminación automática con `deleteMissing` fue retirada. Use el escaneo Orphan y confirme borrados manualmente.",
+        "targetNewerReview": "Cuando los archivos de destino son más nuevos que el origen, SyncWatcher no sobrescribe automáticamente y los envía a Conflict Review."
+      },
+      "sections": {
+        "syncBasics": {
+          "title": "Conceptos Básicos de Sync",
+          "description": "Comportamiento actual de sincronización manual y simulacro.",
+          "oneWay": "La dirección de sincronización es solo Source -> Target.",
+          "dryRunNoChanges": "Dry Run calcula candidatos de copia/actualización sin modificar archivos reales.",
+          "verifyAfterCopy": "La sincronización manual ejecuta verificación por checksum después de copiar por defecto.",
+          "exclusionScope": "Los patrones de exclusión se aplican a sync, dry-run y resultados del escaneo orphan."
+        },
+        "watchRuntime": {
+          "title": "Comportamiento Watch / Runtime",
+          "description": "Cómo se programa y ejecuta la sincronización disparada por watch.",
+          "debounce": "Los eventos watch se agrupan con debounce antes de iniciar sync para reducir ráfagas.",
+          "queuedState": "Las sincronizaciones disparadas por watch entran en una cola runtime y se muestran como QUEUED al esperar.",
+          "concurrencyLimit": "La sincronización runtime por watch se ejecuta con paralelismo máximo de 2 tareas.",
+          "initialQueue": "Cuando se aplica runtime por primera vez, las tareas con watch activo se encolan para una sincronización inicial."
+        },
+        "pathConflicts": {
+          "title": "Reglas de Conflicto de Rutas",
+          "description": "La validación runtime bloquea configuraciones de rutas inseguras.",
+          "withinTaskOverlap": "Dentro de una tarea, source y target no pueden solaparse (misma ruta o relación padre/hijo).",
+          "targetUniqueness": "Entre tareas, los targets deben ser únicos y no pueden ser padre/hijo entre sí.",
+          "watchLoopRisk": "Si un watch source se solapa con el target de otra tarea, la configuración se rechaza para evitar bucles."
+        },
+        "conflictOrphan": {
+          "title": "Flujo de Conflicto / Limpieza",
+          "description": "Cómo se manejan de forma segura los archivos más nuevos en destino y los archivos solo en destino.",
+          "targetNewerActions": "Conflict Review ofrece tres acciones explícitas: Force Copy, Rename then Copy (más seguro) y Do Nothing.",
+          "memorySession": "Las sesiones de conflicto viven en memoria y se reinician al reiniciar la app.",
+          "autoUnmountSkip": "Si hay conflictos pendientes, se omite el auto unmount hasta terminar la revisión.",
+          "orphanWorkflow": "La limpieza de archivos solo en destino usa Orphan scan -> seleccionar -> confirmar borrado. El borrado es irreversible."
+        },
+        "uuidSource": {
+          "title": "Modo de Origen por UUID",
+          "description": "Cómo se resuelven en runtime las rutas de origen basadas en UUID.",
+          "tokenResolve": "Tokens como [DISK_UUID:...] o [VOLUME_UUID:...] se resuelven a la ruta del volumen montado actualmente.",
+          "notMounted": "Si el UUID no está montado, falla la resolución de ruta y no puede iniciar sync/watch.",
+          "subPath": "Puede definir un sub path dentro del volumen montado para sincronizar solo parte del dispositivo."
+        }
+      },
       "syncEngine": {
         "title": "Motor de Sincronización",
         "description": "Potente sincronización unidireccional de archivos con verificación de checksum",

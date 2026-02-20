@@ -205,6 +205,54 @@
     },
     "help": {
       "title": "도움말 및 문서",
+      "safetyChecklist": {
+        "title": "핵심 안전 체크리스트",
+        "description": "자동화 중심 작업을 켜기 전에 아래 제약을 먼저 확인하세요.",
+        "checksumCost": "체크섬 모드는 메타데이터가 같을 때도 전체 파일 해시를 계산하므로 CPU/디스크 I/O 부하가 커질 수 있습니다.",
+        "networkTargetSlow": "대상이 네트워크 볼륨이면 체크섬 비교와 복사 후 검증 단계가 훨씬 오래 걸릴 수 있습니다.",
+        "deleteMissingRemoved": "`deleteMissing` 자동 삭제는 제거되었습니다. Orphan 검사에서 직접 확인 후 삭제하세요.",
+        "targetNewerReview": "타겟 파일이 소스보다 최신이면 자동 덮어쓰기를 하지 않고 충돌 검토 목록으로 보냅니다."
+      },
+      "sections": {
+        "syncBasics": {
+          "title": "동기화 기본 동작",
+          "description": "현재 수동 동기화와 모의 실행이 동작하는 방식입니다.",
+          "oneWay": "동기화 방향은 원본 -> 대상 단방향입니다.",
+          "dryRunNoChanges": "모의 실행은 복사/업데이트 후보를 계산하지만 실제 파일은 변경하지 않습니다.",
+          "verifyAfterCopy": "수동 동기화는 기본적으로 복사 후 체크섬 검증을 수행합니다.",
+          "exclusionScope": "제외 세트 패턴은 동기화, 모의 실행, Orphan 검사 결과에 함께 적용됩니다."
+        },
+        "watchRuntime": {
+          "title": "Watch / Runtime 동작",
+          "description": "감시 기반 동기화가 스케줄되고 실행되는 방식입니다.",
+          "debounce": "감시 이벤트는 이벤트 폭주를 줄이기 위해 디바운싱 후 동기화를 트리거합니다.",
+          "queuedState": "감시로 발생한 동기화는 런타임 큐에 들어가며 대기 중에는 QUEUED 상태로 표시됩니다.",
+          "concurrencyLimit": "런타임 감시 동기화는 최대 2개 작업까지 병렬 실행됩니다.",
+          "initialQueue": "런타임 설정이 처음 적용될 때 watch 활성 작업은 초기 동기화 대상으로 큐에 등록됩니다."
+        },
+        "pathConflicts": {
+          "title": "경로 충돌 규칙",
+          "description": "작업 저장 시 런타임 검증으로 위험한 경로 구성을 차단합니다.",
+          "withinTaskOverlap": "단일 작업 안에서 원본/대상 경로는 겹칠 수 없습니다(동일 경로 또는 상위/하위).",
+          "targetUniqueness": "여러 작업 간 대상 경로는 서로 겹치거나 상위/하위 관계가 될 수 없습니다.",
+          "watchLoopRisk": "watch 원본이 다른 작업 대상과 겹치면 sync loop 위험 때문에 구성이 거부됩니다."
+        },
+        "conflictOrphan": {
+          "title": "충돌 / 정리 워크플로우",
+          "description": "타겟 최신 파일과 대상 전용 파일을 안전하게 처리하는 흐름입니다.",
+          "targetNewerActions": "충돌 검토에서 강제 복사, 이름 변경 후 복사(권장), 이번 실행 건너뛰기 중 선택합니다.",
+          "memorySession": "충돌 세션은 메모리 기반이며 앱을 재시작하면 초기화됩니다.",
+          "autoUnmountSkip": "미해결 충돌이 남아 있으면 자동 unmount를 건너뜁니다.",
+          "orphanWorkflow": "대상 전용 파일 정리는 Orphan 검사 -> 선택 -> 삭제 확인 순서로 진행되며 삭제는 되돌릴 수 없습니다."
+        },
+        "uuidSource": {
+          "title": "UUID 소스 모드",
+          "description": "UUID 기반 원본 경로를 런타임에서 해석하는 방식입니다.",
+          "tokenResolve": "[DISK_UUID:...], [VOLUME_UUID:...] 토큰은 현재 마운트된 볼륨 경로로 해석됩니다.",
+          "notMounted": "해당 UUID가 마운트되어 있지 않으면 경로 해석에 실패해 동기화/감시를 시작할 수 없습니다.",
+          "subPath": "마운트된 볼륨 내부 하위 경로를 지정해 장치의 일부만 동기화할 수 있습니다."
+        }
+      },
       "syncEngine": {
         "title": "동기화 엔진",
         "description": "체크섬 검증을 포함한 강력한 단방향 파일 동기화",

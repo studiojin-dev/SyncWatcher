@@ -205,6 +205,54 @@
     },
     "help": {
       "title": "帮助与文档",
+      "safetyChecklist": {
+        "title": "核心安全检查清单",
+        "description": "启用高自动化工作流前，请先确认以下限制。",
+        "checksumCost": "在元数据一致时，校验和模式仍会计算整文件哈希，会增加 CPU 与磁盘 I/O 开销。",
+        "networkTargetSlow": "如果目标是网络卷，校验和比较和复制后验证可能明显更慢。",
+        "deleteMissingRemoved": "`deleteMissing` 自动删除已移除。请通过 Orphan 扫描手动确认后再删除。",
+        "targetNewerReview": "当目标文件比源文件更新时，SyncWatcher 不会自动覆盖，而是进入冲突审查队列。"
+      },
+      "sections": {
+        "syncBasics": {
+          "title": "同步基础行为",
+          "description": "当前手动同步和模拟运行的实际行为。",
+          "oneWay": "同步方向仅支持 Source -> Target。",
+          "dryRunNoChanges": "模拟运行只计算复制/更新候选项，不会修改实际文件。",
+          "verifyAfterCopy": "手动同步默认启用复制后的校验和验证。",
+          "exclusionScope": "排除集模式会应用到同步、模拟运行和 Orphan 扫描结果。"
+        },
+        "watchRuntime": {
+          "title": "Watch / Runtime 行为",
+          "description": "说明监控触发同步如何调度与执行。",
+          "debounce": "监控事件会先经过去抖（debounce），再触发同步，以降低事件风暴影响。",
+          "queuedState": "由监控触发的同步会进入运行时队列，等待时显示为 QUEUED。",
+          "concurrencyLimit": "运行时监控同步最大并发为 2 个任务。",
+          "initialQueue": "首次应用运行时配置时，已启用 watch 的任务会先入队执行一次初始同步。"
+        },
+        "pathConflicts": {
+          "title": "路径冲突规则",
+          "description": "保存任务时会进行运行时校验并阻止不安全路径组合。",
+          "withinTaskOverlap": "单个任务内 source 与 target 不能重叠（同一路径或父子关系）。",
+          "targetUniqueness": "多个任务之间 target 必须唯一，且不能是父子关系。",
+          "watchLoopRisk": "若某个 watch source 与其他任务 target 重叠，将拒绝该配置以避免同步循环。"
+        },
+        "conflictOrphan": {
+          "title": "冲突 / 清理工作流",
+          "description": "安全处理“目标更新更晚”和“仅目标存在”文件的流程。",
+          "targetNewerActions": "在 Conflict Review 中可选择三种动作：Force Copy、Rename then Copy（更安全）、Do Nothing。",
+          "memorySession": "冲突会话仅保存在内存中，重启应用后会清空。",
+          "autoUnmountSkip": "若仍有待处理冲突，会跳过自动 unmount。",
+          "orphanWorkflow": "清理仅目标存在文件需要 Orphan 扫描 -> 选择 -> 删除确认，删除不可恢复。"
+        },
+        "uuidSource": {
+          "title": "UUID 源模式",
+          "description": "UUID 源路径在运行时的解析方式。",
+          "tokenResolve": "如 [DISK_UUID:...] 或 [VOLUME_UUID:...] 的 source token 会解析到当前已挂载卷路径。",
+          "notMounted": "若对应 UUID 未挂载，路径解析会失败，无法启动同步/监控。",
+          "subPath": "可指定挂载卷内的子路径，仅同步设备中的部分目录。"
+        }
+      },
       "syncEngine": {
         "title": "同步引擎",
         "description": "具有校验和验证功能的强大单向文件同步",

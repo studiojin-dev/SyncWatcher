@@ -7,7 +7,7 @@ import { LicenseCard, LicenseData } from '../components/ui/LicenseCard';
 function AboutView() {
   const { t } = useTranslation();
   const [showLicenses, setShowLicenses] = useState(false);
-  const [appVersion, setAppVersion] = useState('0.9.0');
+  const [appVersion, setAppVersion] = useState('0.9.1-beta');
   const [licenseData, setLicenseData] = useState<LicenseData[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
 

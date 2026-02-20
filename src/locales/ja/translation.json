@@ -205,6 +205,54 @@
     },
     "help": {
       "title": "ヘルプとドキュメント",
+      "safetyChecklist": {
+        "title": "重要な安全チェックリスト",
+        "description": "自動化中心の運用を有効にする前に、次の制約を確認してください。",
+        "checksumCost": "チェックサムモードは、メタデータが一致する場合でもファイル全体のハッシュを計算するため、CPU/ディスクI/O負荷が増えます。",
+        "networkTargetSlow": "転送先がネットワークボリュームの場合、チェックサム比較とコピー後検証により時間が大きく延びることがあります。",
+        "deleteMissingRemoved": "`deleteMissing` の自動削除は廃止されました。Orphan スキャンで確認してから手動削除してください。",
+        "targetNewerReview": "転送先ファイルが転送元より新しい場合は自動上書きせず、Conflict Review に送られます。"
+      },
+      "sections": {
+        "syncBasics": {
+          "title": "同期の基本動作",
+          "description": "現在の手動同期とドライランの挙動です。",
+          "oneWay": "同期方向は Source -> Target の一方向のみです。",
+          "dryRunNoChanges": "ドライランはコピー/更新候補を計算しますが、実ファイルは変更しません。",
+          "verifyAfterCopy": "手動同期では、デフォルトでコピー後のチェックサム検証を実行します。",
+          "exclusionScope": "除外セットのパターンは、同期・ドライラン・Orphan スキャンの結果に適用されます。"
+        },
+        "watchRuntime": {
+          "title": "Watch / Runtime 動作",
+          "description": "監視トリガー同期がどのように実行されるかを説明します。",
+          "debounce": "監視イベントはイベント集中を抑えるため、デバウンス後に同期を開始します。",
+          "queuedState": "監視起点の同期はランタイムキューに入り、待機中は QUEUED と表示されます。",
+          "concurrencyLimit": "ランタイム監視同期は最大2タスクまで並列実行されます。",
+          "initialQueue": "ランタイム設定が最初に適用されたとき、watch 有効タスクは初期同期としてキューに登録されます。"
+        },
+        "pathConflicts": {
+          "title": "パス競合ルール",
+          "description": "タスク保存時にランタイム検証で危険なパス構成を拒否します。",
+          "withinTaskOverlap": "1つのタスク内で source/target の重複は不可です（同一、親子関係を含む）。",
+          "targetUniqueness": "複数タスク間で target は重複不可で、親子関係にもできません。",
+          "watchLoopRisk": "watch source が他タスクの target と重なる構成は、同期ループ防止のため拒否されます。"
+        },
+        "conflictOrphan": {
+          "title": "競合 / クリーンアップ手順",
+          "description": "新しい target ファイルと target 専用ファイルを安全に処理するフローです。",
+          "targetNewerActions": "Conflict Review では、Force Copy / Rename then Copy（推奨）/ Do Nothing の3つを選択できます。",
+          "memorySession": "競合セッションはメモリ上のみで、アプリ再起動時にリセットされます。",
+          "autoUnmountSkip": "未解決の競合がある場合、auto unmount はスキップされます。",
+          "orphanWorkflow": "target 専用ファイルの整理は Orphan スキャン -> 選択 -> 削除確認で行い、削除は元に戻せません。"
+        },
+        "uuidSource": {
+          "title": "UUID ソースモード",
+          "description": "UUID ベースの source パスをランタイムで解決する方法です。",
+          "tokenResolve": "[DISK_UUID:...] / [VOLUME_UUID:...] のトークンは、現在マウント中のボリュームパスに解決されます。",
+          "notMounted": "指定UUIDが未マウントの場合、パス解決に失敗し、同期/監視を開始できません。",
+          "subPath": "マウント済みボリューム内のサブパスを指定し、デバイスの一部だけを同期できます。"
+        }
+      },
       "syncEngine": {
         "title": "同期エンジン",
         "description": "チェックサム検証を備えた強力な一方向ファイル同期",

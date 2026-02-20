@@ -202,6 +202,54 @@
     },
     "help": {
       "title": "Help & Documentation",
+      "safetyChecklist": {
+        "title": "Core Safety Checklist",
+        "description": "Review these constraints before enabling automation-heavy workflows.",
+        "checksumCost": "Checksum mode computes full-file hashes when metadata matches, which increases CPU and disk I/O.",
+        "networkTargetSlow": "If the target is a network volume, checksum and verify phases can take significantly longer.",
+        "deleteMissingRemoved": "`deleteMissing` automatic target deletion was removed. Use Orphan scan and confirm deletions manually.",
+        "targetNewerReview": "When target files are newer than source, SyncWatcher does not overwrite automatically and sends them to Conflict Review."
+      },
+      "sections": {
+        "syncBasics": {
+          "title": "Sync Basics",
+          "description": "Current behavior for manual sync and dry-run.",
+          "oneWay": "Sync direction is Source -> Target only.",
+          "dryRunNoChanges": "Dry Run calculates copy/update candidates without changing files.",
+          "verifyAfterCopy": "Manual sync runs with post-copy checksum verification enabled by default.",
+          "exclusionScope": "Exclusion set patterns are applied to sync, dry-run, and orphan scan results."
+        },
+        "watchRuntime": {
+          "title": "Watch / Runtime Behavior",
+          "description": "How watch-triggered sync is scheduled and executed.",
+          "debounce": "Watch events are debounced before sync is triggered to reduce event storms.",
+          "queuedState": "Watch-triggered syncs enter a runtime queue and appear as QUEUED while waiting.",
+          "concurrencyLimit": "Runtime watch sync executes with max parallelism of 2 tasks.",
+          "initialQueue": "When runtime config is first applied, watch-enabled tasks are queued for an initial sync."
+        },
+        "pathConflicts": {
+          "title": "Path Conflict Rules",
+          "description": "Task sets are validated and unsafe path layouts are blocked.",
+          "withinTaskOverlap": "Within one task, source and target cannot overlap (same path or parent/child).",
+          "targetUniqueness": "Across tasks, targets must be unique and cannot be parent/child of each other.",
+          "watchLoopRisk": "If a watch source overlaps another task target, the config is rejected to prevent sync loops."
+        },
+        "conflictOrphan": {
+          "title": "Conflict / Cleanup Workflow",
+          "description": "How newer target files and target-only files are handled safely.",
+          "targetNewerActions": "Conflict Review provides three explicit actions: Force Copy, Rename then Copy (safer), and Do Nothing.",
+          "memorySession": "Conflict sessions are in-memory and reset when the app restarts.",
+          "autoUnmountSkip": "If pending conflicts exist, auto unmount is skipped until review is finished.",
+          "orphanWorkflow": "Target-only cleanup uses Orphan scan -> select -> confirm delete. Deletion is irreversible."
+        },
+        "uuidSource": {
+          "title": "UUID Source Mode",
+          "description": "How UUID-based source paths are resolved at runtime.",
+          "tokenResolve": "Source tokens like [DISK_UUID:...] or [VOLUME_UUID:...] resolve to the currently mounted volume path.",
+          "notMounted": "If the UUID is not mounted, path resolution fails and sync/watch cannot start.",
+          "subPath": "You can set a sub path inside the mounted volume to sync only part of the device."
+        }
+      },
       "syncEngine": {
         "title": "Sync Engine",
         "description": "Powerful one-way file synchronization with checksum verification",
