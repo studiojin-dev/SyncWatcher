@@ -87,6 +87,25 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "SyncWatcher ${{ github.ref_name }}"
           releaseBody: "See the assets to download this version and install."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           args: ${{ matrix.args }}
+
+  publish_release:
+    needs: [tag_gate, release]
+    if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          IS_PRERELEASE: ${{ needs.tag_gate.outputs.is_prerelease }}
+        run: |
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            gh release edit "$TAG_NAME" --draft=false --prerelease=true
+          else
+            gh release edit "$TAG_NAME" --draft=false --prerelease=false
+          fi
