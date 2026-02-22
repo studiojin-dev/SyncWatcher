@@ -163,7 +163,7 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                 </div>
 
                 <div className="neo-box p-2 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest border-2 border-[var(--border-main)] relative overflow-hidden group">
-                    <span className="relative z-10">v{import.meta.env.PACKAGE_VERSION || '0.9.1-beta'}</span>
+                    <span className="relative z-10">v{import.meta.env.PACKAGE_VERSION || '0.9.3-beta'}</span>
                     <div className="absolute inset-0 bg-[var(--accent-warning)] translate-y-full group-hover:translate-y-0 transition-transform duration-200" />
                 </div>
             </div>
