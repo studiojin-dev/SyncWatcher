@@ -301,6 +301,13 @@
       "unregistered": "未注册版本",
       "registered": "已注册版本",
       "thankYou": "感谢您的购买！",
+      "supportTitle": "再请我一角披萨吗？",
+      "supportHint": "仅仅购买许可证就已经让我感动了。要是还想继续赞助，开发者会一边鞠躬一边偷笑。",
+      "supportButton": "再赞助一口",
+      "supportModalTitle": "感恩鞠躬模式 ON",
+      "supportModalMessage": "非常感谢您购买许可证。即便如此您还愿意继续赞助的话，开发者会抱着披萨盒连鞠108次躬。可以的话就点下面链接吧！",
+      "supportModalConfirm": "我要去赞助",
+      "supportModalCancel": "今天先忍住",
       "purchaseLicense": "购买许可证",
       "licenseType": "Polyform NC 1.0.0"
     },

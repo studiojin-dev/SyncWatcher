@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useSettings } from '../../hooks/useSettings';
 import LicenseActivation from '../features/LicenseActivation';
+import PizzaBiteAnimation from '../ui/PizzaBiteAnimation';
 import {
     IconDashboard,
     IconRefresh,
@@ -43,6 +45,7 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const { settings } = useSettings();
     const isRegistered = settings.isRegistered;
     const [showLicenseModal, setShowLicenseModal] = useState(false);
+    const [showSupportModal, setShowSupportModal] = useState(false);
 
     return (
         <aside className="flex flex-col h-full bg-[var(--bg-primary)] border-r-4 border-[var(--border-main)] overflow-hidden">
@@ -131,20 +134,30 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                             </button>
                         </div>
                     ) : (
-                        <div className="flex flex-col gap-1.5 p-3 bg-[var(--bg-tertiary)] border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] overflow-hidden relative group">
-                            <div className="flex items-center justify-between relative z-10">
+                        <div className="flex flex-col gap-2.5 p-3 bg-[var(--bg-tertiary)] border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] overflow-hidden">
+                            <div className="flex items-center justify-between">
                                 <span className="text-[10px] font-black uppercase tracking-wider text-[var(--accent-success)]">
                                     {t('about.registered')}
                                 </span>
                                 <div className="w-2 h-2 rounded-full bg-[var(--accent-success)]" />
                             </div>
-                            <p className="text-[9px] font-bold text-[var(--text-secondary)] italic relative z-10">
-                                {t('about.thankYou')}
-                            </p>
-                            {/* Subtle Success Pattern */}
-                            <div className="absolute -right-2 -bottom-2 text-4xl opacity-5 transform rotate-12 group-hover:scale-110 transition-transform">
-                                ✨
+                            <div className="flex items-center gap-3 border-2 border-[var(--border-main)] bg-[var(--bg-primary)] px-2 py-1.5">
+                                <PizzaBiteAnimation className="shrink-0" />
+                                <div className="min-w-0">
+                                    <p className="text-[10px] font-black uppercase tracking-wider text-[var(--text-primary)]">
+                                        {t('about.supportTitle')}
+                                    </p>
+                                    <p className="mt-1 text-[9px] font-bold italic leading-relaxed text-[var(--text-secondary)]">
+                                        {t('about.supportHint')}
+                                    </p>
+                                </div>
                             </div>
+                            <button
+                                onClick={() => setShowSupportModal(true)}
+                                className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
+                            >
+                                {t('about.supportButton')}
+                            </button>
                         </div>
                     )}
                 </div>
@@ -158,6 +171,62 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                 open={showLicenseModal}
                 onClose={() => setShowLicenseModal(false)}
             />
+            {showSupportModal && createPortal(
+                <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4"
+                    data-testid="support-modal-overlay"
+                    onClick={() => setShowSupportModal(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="support-modal-title"
+                        className="w-full max-w-md border-4 border-[var(--border-main)] bg-[var(--bg-primary)] shadow-[8px_8px_0_0_var(--shadow-color)]"
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between border-b-4 border-[var(--border-main)] bg-[var(--accent-warning)] px-5 py-3">
+                            <h2
+                                id="support-modal-title"
+                                className="text-sm font-black uppercase tracking-wider text-black"
+                            >
+                                {t('about.supportModalTitle')}
+                            </h2>
+                            <button
+                                onClick={() => setShowSupportModal(false)}
+                                aria-label={t('common.close')}
+                                className="text-black text-lg font-black hover:opacity-70 transition-opacity"
+                            >
+                                ✕
+                            </button>
+                        </div>
+
+                        <div className="space-y-4 p-5">
+                            <p className="text-xs leading-relaxed font-bold text-[var(--text-primary)]">
+                                {t('about.supportModalMessage')}
+                            </p>
+                        </div>
+
+                        <div className="flex justify-end gap-3 border-t-2 border-[var(--border-main)] bg-[var(--bg-secondary)] px-5 py-3">
+                            <button
+                                onClick={() => setShowSupportModal(false)}
+                                className="border-2 border-[var(--border-main)] px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[var(--bg-tertiary)] transition-colors"
+                            >
+                                {t('about.supportModalCancel')}
+                            </button>
+                            <a
+                                href="https://buymeacoffee.com/studiojin_dev"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => setShowSupportModal(false)}
+                                className="inline-flex items-center justify-center border-2 border-[var(--border-main)] bg-black px-4 py-2 text-xs font-bold uppercase tracking-wider text-[var(--accent-warning)] shadow-[3px_3px_0_0_var(--shadow-color)] hover:opacity-90 transition-all"
+                            >
+                                {t('about.supportModalConfirm')}
+                            </a>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
         </aside>
     );
 }

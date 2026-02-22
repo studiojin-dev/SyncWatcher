@@ -1,0 +1,55 @@
+.pizzaBiteAnimation {
+    position: relative;
+    width: 62px;
+    height: 62px;
+    flex-shrink: 0;
+}
+
+.pizzaBiteFrame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    animation: pizzaBiteCycle 2s linear infinite;
+}
+
+.pizzaBiteFrame1 {
+    animation-delay: 0s;
+}
+
+.pizzaBiteFrame2 {
+    animation-delay: 0.5s;
+}
+
+.pizzaBiteFrame3 {
+    animation-delay: 1s;
+}
+
+.pizzaBiteFrame4 {
+    animation-delay: 1.5s;
+}
+
+@keyframes pizzaBiteCycle {
+
+    0%,
+    20% {
+        opacity: 1;
+    }
+
+    24%,
+    100% {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pizzaBiteFrame {
+        animation: none;
+        opacity: 0;
+    }
+
+    .pizzaBiteFrame1 {
+        opacity: 1;
+    }
+}

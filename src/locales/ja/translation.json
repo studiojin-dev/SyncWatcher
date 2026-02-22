@@ -301,6 +301,13 @@
       "unregistered": "未登録バージョン",
       "registered": "登録済みバージョン",
       "thankYou": "ご購入ありがとうございます！",
+      "supportTitle": "ピザ一切れ分、いけますか？",
+      "supportHint": "ライセンス購入だけでも大感謝です。さらに応援いただけたら、開発者は土下座しながら小躍りします。",
+      "supportButton": "もう一切れ応援する",
+      "supportModalTitle": "全力感謝モード ON",
+      "supportModalMessage": "ライセンスをご購入いただき、本当にありがとうございます。それでもさらに応援していただけるなら、開発者はピザ箱を抱えて108回お辞儀します。よろしければリンクからお願いします！",
+      "supportModalConfirm": "応援しに行く",
+      "supportModalCancel": "今日は見送る",
       "purchaseLicense": "ライセンスを購入",
       "licenseType": "Polyform NC 1.0.0"
     },

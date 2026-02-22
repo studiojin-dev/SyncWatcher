@@ -301,6 +301,13 @@
       "unregistered": "Versión no registrada",
       "registered": "Versión registrada",
       "thankYou": "¡Gracias por su compra!",
+      "supportTitle": "¿Otra rebanada de pizza?",
+      "supportHint": "Con tu licencia ya me hiciste el día. Si quieres apoyar aún más, el desarrollador hará reverencias con una sonrisa traviesa.",
+      "supportButton": "Patrocinar otra rebanada",
+      "supportModalTitle": "Modo Gratitud Extrema",
+      "supportModalMessage": "Muchas gracias por comprar la licencia. Con eso ya ayudas muchísimo. Si aun así quieres apoyar más, el desarrollador aceptará haciendo 108 reverencias con una caja de pizza en brazos.",
+      "supportModalConfirm": "Sí, voy a apoyar",
+      "supportModalCancel": "Hoy paso",
       "purchaseLicense": "Comprar licencia",
       "licenseType": "Polyform NC 1.0.0"
     },

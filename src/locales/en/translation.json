@@ -298,6 +298,13 @@
       "unregistered": "Unregistered",
       "registered": "Registered",
       "thankYou": "Thank you for your purchase!",
+      "supportTitle": "One more pizza bite?",
+      "supportHint": "Your license already made my day. If you still want to fuel development, I am bowing dramatically.",
+      "supportButton": "Sponsor Another Slice",
+      "supportModalTitle": "Maximum Gratitude Mode",
+      "supportModalMessage": "Thank you for purchasing a license. Seriously, that already keeps this project alive. If you still want to support more, I will accept it while bowing respectfully and grinning like a goblin.",
+      "supportModalConfirm": "Yes, I Will Support",
+      "supportModalCancel": "Maybe Later",
       "purchaseLicense": "Purchase License",
       "licenseType": "Polyform NC 1.0.0"
     },

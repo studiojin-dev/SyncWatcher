@@ -301,6 +301,13 @@
       "unregistered": "미등록 버전",
       "registered": "등록된 버전",
       "thankYou": "구매해 주셔서 감사합니다!",
+      "supportTitle": "피자 한 조각 값... 가능하실까요?",
+      "supportHint": "라이선스만으로도 황송한데, 또 후원해 주시면 개발자는 바닥 닦으며 춤춥니다.",
+      "supportButton": "한 조각 더 후원하기",
+      "supportModalTitle": "굽신굽신 감사 모드 ON",
+      "supportModalMessage": "라이선스를 구매해주셔서 정말 감사합니다. 그럼에도 또 후원해주신다면 개발자는 피자 박스 들고 큰절 108번 하겠습니다. 괜찮으시면 링크로 살짝 찔러 주세요!",
+      "supportModalConfirm": "후원하러 갈게요",
+      "supportModalCancel": "오늘은 참을게요",
       "purchaseLicense": "라이선스 구매",
       "licenseType": "Polyform NC 1.0.0"
     },
