@@ -1,0 +1,375 @@
+{
+    "translation": {
+        "appName": "SyncWatcher",
+        "app": {
+            "quitConfirmTitle": "確認退出",
+            "quitConfirmMessage": "存在已啟用的 Watch Mode 任務或正在同步的任務。確定要退出嗎？",
+            "quitConfirmMessageStateUnknown": "目前無法確認同步狀態。為避免中斷正在進行的任務，確定要退出嗎？",
+            "backgroundNotification": "SyncWatcher 正在背景運行。",
+            "backgroundIntroMessage": "關閉視窗後，SyncWatcher 仍可在背景運行。可在 設定 > 行為 中變更關閉動作。",
+            "loadingView": "正在載入視圖..."
+        },
+        "nav": {
+            "dashboard": "磁碟區",
+            "syncTasks": "同步任務",
+            "activityLog": "活動日誌",
+            "settings": "設定",
+            "help": "幫助",
+            "about": "關於"
+        },
+        "dashboard": {
+            "title": "磁碟區",
+            "noDevices": "未連接裝置",
+            "currentSpeed": "當前速度",
+            "freeSpace": "剩餘空間",
+            "deviceStatus": "裝置狀態",
+            "connected": "已連接",
+            "disconnected": "已斷開",
+            "success": "成功",
+            "warning": "警告",
+            "refresh": "重新整理",
+            "bytesPerSecond": "位元組/秒",
+            "analyzing": "分析中...",
+            "capacityUnavailable": "N/A",
+            "networkCapacityUnavailable": "N/A - 網路連接"
+        },
+        "logs": {
+            "title": "任務日誌"
+        },
+        "syncTasks": {
+            "title": "同步任務",
+            "addTask": "新增任務",
+            "editTask": "編輯任務",
+            "deleteTask": "刪除任務",
+            "confirmDelete": "您確定要刪除此任務嗎？",
+            "taskName": "任務名稱",
+            "source": "來源目錄",
+            "target": "目標目錄",
+            "enabled": "啟用",
+            "checksumMode": "總和檢查碼模式",
+            "watchMode": "監控模式",
+            "watchModeDesc": "監控來源目錄並在變更時自動同步。",
+            "watchToggleOn": "開啟監控",
+            "watchToggleOff": "關閉監控",
+            "watchStarting": "正在啟動監控...",
+            "watchStopping": "正在停止監控...",
+            "watchToggleFailed": "監控狀態更新超時，切換失敗。",
+            "autoUnmount": "自動卸載",
+            "save": "儲存",
+            "cancel": "取消",
+            "startSync": "開始同步",
+            "cancelSync": "取消同步",
+            "cancelDryRun": "取消模擬執行",
+            "cancelConfirm": "您確定要取消操作嗎？",
+            "cancelled": "操作已取消。",
+            "dryRun": "模擬執行",
+            "noTasks": "未配置同步任務",
+            "sourceType": "來源類型",
+            "sourceTypePath": "目錄路徑",
+            "sourceTypeUuid": "磁碟區 UUID",
+            "selectVolume": "選擇磁碟區",
+            "subPath": "子路徑",
+            "subPathPlaceholder": "/DCIM/100MSDCF",
+            "volumeNotMounted": "磁碟區未掛載",
+            "uuidCopied": "UUID 已複製到剪貼簿",
+            "errors": {
+                "sourceEqualsTarget": "來源路徑與目標路徑不能重疊。",
+                "targetIsSubdirOfSource": "目標不能位於來源目錄內部。",
+                "duplicateTarget": "目標與其他任務目標路徑衝突。",
+                "targetSubdirConflict": "目標不能成為其他任務目標的父/子路徑。"
+            },
+            "warnings": {
+                "targetInWatchedSource": "目標與其他監控任務的來源路徑重疊，可能導致同步迴圈。"
+            }
+        },
+        "dryRun": {
+            "totalFiles": "檔案總數",
+            "filesToCopy": "待複製檔案",
+            "filesModified": "已修改檔案",
+            "bytesToCopy": "待複製大小",
+            "newFile": "新增",
+            "modifiedFile": "已修改",
+            "noChanges": "未檢測到變更。",
+            "colPath": "路徑",
+            "colType": "類型",
+            "colSourceSize": "來源檔案大小",
+            "colTargetSize": "目標大小"
+        },
+        "orphan": {
+            "title": "孤立檔案",
+            "search": "搜尋路徑...",
+            "scanning": "掃描中...",
+            "noOrphans": "未發現孤立檔案。",
+            "foundCount": "檢測到 {{count}} 項",
+            "selectVisible": "選擇可見項",
+            "deselectAll": "清除選擇",
+            "deleteSelected": "刪除已選 ({{count}})",
+            "confirmDelete": "確定刪除已選的 {{count}} 項嗎？",
+            "deleteSuccess": "已刪除檔案 {{files}}，已刪除目錄 {{dirs}}，跳過 {{skipped}}，失敗 {{failed}}",
+            "deleteFailed": "刪除所選孤立檔案失敗。"
+        },
+        "conflict": {
+            "queueTitle": "需要審核",
+            "queueEmpty": "沒有待處理的衝突工作階段。",
+            "queueCount": "{{count}} 個工作階段",
+            "queuePersistenceNote": "工作階段僅存在於記憶體中，重新啟動應用程式時會重設。",
+            "queueNoItems": "沒有需要審核的衝突工作階段。",
+            "openReview": "打開審核視窗",
+            "detectedAfterSync": "同步完成。{{count}} 個項目因目標較新而需要審核。",
+            "openNowPrompt": "現在打開審核視窗嗎？",
+            "autoUnmountSkipped": "因為有衝突等待審核，已跳過自動卸載。",
+            "partialFailure": "{{count}} 個項目處理失敗。",
+            "actionComplete": "已處理 {{count}} 個項目。",
+            "closeWithPendingConfirm": "仍有未處理項目。關閉並將剩餘項目標記為此次略過？",
+            "noSessionSelected": "未選擇衝突工作階段。",
+            "previewTitle": "來源 / 目標預覽 (差異)",
+            "previewEmpty": "請從下方列表中選擇一個檔案。",
+            "previewUnsupported": "此檔案類型不支援預覽。請使用作業系統預覽打開。",
+            "listTitle": "需要審核檔案列表",
+            "listEmpty": "沒有可顯示的項目。",
+            "confirmForceCopy": "強制複製無法復原。要繼續嗎？",
+            "forceCopy": "強制複製",
+            "confirmSafeCopy": "重新命名目標並複製來源。要繼續嗎？",
+            "safeCopy": "重新命名後複製 (較安全)",
+            "confirmSkip": "此次略過。下次同步時可能會再次發生。要繼續嗎？",
+            "skip": "什麼都不做",
+            "safeCopyHint": "在複製前重新命名目標較安全，因為這樣可以保留當前的目標檔案。"
+        },
+        "activityLog": {
+            "title": "活動日誌",
+            "date": "日期",
+            "source": "來源",
+            "target": "目標",
+            "status": "狀態",
+            "filesCopied": "已複製檔案",
+            "bytesCopied": "已複製位元組",
+            "errors": "錯誤",
+            "noLogs": "無活動日誌",
+            "success": "成功",
+            "failed": "失敗",
+            "inProgress": "進行中"
+        },
+        "settings": {
+            "title": "設定",
+            "language": "語言",
+            "darkMode": "深色模式",
+            "systemTheme": "系統主題",
+            "themeSystem": "系統",
+            "themeLight": "淺色",
+            "themeDark": "深色",
+            "dataUnit": "容量單位",
+            "unitBinary": "二進位 (KiB, MiB, GiB)",
+            "unitDecimal": "十進位 (KB, MB, GB)",
+            "sectionDisplay": "顯示",
+            "sectionSystem": "系統",
+            "sectionBehavior": "行為",
+            "stateLocation": "狀態儲存位置",
+            "stateLocationPlaceholder": "預設: Tauri AppData",
+            "maxLogLines": "最大日誌行數",
+            "closeAction": "關閉動作",
+            "closeActionDesc": "選擇關閉應用程式時的行為",
+            "closeActionQuit": "退出應用程式",
+            "closeActionBackground": "在背景運行",
+            "notifications": "通知",
+            "deleteConfirmation": "刪除「確認」",
+            "verifyAfterCopy": "複製後驗證",
+            "saveSettings": "儲存設定",
+            "resetDefaults": "還原預設值"
+        },
+        "startup": {
+            "title": "正在啟動 SyncWatcher",
+            "description": "正在載入配置並應用執行階段狀態...",
+            "step": {
+                "settings": "設定",
+                "tasks": "同步任務",
+                "exclusionSets": "排除集合",
+                "runtime": "應用執行階段"
+            }
+        },
+        "sync": {
+            "phase": {
+                "scanning": "掃描中",
+                "copying": "複製中",
+                "deleting": "刪除中",
+                "verifying": "驗證中"
+            },
+            "file": "檔案",
+            "progress": "進度",
+            "completed": "已完成",
+            "cancelled": "已取消",
+            "error": "錯誤",
+            "syncComplete": "同步完成",
+            "filesCopied": "已複製 {{count}} 個檔案",
+            "filesDeleted": "已刪除 {{count}} 個檔案",
+            "bytesCopied": "已複製 {{bytes}} MB"
+        },
+        "help": {
+            "title": "幫助與文件",
+            "safetyChecklist": {
+                "title": "核心安全檢查清單",
+                "description": "啟用高自動化工作流程前，請先確認以下限制。",
+                "checksumCost": "在元資料一致時，總和檢查碼模式仍會計算整份檔案的雜湊值，會增加 CPU 與磁碟 I/O 開銷。",
+                "networkTargetSlow": "如果目標是網路磁碟區，總和檢查碼比較和複製後驗證可能會明顯變慢。",
+                "deleteMissingRemoved": "`deleteMissing` 自動刪除已移除。請透過 Orphan 掃描手動確認後再刪除。",
+                "targetNewerReview": "當目標檔案比來源檔案新時，SyncWatcher 不會自動覆蓋，而是進入衝突審核佇列。"
+            },
+            "sections": {
+                "syncBasics": {
+                    "title": "同步基礎行為",
+                    "description": "當前手動同步和模擬執行的實際行為。",
+                    "oneWay": "同步方向僅支援 Source -> Target。",
+                    "dryRunNoChanges": "模擬執行只計算複製/更新候選項，不會修改實際檔案。",
+                    "verifyAfterCopy": "手動同步預設啟用複製後的總和檢查碼驗證。",
+                    "exclusionScope": "排除集模式會套用到同步、模擬執行和 Orphan 掃描結果。"
+                },
+                "watchRuntime": {
+                    "title": "Watch / Runtime 行為",
+                    "description": "說明監控觸發同步如何排程與執行。",
+                    "debounce": "監控事件會先經過防抖（debounce）再觸發同步，以降低事件風暴影響。",
+                    "queuedState": "由監控觸發的同步會進入執行階段佇列，等待時顯示為 QUEUED。",
+                    "concurrencyLimit": "執行階段監控同步最大並發為 2 個任務。",
+                    "initialQueue": "首次應用執行階段配置時，已啟用 watch 的任務會先入隊執行一次初始同步。"
+                },
+                "pathConflicts": {
+                    "title": "路徑衝突規則",
+                    "description": "儲存任務時會進行執行階段校驗並阻止不安全路徑組合。",
+                    "withinTaskOverlap": "單個任務內 source 與 target 不能重疊（同一路徑或父子關係）。",
+                    "targetUniqueness": "多個任務之間 target 必須唯一，且不能是父子關係。",
+                    "watchLoopRisk": "若某個 watch source 與其他任務 target 重疊，將拒絕該配置以避免同步迴圈。"
+                },
+                "conflictOrphan": {
+                    "title": "衝突 / 清理工作流程",
+                    "description": "安全處理「目標更新更晚」和「僅目標存在」檔案的流程。",
+                    "targetNewerActions": "在 Conflict Review 中可選擇三種動作：Force Copy、Rename then Copy（更安全）、Do Nothing。",
+                    "memorySession": "衝突工作階段僅儲存在記憶體中，重啟應用程式後會清空。",
+                    "autoUnmountSkip": "若仍有待處理衝突，會跳過自動 unmount。",
+                    "orphanWorkflow": "清理僅目標存在檔案需要 Orphan 掃描 -> 選擇 -> 刪除確認，刪除不可復原。"
+                },
+                "uuidSource": {
+                    "title": "UUID 來源模式",
+                    "description": "UUID 來源路徑在執行階段的解析方式。",
+                    "tokenResolve": "如 [DISK_UUID:...] 或 [VOLUME_UUID:...] 的 source token 會解析到當前已掛載磁碟區路徑。",
+                    "notMounted": "若對應 UUID 未掛載，路徑解析會失敗，無法啟動同步/監控。",
+                    "subPath": "可指定掛載磁碟區內的子路徑，僅同步裝置中的部分目錄。"
+                }
+            },
+            "syncEngine": {
+                "title": "同步引擎",
+                "description": "具有總和檢查碼驗證功能的強大單向檔案同步",
+                "oneWaySync": "從來源目錄到目標目錄的單向同步",
+                "dryRun": "在執行前使用模擬執行模式預覽變更",
+                "checksum": "快速 xxHash64 總和檢查碼比較以確保準確性"
+            },
+            "watchMode": {
+                "title": "監控模式",
+                "description": "即時目錄監控以進行即時備份",
+                "autoDetection": "自動檢測來源目錄中的檔案變更",
+                "realTime": "檔案修改時立即啟動同步"
+            },
+            "backgroundMode": {
+                "title": "背景模式",
+                "description": "關閉主視窗後仍保持監控與執行階段任務繼續執行",
+                "closeAction": "可在 設定 > 行為 中選擇「退出」或「在背景運行」",
+                "trayOpen": "使用系統匣選單「打開 SyncWatcher」重新顯示主視窗",
+                "trayQuit": "系統匣選單「退出」始終執行完全退出"
+            },
+            "security": {
+                "title": "資料完整性",
+                "description": "確保您的資料保持安全和一致",
+                "verifyAfterCopy": "複製後使用重新檢查驗證檔案（僅針對關鍵資料）"
+            },
+            "preview": {
+                "title": "預覽模式",
+                "description": "查看如果不進行變更會發生什麼事",
+                "whatIf": "顯示將被複製/更新/刪除的檔案的詳細差異",
+                "noChanges": "預覽模式下不執行實際檔案操作"
+            },
+            "feedback": {
+                "title": "問題回報與建議",
+                "description": "歡迎在 GitHub Discussions 提交問題或功能建議。",
+                "linkText": "問題/建議 (Discussions)",
+                "issueLinkText": "提交 Bug (Issues)"
+            }
+        },
+        "about": {
+            "title": "關於",
+            "developer": "開發者",
+            "license": "授權",
+            "openSourceLibraries": "開源程式庫",
+            "viewLicenses": "查看開源授權",
+            "viewOnGithub": "在 GitHub 上查看",
+            "unregistered": "未註冊版本",
+            "registered": "已註冊版本",
+            "thankYou": "感謝您的購買！",
+            "supportTitle": "再請我一塊披薩嗎？",
+            "supportHint": "僅僅購買授權就已經讓我感動了。要是還想繼續贊助，開發者會一邊鞠躬一邊偷笑。",
+            "supportButton": "再贊助一口",
+            "supportModalTitle": "感恩鞠躬模式 ON",
+            "supportModalMessage": "非常感謝您購買授權。即便如此您還願意繼續贊助的話，開發者會抱著披薩盒連鞠 108 次躬。可以的話就點下面連結吧！",
+            "supportModalConfirm": "我要去贊助",
+            "supportModalCancel": "今天先忍住",
+            "purchaseLicense": "購買授權",
+            "licenseType": "Polyform NC 1.0.0"
+        },
+        "common": {
+            "confirm": "確認",
+            "yes": "是",
+            "no": "否",
+            "back": "返回",
+            "cancel": "取消",
+            "save": "儲存",
+            "delete": "刪除",
+            "edit": "編輯",
+            "add": "新增",
+            "close": "關閉",
+            "ok": "確定",
+            "browse": "瀏覽",
+            "loading": "載入中...",
+            "error": "錯誤",
+            "success": "成功",
+            "warning": "警告"
+        },
+        "yamlEditor": {
+            "title": "編輯 YAML 檔案",
+            "parseError": "YAML 解析錯誤",
+            "line": "行",
+            "column": "列",
+            "jumpToError": "跳轉到錯誤行",
+            "placeholder": "輸入 YAML 內容...",
+            "validationError": "驗證錯誤",
+            "validYaml": "有效的 YAML",
+            "validYamlDescription": "這個 YAML 有效，可以儲存。",
+            "openExternal": "在外部編輯器中打開",
+            "saveAndReload": "儲存並重新載入",
+            "unsavedChangesWarning": "您有未儲存的變更。仍要關閉嗎？"
+        },
+        "errors": {
+            "diskFull": "磁碟已滿",
+            "smbDisconnected": "SMB 已斷開",
+            "permissionDenied": "權限被拒絕",
+            "fileNotFound": "找不到檔案",
+            "networkError": "網路錯誤",
+            "watchStartFailed": "啟動監控失敗",
+            "watchStopFailed": "停止監控失敗"
+        },
+        "update": {
+            "title": "更新",
+            "available": "v{{version}} 可用",
+            "downloading": "下載中...",
+            "installing": "安裝中... 請稍候",
+            "error": "更新失敗",
+            "later": "稍後",
+            "updateNow": "立即更新"
+        },
+        "license": {
+            "title": "啟動授權",
+            "enterKeyDescription": "請輸入購買時收到的授權金鑰。",
+            "keyPlaceholder": "輸入授權金鑰",
+            "activate": "啟動",
+            "activating": "啟動中...",
+            "activated": "授權已啟動！",
+            "invalid": "無效的授權金鑰。",
+            "enterLicense": "輸入授權金鑰"
+        }
+    }
+}
