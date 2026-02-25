@@ -22,6 +22,8 @@ interface SyncTaskStatusStore {
     watchingTaskIds: Set<string>;
     /** 런타임 동기화 대기열에 있는 Task ID 집합 */
     queuedTaskIds: Set<string>;
+    /** 런타임에서 동기화 실행 중인 Task ID 집합 */
+    syncingTaskIds: Set<string>;
 
     /** 상태 업데이트 */
     setStatus: (taskId: string, status: TaskStatus['status']) => void;
@@ -47,6 +49,12 @@ interface SyncTaskStatusStore {
     /** 큐 상태 일괄 업데이트 */
     setQueuedTasks: (taskIds: string[]) => void;
 
+    /** syncing 상태 업데이트 */
+    setSyncing: (taskId: string, syncing: boolean) => void;
+
+    /** syncing 상태 일괄 업데이트 */
+    setSyncingTasks: (taskIds: string[]) => void;
+
     /** 상태 초기화 */
     clearStatus: (taskId: string) => void;
 }
@@ -59,6 +67,7 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
     statuses: new Map<string, TaskStatus>(),
     watchingTaskIds: new Set<string>(),
     queuedTaskIds: new Set<string>(),
+    syncingTaskIds: new Set<string>(),
 
     setStatus: (taskId, status) => {
         set((state) => {
@@ -138,7 +147,11 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
             }
 
             for (const [taskId, current] of nextStatuses.entries()) {
-                if (current.status === 'queued' && !nextQueued.has(taskId)) {
+                if (
+                    current.status === 'queued' &&
+                    !nextQueued.has(taskId) &&
+                    !state.syncingTaskIds.has(taskId)
+                ) {
                     nextStatuses.set(taskId, {
                         ...current,
                         status: state.watchingTaskIds.has(taskId) ? 'watching' : 'idle',
@@ -151,6 +164,22 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
                 statuses: nextStatuses,
             };
         });
+    },
+
+    setSyncing: (taskId, syncing) => {
+        set((state) => {
+            const nextSyncing = new Set(state.syncingTaskIds);
+            if (syncing) {
+                nextSyncing.add(taskId);
+            } else {
+                nextSyncing.delete(taskId);
+            }
+            return { syncingTaskIds: nextSyncing };
+        });
+    },
+
+    setSyncingTasks: (taskIds) => {
+        set({ syncingTaskIds: new Set(taskIds) });
     },
 
     clearStatus: (taskId) => {

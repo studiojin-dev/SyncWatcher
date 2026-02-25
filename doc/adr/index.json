@@ -29,7 +29,7 @@
     ],
     "status": "Accepted",
     "date": "2026-02-15",
-    "tldr": "Enqueue watch-mode tasks for one-time startup sync and process runtime-triggered sync through a bounded queue (max concurrency 2).",
+    "tldr": "Runtime watch sync uses a bounded queue (max concurrency 2), coalesces watch events during active sync into one replay, and serializes overlapping runtime config applies.",
     "path": "doc/adr/ADR-20260215-0004-runtime-watch-sync-queue-and-concurrency.md"
   },
   {

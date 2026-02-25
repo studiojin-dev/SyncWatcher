@@ -29,14 +29,17 @@ interface BackendRuntimeBridgeProps {
     onInitialRuntimeSyncChange?: (state: InitialRuntimeSyncState) => void;
 }
 
+const QUEUED_STATUS_DEMOTION_DELAY_MS = 80;
+
 function applyRuntimeSnapshotToStore(state: RuntimeState) {
     const store = useSyncTaskStatusStore.getState();
     store.setWatchingTasks(state.watchingTasks);
+    store.setSyncingTasks(state.syncingTasks);
     store.setQueuedTasks(state.queuedTasks);
 
     for (const taskId of state.watchingTasks) {
         const currentStatus = store.getStatus(taskId)?.status;
-        if (currentStatus !== 'syncing') {
+        if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
             store.setStatus(taskId, 'watching');
         }
     }
@@ -61,6 +64,7 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
     const ready = tasksLoaded && setsLoaded && settingsLoaded;
     const watchingTasksRef = useRef<Set<string>>(new Set());
     const initialSyncResolvedRef = useRef(false);
+    const queuedStatusDemotionTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
     const payload = useMemo<RuntimeConfigPayload>(() => ({
         tasks: tasks.map(toRuntimeTask),
@@ -117,9 +121,27 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
 
             store.setQueued(taskId, queued);
 
+            const previousTimer = queuedStatusDemotionTimersRef.current.get(taskId);
+            if (previousTimer) {
+                clearTimeout(previousTimer);
+                queuedStatusDemotionTimersRef.current.delete(taskId);
+            }
+
             if (!queued && store.getStatus(taskId)?.status === 'queued') {
-                const isWatching = watchingTasksRef.current.has(taskId);
-                store.setStatus(taskId, isWatching ? 'watching' : 'idle');
+                const demotionTimer = setTimeout(() => {
+                    queuedStatusDemotionTimersRef.current.delete(taskId);
+
+                    const nextStore = useSyncTaskStatusStore.getState();
+                    if (nextStore.queuedTaskIds.has(taskId) || nextStore.syncingTaskIds.has(taskId)) {
+                        return;
+                    }
+
+                    if (nextStore.getStatus(taskId)?.status === 'queued') {
+                        const isWatching = watchingTasksRef.current.has(taskId);
+                        nextStore.setStatus(taskId, isWatching ? 'watching' : 'idle');
+                    }
+                }, QUEUED_STATUS_DEMOTION_DELAY_MS);
+                queuedStatusDemotionTimersRef.current.set(taskId, demotionTimer);
             }
 
             if (reason) {
@@ -134,6 +156,13 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
         const unlistenSyncState = listen<RuntimeSyncStateEvent>('runtime-sync-state', (event) => {
             const { taskId, syncing, reason } = event.payload;
             const store = useSyncTaskStatusStore.getState();
+
+            const pendingDemotion = queuedStatusDemotionTimersRef.current.get(taskId);
+            if (pendingDemotion) {
+                clearTimeout(pendingDemotion);
+                queuedStatusDemotionTimersRef.current.delete(taskId);
+            }
+            store.setSyncing(taskId, syncing);
 
             if (syncing) {
                 store.setQueued(taskId, false);
@@ -160,6 +189,8 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
         });
 
         return () => {
+            queuedStatusDemotionTimersRef.current.forEach((timer) => clearTimeout(timer));
+            queuedStatusDemotionTimersRef.current.clear();
             unlistenProgress.then((fn) => fn());
             unlistenWatchState.then((fn) => fn());
             unlistenQueueState.then((fn) => fn());

@@ -4,11 +4,13 @@ mod integration_tests {
     use crate::watcher::WatcherManager;
     use crate::{
         compute_volume_mount_diff, format_bytes_with_unit, get_app_version,
+        enqueue_runtime_sync_task_internal, dequeue_runtime_sync_task,
         handle_volume_watch_event, handle_volume_watch_tick,
         is_runtime_watch_task_active, join_paths, progress_phase_to_log_category,
         parse_uuid_source_path,
+        remove_runtime_sync_task_state, take_runtime_pending_sync_task,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        validate_runtime_tasks, AppState, DataUnitSystem, RuntimeSyncTask,
+        validate_runtime_tasks, AppState, DataUnitSystem, RuntimeSyncEnqueueResult, RuntimeSyncTask,
         volume_watch_next_tick_delay,
         VolumeEmitDebounceState,
     };
@@ -60,9 +62,11 @@ mod integration_tests {
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_sync_queue: Arc::new(RwLock::new(VecDeque::new())),
             queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
+            runtime_pending_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_dispatcher_running: Arc::new(Mutex::new(false)),
             runtime_sync_slot_released: Arc::new(Notify::new()),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
+            runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
@@ -177,6 +181,111 @@ mod integration_tests {
             assert!(syncing.contains("task-1"));
             assert!(syncing.contains("task-2"));
             assert_eq!(syncing.len(), 2);
+        });
+    }
+
+    #[test]
+    fn test_enqueue_runtime_sync_task_internal_defers_while_syncing() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let state = build_app_state();
+
+        rt.block_on(async {
+            {
+                let mut syncing = state.syncing_tasks.write().await;
+                syncing.insert("task-1".to_string());
+            }
+
+            let result = enqueue_runtime_sync_task_internal("task-1", &state).await;
+            assert_eq!(result, RuntimeSyncEnqueueResult::DeferredWhileSyncing);
+
+            let pending = state.runtime_pending_sync_tasks.read().await;
+            assert!(pending.contains("task-1"));
+            drop(pending);
+
+            let queued = state.queued_sync_tasks.read().await;
+            assert!(!queued.contains("task-1"));
+            drop(queued);
+
+            let queue = state.runtime_sync_queue.read().await;
+            assert!(queue.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_take_runtime_pending_sync_task_returns_true_once() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let state = build_app_state();
+
+        rt.block_on(async {
+            {
+                let mut pending = state.runtime_pending_sync_tasks.write().await;
+                pending.insert("task-1".to_string());
+            }
+
+            assert!(take_runtime_pending_sync_task("task-1", &state).await);
+            assert!(!take_runtime_pending_sync_task("task-1", &state).await);
+        });
+    }
+
+    #[test]
+    fn test_dequeue_runtime_sync_task_keeps_queue_set_consistent() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let state = build_app_state();
+
+        rt.block_on(async {
+            {
+                let mut queued = state.queued_sync_tasks.write().await;
+                queued.insert("task-1".to_string());
+            }
+            {
+                let mut queue = state.runtime_sync_queue.write().await;
+                queue.push_back("task-1".to_string());
+            }
+
+            let next = dequeue_runtime_sync_task(&state).await;
+            assert_eq!(next.as_deref(), Some("task-1"));
+
+            let queued = state.queued_sync_tasks.read().await;
+            assert!(!queued.contains("task-1"));
+            drop(queued);
+
+            let queue = state.runtime_sync_queue.read().await;
+            assert!(queue.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_remove_runtime_sync_task_state_clears_pending_queue_and_set() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let state = build_app_state();
+
+        rt.block_on(async {
+            {
+                let mut pending = state.runtime_pending_sync_tasks.write().await;
+                pending.insert("task-1".to_string());
+            }
+            {
+                let mut queued = state.queued_sync_tasks.write().await;
+                queued.insert("task-1".to_string());
+            }
+            {
+                let mut queue = state.runtime_sync_queue.write().await;
+                queue.push_back("task-1".to_string());
+                queue.push_back("task-2".to_string());
+            }
+
+            remove_runtime_sync_task_state("task-1", &state).await;
+
+            let pending = state.runtime_pending_sync_tasks.read().await;
+            assert!(!pending.contains("task-1"));
+            drop(pending);
+
+            let queued = state.queued_sync_tasks.read().await;
+            assert!(!queued.contains("task-1"));
+            drop(queued);
+
+            let queue = state.runtime_sync_queue.read().await;
+            assert_eq!(queue.iter().cloned().collect::<Vec<_>>(), vec!["task-2".to_string()]);
         });
     }
 

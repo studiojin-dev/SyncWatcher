@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-02-15
 - Tags: sync-task, watch-mode, runtime, concurrency, reliability, macos
-- TL;DR: On runtime initialization, enqueue watch-mode tasks for initial sync and execute through a bounded queue with max parallelism 2.
+- TL;DR: Runtime watch sync uses a bounded queue (max parallelism 2), coalesces watch events during active sync into one replay, and serializes overlapping runtime config applies.
 
 ## Context
 
@@ -18,6 +18,8 @@
 3. Trigger watch-event sync by enqueueing (not direct execution).
 4. Enforce runtime sync max concurrency (`2`) for watch-mode runtime sync execution.
 5. Emit queue state events to frontend so UI can show queued status.
+6. While a task is syncing, coalesce additional watch-triggered sync requests as a pending flag and replay once after completion.
+7. Serialize `runtime_set_config` application so overlapping updates resolve with last-write-wins semantics.
 
 ## Consequences
 
@@ -25,6 +27,8 @@
 - Bursty watch events are absorbed by queue, reducing concurrent sync contention.
 - Some syncs may start slightly later due to queueing.
 - UI can represent `queued` state and improve user visibility.
+- Watch events detected during an active sync are not lost; they are replayed once after the current sync finishes.
+- Overlapping runtime config updates no longer race each other during watcher reconciliation.
 
 ## Alternatives Considered
 

@@ -148,12 +148,16 @@ pub struct AppState {
     runtime_sync_queue: Arc<RwLock<VecDeque<String>>>,
     /// 큐에 올라간 태스크 집합 (중복 enqueue 방지)
     queued_sync_tasks: Arc<RwLock<HashSet<String>>>,
+    /// syncing 중 추가 변경이 감지된 태스크 집합 (1회 재실행 보장)
+    runtime_pending_sync_tasks: Arc<RwLock<HashSet<String>>>,
     /// 런타임 큐 디스패처 실행 여부
     runtime_dispatcher_running: Arc<Mutex<bool>>,
     /// 런타임 동기화 슬롯 해제 알림
     runtime_sync_slot_released: Arc<Notify>,
     /// 초기 watchMode 일괄 동기화 실행 여부
     runtime_initial_watch_bootstrapped: Arc<AtomicBool>,
+    /// runtime config 적용 직렬화 락 (last-write-wins 보장)
+    runtime_config_apply_lock: Arc<Mutex<()>>,
     /// 런타임이 관리 중인 watcher source 추적 (task_id -> source)
     runtime_watch_sources: Arc<RwLock<HashMap<String, String>>>,
     /// 타겟 최신 파일 충돌 검토 세션
@@ -1028,6 +1032,13 @@ enum RuntimeSyncAcquireResult {
     CapacityReached,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeSyncEnqueueResult {
+    Enqueued,
+    AlreadyQueued,
+    DeferredWhileSyncing,
+}
+
 async fn acquire_runtime_sync_slot(task_id: &str, state: &AppState) -> RuntimeSyncAcquireResult {
     let mut syncing = state.syncing_tasks.write().await;
 
@@ -1054,45 +1065,69 @@ async fn release_sync_slot(task_id: &str, state: &AppState) {
     }
 }
 
-async fn enqueue_runtime_sync_task(
+async fn enqueue_runtime_sync_task_internal(
     task_id: &str,
-    app: &tauri::AppHandle,
     state: &AppState,
-    reason: Option<String>,
-) -> bool {
+) -> RuntimeSyncEnqueueResult {
     {
         let syncing = state.syncing_tasks.read().await;
         if syncing.contains(task_id) {
-            return false;
+            drop(syncing);
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.insert(task_id.to_string());
+            return RuntimeSyncEnqueueResult::DeferredWhileSyncing;
         }
     }
 
     let mut queued_set = state.queued_sync_tasks.write().await;
     if !queued_set.insert(task_id.to_string()) {
-        return false;
+        return RuntimeSyncEnqueueResult::AlreadyQueued;
     }
-    drop(queued_set);
 
     let mut queue = state.runtime_sync_queue.write().await;
     queue.push_back(task_id.to_string());
-    drop(queue);
 
-    emit_runtime_sync_queue_state(app, task_id, true, reason);
-    true
+    RuntimeSyncEnqueueResult::Enqueued
+}
+
+async fn enqueue_runtime_sync_task(
+    task_id: &str,
+    app: &tauri::AppHandle,
+    state: &AppState,
+    reason: Option<String>,
+) -> RuntimeSyncEnqueueResult {
+    let enqueue_result = enqueue_runtime_sync_task_internal(task_id, state).await;
+    if enqueue_result == RuntimeSyncEnqueueResult::Enqueued {
+        emit_runtime_sync_queue_state(app, task_id, true, reason);
+    }
+    enqueue_result
 }
 
 async fn dequeue_runtime_sync_task(state: &AppState) -> Option<String> {
-    let next = {
-        let mut queue = state.runtime_sync_queue.write().await;
-        queue.pop_front()
-    };
-
+    let mut queued_set = state.queued_sync_tasks.write().await;
+    let mut queue = state.runtime_sync_queue.write().await;
+    let next = queue.pop_front();
     if let Some(task_id) = &next {
-        let mut queued_set = state.queued_sync_tasks.write().await;
         queued_set.remove(task_id);
     }
-
     next
+}
+
+async fn take_runtime_pending_sync_task(task_id: &str, state: &AppState) -> bool {
+    let mut pending = state.runtime_pending_sync_tasks.write().await;
+    pending.remove(task_id)
+}
+
+async fn remove_runtime_sync_task_state(task_id: &str, state: &AppState) {
+    {
+        let mut pending = state.runtime_pending_sync_tasks.write().await;
+        pending.remove(task_id);
+    }
+
+    let mut queued = state.queued_sync_tasks.write().await;
+    let mut queue = state.runtime_sync_queue.write().await;
+    queued.remove(task_id);
+    queue.retain(|queued_task_id| queued_task_id != task_id);
 }
 
 fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
@@ -1529,10 +1564,12 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     match acquire_runtime_sync_slot(&task.id, &state).await {
         RuntimeSyncAcquireResult::Acquired => {}
         RuntimeSyncAcquireResult::AlreadySyncing => {
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.insert(task.id.clone());
             return;
         }
         RuntimeSyncAcquireResult::CapacityReached => {
-            let queued = enqueue_runtime_sync_task(
+            let enqueue_result = enqueue_runtime_sync_task(
                 &task.id,
                 &app,
                 &state,
@@ -1540,7 +1577,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
             )
             .await;
 
-            if queued {
+            if enqueue_result == RuntimeSyncEnqueueResult::Enqueued {
                 schedule_runtime_sync_dispatcher(app.clone(), state.clone());
             }
             return;
@@ -1589,6 +1626,20 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     let reason = result.err();
     emit_runtime_sync_state(&app, &task.id, false, reason);
 
+    let should_replay = take_runtime_pending_sync_task(&task.id, &state).await;
+    if should_replay && is_runtime_watch_task_active(&task.id, &state).await {
+        let replay_result = enqueue_runtime_sync_task(
+            &task.id,
+            &app,
+            &state,
+            Some("Replay once for watch events detected during sync".to_string()),
+        )
+        .await;
+        if replay_result == RuntimeSyncEnqueueResult::Enqueued {
+            schedule_runtime_sync_dispatcher(app.clone(), state.clone());
+        }
+    }
+
     schedule_runtime_sync_dispatcher(app, state);
 }
 
@@ -1623,7 +1674,7 @@ async fn start_watch_internal(
                 let state_for_sync = state_clone.clone();
                 let task_id_for_sync = task_id_clone.clone();
                 tauri::async_runtime::spawn(async move {
-                    let queued = enqueue_runtime_sync_task(
+                    let enqueue_result = enqueue_runtime_sync_task(
                         &task_id_for_sync,
                         &app_for_sync,
                         &state_for_sync,
@@ -1631,7 +1682,7 @@ async fn start_watch_internal(
                     )
                     .await;
 
-                    if queued {
+                    if enqueue_result == RuntimeSyncEnqueueResult::Enqueued {
                         schedule_runtime_sync_dispatcher(app_for_sync, state_for_sync);
                     }
                 });
@@ -1736,12 +1787,7 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
                     sources.remove(task_id);
                 }
                 {
-                    let mut queued = state.queued_sync_tasks.write().await;
-                    queued.remove(task_id);
-                }
-                {
-                    let mut queue = state.runtime_sync_queue.write().await;
-                    queue.retain(|queued_task_id| queued_task_id != task_id);
+                    remove_runtime_sync_task_state(task_id, &state).await;
                 }
                 emit_runtime_sync_queue_state(
                     &app,
@@ -1768,7 +1814,7 @@ async fn enqueue_initial_runtime_watch_syncs(app: tauri::AppHandle, state: AppSt
 
     let mut enqueued_any = false;
     for task in runtime_config.tasks.iter().filter(|task| task.watch_mode) {
-        let queued = enqueue_runtime_sync_task(
+        let enqueue_result = enqueue_runtime_sync_task(
             &task.id,
             &app,
             &state,
@@ -1776,7 +1822,7 @@ async fn enqueue_initial_runtime_watch_syncs(app: tauri::AppHandle, state: AppSt
         )
         .await;
 
-        enqueued_any = enqueued_any || queued;
+        enqueued_any = enqueued_any || enqueue_result == RuntimeSyncEnqueueResult::Enqueued;
     }
 
     if enqueued_any {
@@ -2648,14 +2694,7 @@ async fn stop_watch(
         let mut sources = state.runtime_watch_sources.write().await;
         sources.remove(&task_id);
     }
-    {
-        let mut queued = state.queued_sync_tasks.write().await;
-        queued.remove(&task_id);
-    }
-    {
-        let mut queue = state.runtime_sync_queue.write().await;
-        queue.retain(|queued_task_id| queued_task_id != &task_id);
-    }
+    remove_runtime_sync_task_state(&task_id, state.inner()).await;
 
     let mut manager = state.watcher_manager.write().await;
     manager
@@ -2691,6 +2730,8 @@ async fn runtime_set_config(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<RuntimeState, String> {
+    let _apply_guard = state.runtime_config_apply_lock.lock().await;
+
     validate_runtime_tasks(&payload.tasks)?;
 
     for set in &payload.exclusion_sets {
@@ -3144,9 +3185,11 @@ pub fn run() {
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_sync_queue: Arc::new(RwLock::new(VecDeque::new())),
             queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
+            runtime_pending_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_dispatcher_running: Arc::new(Mutex::new(false)),
             runtime_sync_slot_released: Arc::new(Notify::new()),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
+            runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
