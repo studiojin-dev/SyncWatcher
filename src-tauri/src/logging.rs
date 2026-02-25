@@ -496,5 +496,5 @@ pub fn get_system_logs(state: tauri::State<'_, AppState>) -> Vec<LogEntry> {
 
 #[tauri::command]
 pub fn get_task_logs(task_id: String, state: tauri::State<'_, AppState>) -> Vec<LogEntry> {
-    state.log_manager.get_task_logs_filtered(&task_id)
+    state.log_manager.get_logs(Some(task_id))
 }

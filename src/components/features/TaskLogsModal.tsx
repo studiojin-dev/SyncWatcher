@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next';
 import { IconRefresh, IconArrowDown, IconArrowLeft } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { isTaskVisibleCategory } from '../../types/logCategories';
 
 interface LogEntry {
     id: string;
@@ -27,10 +26,6 @@ interface TaskLogsModalProps {
     onBack: () => void;
 }
 
-function isTaskVisibleLog(entry: LogEntry): boolean {
-    return isTaskVisibleCategory(entry.category);
-}
-
 export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModalProps) {
     const { t } = useTranslation();
     const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -44,7 +39,6 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
             const data = await invoke<LogEntry[]>('get_task_logs', { taskId });
             // Sort by timestamp ascending (oldest first) for log view usually
             const sorted = data
-                .filter(isTaskVisibleLog)
                 .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
             setLogs(sorted);
 
@@ -63,7 +57,7 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
 
         // Listen for new log events (Single)
         const unlistenSinglePromise = listen<{ task_id?: string; entry: LogEntry }>('new-log-task', (event) => {
-            if (event.payload.task_id === taskId && isTaskVisibleLog(event.payload.entry)) {
+            if (event.payload.task_id === taskId) {
                 setLogs(prevLogs => {
                     const newLogs = [...prevLogs, event.payload.entry];
                     // Keep max 10000 logs (matches backend)
@@ -79,11 +73,10 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
         const unlistenBatchPromise = listen<LogBatchEvent>('new-logs-batch', (event) => {
             if (event.payload.task_id === taskId) {
                 setLogs(prevLogs => {
-                    const filteredEntries = event.payload.entries.filter(isTaskVisibleLog);
-                    if (filteredEntries.length === 0) {
+                    if (event.payload.entries.length === 0) {
                         return prevLogs;
                     }
-                    const newLogs = [...prevLogs, ...filteredEntries];
+                    const newLogs = [...prevLogs, ...event.payload.entries];
                     if (newLogs.length > 10000) {
                         return newLogs.slice(newLogs.length - 10000);
                     }
@@ -117,7 +110,7 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
     return (
         <div className="w-full">
             <CardAnimation>
-                <div className="neo-box w-full flex flex-col bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
+                <div className="neo-box w-full h-[72vh] min-h-[360px] max-h-[760px] flex flex-col bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
                     {/* Header */}
                     <div className="flex justify-between items-center p-4 border-b-3 border-[var(--border-main)] bg-[var(--bg-secondary)]">
                         <div>
@@ -154,7 +147,7 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
                     </div>
 
                     {/* Logs Content - Virtual List */}
-                    <div className="flex-1 p-0 font-mono text-xs bg-[var(--bg-primary)] overflow-hidden relative">
+                    <div className="flex-1 min-h-0 p-0 font-mono text-xs bg-[var(--bg-primary)] overflow-hidden relative">
                         {loading ? (
                             <div className="flex items-center justify-center h-full text-[var(--text-secondary)]">
                                 Loading...
@@ -166,6 +159,7 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
                         ) : (
                             <Virtuoso
                                 ref={virtuoso}
+                                style={{ height: '100%' }}
                                 data={logs}
                                 atBottomStateChange={(atBottom) => setAutoScroll(atBottom)}
                                 totalCount={logs.length}

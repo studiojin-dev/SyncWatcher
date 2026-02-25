@@ -30,6 +30,8 @@ interface BackendRuntimeBridgeProps {
 }
 
 const QUEUED_STATUS_DEMOTION_DELAY_MS = 80;
+const INITIAL_RUNTIME_SYNC_TIMEOUT_MS = 10_000;
+const RUNTIME_SYNC_ERROR_TOAST_DEDUP_WINDOW_MS = 3_000;
 
 function applyRuntimeSnapshotToStore(state: RuntimeState) {
     const store = useSyncTaskStatusStore.getState();
@@ -56,6 +58,47 @@ function applyRuntimeSnapshotToStore(state: RuntimeState) {
     }
 }
 
+function hasTauriInvokeBridge(): boolean {
+    const maybeWindow = globalThis as typeof globalThis & {
+        __TAURI_INTERNALS__?: {
+            invoke?: unknown;
+        };
+    };
+    return typeof maybeWindow.__TAURI_INTERNALS__?.invoke === 'function';
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error(timeoutMessage));
+        }, timeoutMs);
+
+        promise
+            .then((value) => {
+                clearTimeout(timeoutId);
+                resolve(value);
+            })
+            .catch((error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            });
+    });
+}
+
+function shouldShowRuntimeSyncErrorToast(
+    previous: { message: string; at: number } | null,
+    nextMessage: string,
+    now: number
+): boolean {
+    if (!previous) {
+        return true;
+    }
+    if (previous.message !== nextMessage) {
+        return true;
+    }
+    return now - previous.at > RUNTIME_SYNC_ERROR_TOAST_DEDUP_WINDOW_MS;
+}
+
 function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBridgeProps) {
     const { tasks, loaded: tasksLoaded } = useSyncTasksContext();
     const { sets, loaded: setsLoaded } = useExclusionSetsContext();
@@ -65,6 +108,7 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
     const watchingTasksRef = useRef<Set<string>>(new Set());
     const initialSyncResolvedRef = useRef(false);
     const queuedStatusDemotionTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+    const lastRuntimeSyncErrorToastRef = useRef<{ message: string; at: number } | null>(null);
 
     const payload = useMemo<RuntimeConfigPayload>(() => ({
         tasks: tasks.map(toRuntimeTask),
@@ -206,13 +250,28 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
         let cancelled = false;
         const isInitialSyncAttempt = !initialSyncResolvedRef.current;
 
+        if (!hasTauriInvokeBridge()) {
+            if (isInitialSyncAttempt) {
+                initialSyncResolvedRef.current = true;
+                onInitialRuntimeSyncChange?.('error');
+            }
+            return;
+        }
+
         const syncRuntimeConfig = async () => {
             if (isInitialSyncAttempt) {
                 onInitialRuntimeSyncChange?.('pending');
             }
 
             try {
-                const nextState = await invoke<RuntimeState>('runtime_set_config', { payload });
+                const invokePromise = invoke<RuntimeState>('runtime_set_config', { payload });
+                const nextState = isInitialSyncAttempt
+                    ? await withTimeout(
+                        invokePromise,
+                        INITIAL_RUNTIME_SYNC_TIMEOUT_MS,
+                        `runtime_set_config timed out after ${INITIAL_RUNTIME_SYNC_TIMEOUT_MS}ms`
+                    )
+                    : await invokePromise;
                 if (cancelled) {
                     return;
                 }
@@ -237,7 +296,14 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
                     timestamp: new Date().toLocaleTimeString(),
                     level: 'error',
                 });
-                showToast('Failed to apply runtime configuration', 'error');
+                const now = Date.now();
+                if (shouldShowRuntimeSyncErrorToast(lastRuntimeSyncErrorToastRef.current, errorMessage, now)) {
+                    showToast('Failed to apply runtime configuration', 'error');
+                    lastRuntimeSyncErrorToastRef.current = {
+                        message: errorMessage,
+                        at: now,
+                    };
+                }
 
                 if (isInitialSyncAttempt) {
                     initialSyncResolvedRef.current = true;

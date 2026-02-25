@@ -54,7 +54,7 @@ describe('TaskLogsModal', () => {
     });
   });
 
-  it('shows only allowed task log categories from fetch and events', async () => {
+  it('shows all task log categories from fetch and events', async () => {
     mockInvoke.mockResolvedValueOnce([
       {
         id: '1',
@@ -90,7 +90,7 @@ describe('TaskLogsModal', () => {
 
     expect(await screen.findByText('Sync started')).toBeInTheDocument();
     expect(screen.getByText('Copy: /a.txt')).toBeInTheDocument();
-    expect(screen.queryByText('Operation cancelled by user')).not.toBeInTheDocument();
+    expect(screen.getByText('Operation cancelled by user')).toBeInTheDocument();
 
     await act(async () => {
       listeners['new-log-task']?.({
@@ -108,7 +108,7 @@ describe('TaskLogsModal', () => {
       });
     });
 
-    expect(screen.queryByText('Dry run started')).not.toBeInTheDocument();
+    expect(screen.getByText('Dry run started')).toBeInTheDocument();
 
     await act(async () => {
       listeners['new-logs-batch']?.({
@@ -137,6 +137,6 @@ describe('TaskLogsModal', () => {
     });
 
     expect(await screen.findByText('Delete: /b.txt')).toBeInTheDocument();
-    expect(screen.queryByText('Sync skipped: task already syncing')).not.toBeInTheDocument();
+    expect(screen.getByText('Sync skipped: task already syncing')).toBeInTheDocument();
   });
 });

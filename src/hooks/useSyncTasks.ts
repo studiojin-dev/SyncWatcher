@@ -30,6 +30,8 @@ interface PersistedSyncTask extends SyncTask {
     deleteMissing?: boolean;
 }
 
+const DEFAULT_TASKS: PersistedSyncTask[] = [];
+
 function normalizeTask(task: PersistedSyncTask): SyncTask {
     return {
         id: task.id,
@@ -51,7 +53,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
 export function useSyncTasks() {
     const { data: storedTasks, saveData: saveTasks, loaded, error, reload } = useYamlStore<PersistedSyncTask[]>({
         fileName: 'tasks.yaml',
-        defaultData: [],
+        defaultData: DEFAULT_TASKS,
     });
 
     const migrationCheckedRef = useRef(false);
