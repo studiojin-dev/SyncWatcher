@@ -12,9 +12,9 @@ const mockState = vi.hoisted(() => ({
     'nav.settings': 'Settings',
     'nav.help': 'Help',
     'nav.about': 'About',
-    'about.unregistered': 'Unregistered',
-    'about.registered': 'Registered',
-    'about.purchaseLicense': 'Purchase License',
+    'about.unregistered': 'Free Use (Personal & Commercial)',
+    'about.registered': 'License Supporter',
+    'about.purchaseLicense': 'Optional License Support',
     'license.enterLicense': 'Enter License',
     'about.supportTitle': 'One more pizza bite?',
     'about.supportHint': 'I am bowing dramatically.',
@@ -56,10 +56,10 @@ describe('Sidebar', () => {
   it('keeps purchase and activation actions for unregistered users', () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
 
-    const purchaseLink = screen.getByRole('link', { name: 'Purchase License' });
+    const purchaseLink = screen.getByRole('link', { name: 'Optional License Support' });
     expect(purchaseLink).toHaveAttribute(
       'href',
-      'https://studiojin.lemonsqueezy.com/checkout/buy/syncwatcher',
+      'https://studiojin.lemonsqueezy.com/checkout/buy/1301030',
     );
     expect(purchaseLink).toHaveAttribute('target', '_blank');
     expect(purchaseLink).toHaveAttribute('rel', 'noopener noreferrer');

@@ -119,7 +119,7 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                                 <div className="w-2 h-2 rounded-full bg-[var(--accent-error)] animate-pulse" />
                             </div>
                             <a
-                                href="https://studiojin.lemonsqueezy.com/checkout/buy/syncwatcher"
+                                href="https://studiojin.lemonsqueezy.com/checkout/buy/1301030"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"

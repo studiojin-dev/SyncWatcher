@@ -109,15 +109,22 @@ This project is **Source-Available** software:
 | Component            | License                                                                                 |
 | -------------------- | --------------------------------------------------------------------------------------- |
 | [Source Code](./LICENSE) | [Polyform Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) |
-| Binary Distribution  | Proprietary EULA (Unlimited Evaluation)                                                 |
+| Binary Distribution  | Proprietary EULA (Free Use, Optional Support License)                                   |
 
-### 💼 Commercial Use
+### Free Use Policy
 
-SyncWatcher is available as a commercial product at [studiojin.dev](https://studiojin.dev). For commercial use, including internal company use or for-profit activities, a commercial license must be purchased.
+The official SyncWatcher app is free to use, including commercial/internal company use.
 
-### Non-commercial Use
+Buying a license is optional for everyone. It is a support purchase to help ongoing development.
 
-Under the Polyform Noncommercial 1.0.0 license, you may freely use, modify, and distribute this software for personal study, research, and other non-commercial purposes. Any commercial application or redistribution for profit is strictly prohibited without a separate agreement.
+### Why Polyform Noncommercial?
+
+The source code is published under Polyform Noncommercial 1.0.0 mainly to prevent third-party fork-and-resell monetization of this project.
+
+### Optional Support Links
+
+- License support purchase: [studiojin.dev](https://studiojin.dev)
+- Additional tip after purchase: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
 
 ## Acknowledgments
 
