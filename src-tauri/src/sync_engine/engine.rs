@@ -4,9 +4,10 @@ use crate::sync_engine::types::{
     TargetNewerConflictCandidate,
 };
 use anyhow::Result;
+use std::ffi::OsStr;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -17,6 +18,36 @@ use anyhow::Context; // Import Context trait
 pub struct SyncEngine {
     source: PathBuf,
     target: PathBuf,
+}
+
+const HARD_IGNORED_ROOT_METADATA_DIRS: [&str; 4] = [
+    ".fseventsd",
+    ".Spotlight-V100",
+    ".Trashes",
+    ".TemporaryItems",
+];
+
+fn is_hard_ignored_root_metadata_dir(relative_path: &Path, is_dir: bool) -> bool {
+    if !is_dir {
+        return false;
+    }
+
+    let mut components = relative_path.components();
+    let Some(first) = components.next() else {
+        return false;
+    };
+
+    // Root-level only: nested matches (e.g. photos/.Trashes) are intentionally allowed.
+    if components.next().is_some() {
+        return false;
+    }
+
+    match first {
+        Component::Normal(name) => HARD_IGNORED_ROOT_METADATA_DIRS
+            .iter()
+            .any(|candidate| name == OsStr::new(candidate)),
+        _ => false,
+    }
 }
 
 impl SyncEngine {
@@ -138,6 +169,10 @@ impl SyncEngine {
                     Ok(p) => p,
                     Err(_) => return true, // Should not happen for children
                 };
+
+                if is_hard_ignored_root_metadata_dir(relative_path, e.file_type().is_dir()) {
+                    return false;
+                }
 
                 // Check exclusion patterns
                 // If it matches, return FALSE to skip entering directory or processing file
@@ -889,6 +924,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_root_metadata_dirs_are_always_excluded() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        for dir_name in HARD_IGNORED_ROOT_METADATA_DIRS {
+            let metadata_dir = source_dir.path().join(dir_name);
+            fs::create_dir_all(&metadata_dir).await?;
+            fs::write(metadata_dir.join("metadata.bin"), b"meta").await?;
+        }
+
+        let nested_allowed = source_dir.path().join("photos/.Trashes/keep.txt");
+        fs::create_dir_all(nested_allowed.parent().expect("nested path should have parent")).await?;
+        fs::write(&nested_allowed, b"nested").await?;
+        fs::write(source_dir.path().join("keep.txt"), b"keep").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = vec![];
+
+        let dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 2);
+
+        let result = engine.sync_files(&options, |_| {}).await?;
+        assert_eq!(result.files_copied, 2);
+
+        for dir_name in HARD_IGNORED_ROOT_METADATA_DIRS {
+            assert!(!target_dir.path().join(dir_name).exists());
+        }
+        assert!(target_dir.path().join("keep.txt").exists());
+        assert!(target_dir.path().join("photos/.Trashes/keep.txt").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_exclusion_empty_patterns() -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;
@@ -1031,6 +1105,36 @@ mod tests {
         assert!(orphan_paths.contains(&"stale".to_string()));
         assert!(orphan_paths.contains(&"stale/old.txt".to_string()));
         assert!(!orphan_paths.contains(&"shared.txt".to_string()));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_find_orphan_files_ignores_root_metadata_dirs() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        fs::write(source_dir.path().join("shared.txt"), b"same").await?;
+        fs::write(target_dir.path().join("shared.txt"), b"same").await?;
+        fs::write(target_dir.path().join("orphan.txt"), b"orphan").await?;
+
+        for dir_name in HARD_IGNORED_ROOT_METADATA_DIRS {
+            let metadata_dir = target_dir.path().join(dir_name);
+            fs::create_dir_all(&metadata_dir).await?;
+            fs::write(metadata_dir.join("stale.bin"), b"stale").await?;
+        }
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let orphans = engine.find_orphan_files(&[]).await?;
+
+        assert!(orphans.iter().any(|orphan| orphan.path == PathBuf::from("orphan.txt")));
+        for dir_name in HARD_IGNORED_ROOT_METADATA_DIRS {
+            let dir_path = PathBuf::from(dir_name);
+            assert!(
+                !orphans.iter().any(|orphan| orphan.path.starts_with(&dir_path)),
+                "orphan list should not include hard-ignored metadata dir: {dir_name}"
+            );
+        }
 
         Ok(())
     }

@@ -49,6 +49,7 @@
       "checksumMode": "체크섬 모드",
       "watchMode": "감시 모드",
       "watchModeDesc": "소스 디렉토리를 감시하고 변경 시 자동 동기화합니다.",
+      "systemMetadataAlwaysExcluded": "시스템 메타데이터 디렉토리(.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems)는 항상 제외됩니다.",
       "watchToggleOn": "감시 켜기",
       "watchToggleOff": "감시 끄기",
       "watchStarting": "감시 시작 중...",
@@ -228,7 +229,8 @@
           "debounce": "감시 이벤트는 이벤트 폭주를 줄이기 위해 디바운싱 후 동기화를 트리거합니다.",
           "queuedState": "감시로 발생한 동기화는 런타임 큐에 들어가며 대기 중에는 QUEUED 상태로 표시됩니다.",
           "concurrencyLimit": "런타임 감시 동기화는 최대 2개 작업까지 병렬 실행됩니다.",
-          "initialQueue": "런타임 설정이 처음 적용될 때 watch 활성 작업은 초기 동기화 대상으로 큐에 등록됩니다."
+          "initialQueue": "런타임 설정이 처음 적용될 때 watch 활성 작업은 초기 동기화 대상으로 큐에 등록됩니다.",
+          "systemMetadataAlwaysExcluded": "macOS 루트 메타데이터 디렉토리(.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems)는 동기화에서 항상 제외됩니다."
         },
         "pathConflicts": {
           "title": "경로 충돌 규칙",

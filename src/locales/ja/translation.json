@@ -49,6 +49,7 @@
       "checksumMode": "チェックサムモード",
       "watchMode": "監視モード",
       "watchModeDesc": "ソースディレクトリを監視し、変更時に自動同期します。",
+      "systemMetadataAlwaysExcluded": "システムメタデータディレクトリ（.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems）は常に除外されます。",
       "watchToggleOn": "監視を有効化",
       "watchToggleOff": "監視を無効化",
       "watchStarting": "監視を開始しています...",
@@ -228,7 +229,8 @@
           "debounce": "監視イベントはイベント集中を抑えるため、デバウンス後に同期を開始します。",
           "queuedState": "監視起点の同期はランタイムキューに入り、待機中は QUEUED と表示されます。",
           "concurrencyLimit": "ランタイム監視同期は最大2タスクまで並列実行されます。",
-          "initialQueue": "ランタイム設定が最初に適用されたとき、watch 有効タスクは初期同期としてキューに登録されます。"
+          "initialQueue": "ランタイム設定が最初に適用されたとき、watch 有効タスクは初期同期としてキューに登録されます。",
+          "systemMetadataAlwaysExcluded": "macOS のルートメタデータディレクトリ（.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems）は同期対象から常に除外されます。"
         },
         "pathConflicts": {
           "title": "パス競合ルール",

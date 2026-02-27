@@ -11,7 +11,16 @@ const DEFAULT_SETS: ExclusionSet[] = [
     {
         id: 'system-defaults',
         name: 'System Junk',
-        patterns: ['.DS_Store', 'Thumbs.db', '.Trash', 'Desktop.ini']
+        patterns: [
+            '.DS_Store',
+            'Thumbs.db',
+            '.Trash',
+            'Desktop.ini',
+            '.fseventsd',
+            '.Spotlight-V100',
+            '.Trashes',
+            '.TemporaryItems'
+        ]
     },
     {
         id: 'nodejs',

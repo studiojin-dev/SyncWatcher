@@ -12,6 +12,8 @@ vi.mock('react-i18next', () => ({
         'help.safetyChecklist.deleteMissingRemoved': '`deleteMissing` automatic deletion is removed. Delete through Orphan workflow only.',
         'help.sections.watchRuntime.title': 'Watch / Runtime Behavior',
         'help.sections.watchRuntime.queuedState': 'Watch-triggered syncs are queued and shown as QUEUED when waiting.',
+        'help.sections.watchRuntime.systemMetadataAlwaysExcluded':
+          'Root metadata directories used by macOS are always excluded from sync.',
         'help.sections.conflictOrphan.title': 'Conflict / Cleanup Workflow',
         'help.sections.conflictOrphan.orphanWorkflow': 'Use Orphan scan -> select -> confirm delete for target-only files.',
         'help.feedback.title': 'Questions & Suggestions',
@@ -40,6 +42,9 @@ describe('HelpView', () => {
     expect(screen.getByText('Watch / Runtime Behavior')).toBeInTheDocument();
     expect(
       screen.getByText('Watch-triggered syncs are queued and shown as QUEUED when waiting.')
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Root metadata directories used by macOS are always excluded from sync.')
     ).toBeInTheDocument();
     expect(screen.getByText('Conflict / Cleanup Workflow')).toBeInTheDocument();
     expect(

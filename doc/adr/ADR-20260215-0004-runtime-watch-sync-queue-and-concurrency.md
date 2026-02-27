@@ -20,6 +20,7 @@
 5. Emit queue state events to frontend so UI can show queued status.
 6. While a task is syncing, coalesce additional watch-triggered sync requests as a pending flag and replay once after completion.
 7. Serialize `runtime_set_config` application so overlapping updates resolve with last-write-wins semantics.
+8. Always exclude macOS root metadata directories (`.fseventsd`, `.Spotlight-V100`, `.Trashes`, `.TemporaryItems`) from scan/sync candidate generation, regardless of user exclusion-set selection.
 
 ## Consequences
 
@@ -29,6 +30,7 @@
 - UI can represent `queued` state and improve user visibility.
 - Watch events detected during an active sync are not lost; they are replayed once after the current sync finishes.
 - Overlapping runtime config updates no longer race each other during watcher reconciliation.
+- System-managed metadata directories are never copied or listed as orphan candidates, reducing noisy watch-driven changes and preventing non-user data replication.
 
 ## Alternatives Considered
 

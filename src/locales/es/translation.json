@@ -49,6 +49,7 @@
       "checksumMode": "Modo Checksum",
       "watchMode": "Modo Vigilancia",
       "watchModeDesc": "Supervisa el directorio de origen y sincroniza automáticamente los cambios.",
+      "systemMetadataAlwaysExcluded": "Los directorios de metadatos del sistema (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) siempre se excluyen.",
       "watchToggleOn": "Activar vigilancia",
       "watchToggleOff": "Desactivar vigilancia",
       "watchStarting": "Iniciando vigilancia...",
@@ -228,7 +229,8 @@
           "debounce": "Los eventos watch se agrupan con debounce antes de iniciar sync para reducir ráfagas.",
           "queuedState": "Las sincronizaciones disparadas por watch entran en una cola runtime y se muestran como QUEUED al esperar.",
           "concurrencyLimit": "La sincronización runtime por watch se ejecuta con paralelismo máximo de 2 tareas.",
-          "initialQueue": "Cuando se aplica runtime por primera vez, las tareas con watch activo se encolan para una sincronización inicial."
+          "initialQueue": "Cuando se aplica runtime por primera vez, las tareas con watch activo se encolan para una sincronización inicial.",
+          "systemMetadataAlwaysExcluded": "Los directorios de metadatos de raíz de macOS (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) siempre se excluyen de la sincronización."
         },
         "pathConflicts": {
           "title": "Reglas de Conflicto de Rutas",

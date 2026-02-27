@@ -46,6 +46,7 @@
       "checksumMode": "Checksum Mode",
       "watchMode": "Watch Mode",
       "watchModeDesc": "Monitors source directory and auto-syncs on changes.",
+      "systemMetadataAlwaysExcluded": "System metadata directories (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) are always excluded.",
       "watchToggleOn": "Enable Watch",
       "watchToggleOff": "Disable Watch",
       "watchStarting": "Starting watch...",
@@ -225,7 +226,8 @@
           "debounce": "Watch events are debounced before sync is triggered to reduce event storms.",
           "queuedState": "Watch-triggered syncs enter a runtime queue and appear as QUEUED while waiting.",
           "concurrencyLimit": "Runtime watch sync executes with max parallelism of 2 tasks.",
-          "initialQueue": "When runtime config is first applied, watch-enabled tasks are queued for an initial sync."
+          "initialQueue": "When runtime config is first applied, watch-enabled tasks are queued for an initial sync.",
+          "systemMetadataAlwaysExcluded": "Root metadata directories used by macOS (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) are always excluded from sync."
         },
         "pathConflicts": {
           "title": "Path Conflict Rules",

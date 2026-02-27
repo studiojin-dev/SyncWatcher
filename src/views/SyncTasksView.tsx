@@ -904,6 +904,9 @@ function SyncTasksView() {
                                             }
                                         }}
                                     />
+                                    <div className="mt-2 text-xs font-mono text-[var(--text-secondary)] border-l-2 border-[var(--accent-info)] pl-2">
+                                        {t('syncTasks.systemMetadataAlwaysExcluded')}
+                                    </div>
                                 </div>
                                 <div className="flex gap-3 mt-6 justify-end">
                                     <button

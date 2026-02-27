@@ -49,6 +49,7 @@
             "checksumMode": "總和檢查碼模式",
             "watchMode": "監控模式",
             "watchModeDesc": "監控來源目錄並在變更時自動同步。",
+            "systemMetadataAlwaysExcluded": "系統中繼資料目錄（.fseventsd、.Spotlight-V100、.Trashes、.TemporaryItems）會被永久排除。",
             "watchToggleOn": "開啟監控",
             "watchToggleOff": "關閉監控",
             "watchStarting": "正在啟動監控...",
@@ -228,7 +229,8 @@
                     "debounce": "監控事件會先經過防抖（debounce）再觸發同步，以降低事件風暴影響。",
                     "queuedState": "由監控觸發的同步會進入執行階段佇列，等待時顯示為 QUEUED。",
                     "concurrencyLimit": "執行階段監控同步最大並發為 2 個任務。",
-                    "initialQueue": "首次應用執行階段配置時，已啟用 watch 的任務會先入隊執行一次初始同步。"
+                    "initialQueue": "首次應用執行階段配置時，已啟用 watch 的任務會先入隊執行一次初始同步。",
+                    "systemMetadataAlwaysExcluded": "macOS 根目錄的中繼資料目錄（.fseventsd、.Spotlight-V100、.Trashes、.TemporaryItems）永遠不會參與同步。"
                 },
                 "pathConflicts": {
                     "title": "路徑衝突規則",

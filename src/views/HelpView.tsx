@@ -42,6 +42,7 @@ function HelpView() {
         t('help.sections.watchRuntime.queuedState'),
         t('help.sections.watchRuntime.concurrencyLimit'),
         t('help.sections.watchRuntime.initialQueue'),
+        t('help.sections.watchRuntime.systemMetadataAlwaysExcluded'),
       ],
     },
     {
