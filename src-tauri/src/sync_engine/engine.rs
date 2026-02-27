@@ -247,18 +247,40 @@ impl SyncEngine {
         for (path, source_meta) in &source_map {
             if let Some(target_meta) = target_map.get(path) {
                 if source_meta.is_file {
+                    let source_path = source_canonical.join(path);
+                    let target_path = target_canonical
+                        .as_ref()
+                        .map(|target| target.join(path))
+                        .unwrap_or_else(|| self.target.join(path));
+                    let mut already_checked_equal_hash = false;
+
                     if target_meta.modified > source_meta.modified {
-                        target_newer_conflicts.push(TargetNewerConflictCandidate {
-                            path: path.clone(),
-                            source_path: source_canonical.join(path),
-                            target_path: target_canonical
-                                .as_ref()
-                                .map(|target| target.join(path))
-                                .unwrap_or_else(|| self.target.join(path)),
-                            source: Self::snapshot_from_metadata(source_meta),
-                            target: Self::snapshot_from_metadata(target_meta),
-                        });
-                        continue;
+                        // If target is newer but binary-identical, treat as no-op instead of conflict.
+                        if source_meta.size != target_meta.size {
+                            target_newer_conflicts.push(TargetNewerConflictCandidate {
+                                path: path.clone(),
+                                source_path: source_path.clone(),
+                                target_path: target_path.clone(),
+                                source: Self::snapshot_from_metadata(source_meta),
+                                target: Self::snapshot_from_metadata(target_meta),
+                            });
+                            continue;
+                        }
+
+                        let source_hash = self.calculate_checksum(&source_path).await?;
+                        let target_hash = self.calculate_checksum(&target_path).await?;
+                        if source_hash != target_hash {
+                            target_newer_conflicts.push(TargetNewerConflictCandidate {
+                                path: path.clone(),
+                                source_path: source_path.clone(),
+                                target_path: target_path.clone(),
+                                source: Self::snapshot_from_metadata(source_meta),
+                                target: Self::snapshot_from_metadata(target_meta),
+                            });
+                            continue;
+                        }
+
+                        already_checked_equal_hash = true;
                     }
 
                     // 1. First check metadata (fastest)
@@ -266,14 +288,9 @@ impl SyncEngine {
                         || source_meta.modified > target_meta.modified;
 
                     // 2. If metadata matches but checksum mode is on, check content (slower but accurate)
-                    if !needs_copy && options.checksum_mode {
-                        let source_hash =
-                            self.calculate_checksum(&source_canonical.join(path)).await?;
-                        let target_hash = if let Some(target) = target_canonical.as_ref() {
-                            self.calculate_checksum(&target.join(path)).await?
-                        } else {
-                            self.calculate_checksum(&self.target.join(path)).await?
-                        };
+                    if !needs_copy && options.checksum_mode && !already_checked_equal_hash {
+                        let source_hash = self.calculate_checksum(&source_path).await?;
+                        let target_hash = self.calculate_checksum(&target_path).await?;
 
                         if source_hash != target_hash {
                             needs_copy = true;
@@ -752,6 +769,78 @@ mod tests {
 
         let target_content = fs::read(&target_file).await?;
         assert_eq!(target_content, b"target-v2");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_target_newer_same_content_is_not_conflict() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let relative = PathBuf::from("media/photo.jpg");
+        let source_file = source_dir.path().join(&relative);
+        let target_file = target_dir.path().join(&relative);
+        fs::create_dir_all(source_file.parent().unwrap()).await?;
+        fs::create_dir_all(target_file.parent().unwrap()).await?;
+
+        fs::write(&source_file, b"same-content").await?;
+        fs::write(&target_file, b"same-content").await?;
+
+        let source_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let target_time = source_time + std::time::Duration::from_secs(60);
+        filetime::set_file_mtime(&source_file, filetime::FileTime::from_system_time(source_time))?;
+        filetime::set_file_mtime(&target_file, filetime::FileTime::from_system_time(target_time))?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions::default();
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+
+        let conflicts = engine.target_newer_conflicts(&options).await?;
+        assert_eq!(conflicts.len(), 0);
+
+        let sync_result = engine.sync_files(&options, |_| {}).await?;
+        assert_eq!(sync_result.files_copied, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_target_newer_different_size_is_conflict() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let relative = PathBuf::from("media/photo.jpg");
+        let source_file = source_dir.path().join(&relative);
+        let target_file = target_dir.path().join(&relative);
+        fs::create_dir_all(source_file.parent().unwrap()).await?;
+        fs::create_dir_all(target_file.parent().unwrap()).await?;
+
+        fs::write(&source_file, b"source-v1").await?;
+        fs::write(&target_file, b"target-v2-with-larger-content").await?;
+
+        let source_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let target_time = source_time + std::time::Duration::from_secs(60);
+        filetime::set_file_mtime(&source_file, filetime::FileTime::from_system_time(source_time))?;
+        filetime::set_file_mtime(&target_file, filetime::FileTime::from_system_time(target_time))?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions::default();
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+
+        let conflicts = engine.target_newer_conflicts(&options).await?;
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].path, relative);
         Ok(())
     }
 

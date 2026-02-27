@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260227-0006",
+    "title": "Target-newer conflict hash-equivalence exception",
+    "tags": [
+      "sync-task",
+      "safety",
+      "conflict-review",
+      "checksum",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-02-27",
+    "tldr": "When target mtime is newer, classify as conflict only if content differs; if source and target are hash-identical, treat as no-op.",
+    "path": "doc/adr/ADR-20260227-0006-target-newer-conflict-hash-equivalence-exception.md"
+  },
+  {
     "id": "ADR-20260219-0005",
     "title": "Target-newer conflict deferred review in dedicated window",
     "tags": [

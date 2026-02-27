@@ -71,6 +71,10 @@ function isPending(item: TargetNewerConflictItem): boolean {
   return item.status === 'pending';
 }
 
+function isSessionNotFoundError(error: unknown): boolean {
+  return String(error).includes('Conflict session not found');
+}
+
 export default function ConflictReviewWindow() {
   const { t } = useTranslation();
   const { showToast } = useToast();
@@ -83,12 +87,24 @@ export default function ConflictReviewWindow() {
   const [focusedItemId, setFocusedItemId] = useState<string | null>(null);
   const [preview, setPreview] = useState<ConflictPreviewPayload | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [sourceMediaPreviewFailed, setSourceMediaPreviewFailed] = useState(false);
+  const [targetMediaPreviewFailed, setTargetMediaPreviewFailed] = useState(false);
+
+  const clearSessionState = useCallback(() => {
+    setSession(null);
+    setSelectedIds(new Set());
+    setFocusedItemId(null);
+    setSessionId(null);
+
+    const params = new URLSearchParams(window.location.search);
+    params.set('view', 'conflict-review');
+    params.delete('sessionId');
+    window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+  }, []);
 
   const loadSession = useCallback(async (nextSessionId: string | null) => {
     if (!nextSessionId) {
-      setSession(null);
-      setSelectedIds(new Set());
-      setFocusedItemId(null);
+      clearSessionState();
       return;
     }
 
@@ -102,14 +118,18 @@ export default function ConflictReviewWindow() {
       setSelectedIds(new Set(pendingItems.map((item) => item.id)));
       setFocusedItemId(pendingItems[0]?.id ?? detail.items[0]?.id ?? null);
     } catch (error) {
-      showToast(String(error), 'error');
-      setSession(null);
-      setSelectedIds(new Set());
-      setFocusedItemId(null);
+      if (isSessionNotFoundError(error)) {
+        clearSessionState();
+      } else {
+        showToast(String(error), 'error');
+        setSession(null);
+        setSelectedIds(new Set());
+        setFocusedItemId(null);
+      }
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, [clearSessionState, showToast]);
 
   useEffect(() => {
     void loadSession(sessionId);
@@ -118,12 +138,16 @@ export default function ConflictReviewWindow() {
   useEffect(() => {
     if (!focusedItemId || !sessionId) {
       setPreview(null);
+      setSourceMediaPreviewFailed(false);
+      setTargetMediaPreviewFailed(false);
       return;
     }
 
     let cancelled = false;
     const fetchPreview = async () => {
       setPreviewLoading(true);
+      setSourceMediaPreviewFailed(false);
+      setTargetMediaPreviewFailed(false);
       try {
         const data = await invoke<ConflictPreviewPayload>('get_conflict_item_preview', {
           sessionId,
@@ -136,7 +160,9 @@ export default function ConflictReviewWindow() {
       } catch (error) {
         if (!cancelled) {
           setPreview(null);
-          showToast(String(error), 'warning');
+          if (!isSessionNotFoundError(error)) {
+            showToast(String(error), 'warning');
+          }
         }
       } finally {
         if (!cancelled) {
@@ -299,9 +325,35 @@ export default function ConflictReviewWindow() {
         await getCurrentWebviewWindow().close();
       }
     } catch (error) {
-      showToast(String(error), 'error');
+      if (isSessionNotFoundError(error)) {
+        clearSessionState();
+        await getCurrentWebviewWindow().close();
+      } else {
+        showToast(String(error), 'error');
+      }
     }
-  }, [sessionId, showToast, t]);
+  }, [clearSessionState, sessionId, showToast, t]);
+
+  const renderOpenPreviewButtons = (sourcePath: string, targetPath: string) => (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="button"
+        onClick={() => void openPath(sourcePath)}
+        className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--bg-tertiary)]"
+      >
+        <IconExternalLink size={14} />
+        Source 열기
+      </button>
+      <button
+        type="button"
+        onClick={() => void openPath(targetPath)}
+        className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--bg-tertiary)]"
+      >
+        <IconExternalLink size={14} />
+        Target 열기
+      </button>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] p-4 md:p-6 flex flex-col gap-4">
@@ -376,27 +428,99 @@ export default function ConflictReviewWindow() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="border-2 border-[var(--border-main)] p-2 bg-[var(--bg-secondary)]">
               <p className="text-xs font-mono mb-2 uppercase">Source</p>
-              <img src={convertFileSrc(focusedItem.sourcePath)} alt="source preview" className="max-h-[360px] w-full object-contain" />
+              {sourceMediaPreviewFailed ? (
+                <div className="h-[360px] border border-dashed border-[var(--border-main)] flex items-center justify-center px-3 text-center font-mono text-xs text-[var(--text-secondary)]">
+                  {t('conflict.previewLoadFailed', {
+                    defaultValue: '미리보기를 불러오지 못했습니다. 아래 버튼으로 OS 기본 앱에서 확인하세요.',
+                  })}
+                </div>
+              ) : (
+                <img
+                  src={convertFileSrc(focusedItem.sourcePath)}
+                  alt="source preview"
+                  onError={() => setSourceMediaPreviewFailed(true)}
+                  className="max-h-[360px] w-full object-contain"
+                />
+              )}
             </div>
             <div className="border-2 border-[var(--border-main)] p-2 bg-[var(--bg-secondary)]">
               <p className="text-xs font-mono mb-2 uppercase">Target</p>
-              <img src={convertFileSrc(focusedItem.targetPath)} alt="target preview" className="max-h-[360px] w-full object-contain" />
+              {targetMediaPreviewFailed ? (
+                <div className="h-[360px] border border-dashed border-[var(--border-main)] flex items-center justify-center px-3 text-center font-mono text-xs text-[var(--text-secondary)]">
+                  {t('conflict.previewLoadFailed', {
+                    defaultValue: '미리보기를 불러오지 못했습니다. 아래 버튼으로 OS 기본 앱에서 확인하세요.',
+                  })}
+                </div>
+              ) : (
+                <img
+                  src={convertFileSrc(focusedItem.targetPath)}
+                  alt="target preview"
+                  onError={() => setTargetMediaPreviewFailed(true)}
+                  className="max-h-[360px] w-full object-contain"
+                />
+              )}
             </div>
+            {(sourceMediaPreviewFailed || targetMediaPreviewFailed) ? (
+              <div className="lg:col-span-2 border border-[var(--border-main)] p-3 bg-[var(--bg-primary)]">
+                <p className="font-mono text-xs mb-2 text-[var(--text-secondary)]">
+                  {t('conflict.previewOpenHint', {
+                    defaultValue: '파일을 직접 열어 원본/타겟을 비교하세요.',
+                  })}
+                </p>
+                {renderOpenPreviewButtons(focusedItem.sourcePath, focusedItem.targetPath)}
+              </div>
+            ) : null}
           </div>
         ) : preview?.kind === 'video' ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div className="border-2 border-[var(--border-main)] p-2 bg-[var(--bg-secondary)]">
               <p className="text-xs font-mono mb-2 uppercase">Source</p>
-              <video controls className="max-h-[320px] w-full" src={convertFileSrc(focusedItem.sourcePath)}>
-                <track kind="captions" />
-              </video>
+              {sourceMediaPreviewFailed ? (
+                <div className="h-[320px] border border-dashed border-[var(--border-main)] flex items-center justify-center px-3 text-center font-mono text-xs text-[var(--text-secondary)]">
+                  {t('conflict.previewLoadFailed', {
+                    defaultValue: '미리보기를 불러오지 못했습니다. 아래 버튼으로 OS 기본 앱에서 확인하세요.',
+                  })}
+                </div>
+              ) : (
+                <video
+                  controls
+                  className="max-h-[320px] w-full"
+                  src={convertFileSrc(focusedItem.sourcePath)}
+                  onError={() => setSourceMediaPreviewFailed(true)}
+                >
+                  <track kind="captions" />
+                </video>
+              )}
             </div>
             <div className="border-2 border-[var(--border-main)] p-2 bg-[var(--bg-secondary)]">
               <p className="text-xs font-mono mb-2 uppercase">Target</p>
-              <video controls className="max-h-[320px] w-full" src={convertFileSrc(focusedItem.targetPath)}>
-                <track kind="captions" />
-              </video>
+              {targetMediaPreviewFailed ? (
+                <div className="h-[320px] border border-dashed border-[var(--border-main)] flex items-center justify-center px-3 text-center font-mono text-xs text-[var(--text-secondary)]">
+                  {t('conflict.previewLoadFailed', {
+                    defaultValue: '미리보기를 불러오지 못했습니다. 아래 버튼으로 OS 기본 앱에서 확인하세요.',
+                  })}
+                </div>
+              ) : (
+                <video
+                  controls
+                  className="max-h-[320px] w-full"
+                  src={convertFileSrc(focusedItem.targetPath)}
+                  onError={() => setTargetMediaPreviewFailed(true)}
+                >
+                  <track kind="captions" />
+                </video>
+              )}
             </div>
+            {(sourceMediaPreviewFailed || targetMediaPreviewFailed) ? (
+              <div className="lg:col-span-2 border border-[var(--border-main)] p-3 bg-[var(--bg-primary)]">
+                <p className="font-mono text-xs mb-2 text-[var(--text-secondary)]">
+                  {t('conflict.previewOpenHint', {
+                    defaultValue: '파일을 직접 열어 원본/타겟을 비교하세요.',
+                  })}
+                </p>
+                {renderOpenPreviewButtons(focusedItem.sourcePath, focusedItem.targetPath)}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-4">
@@ -405,24 +529,7 @@ export default function ConflictReviewWindow() {
                 defaultValue: '앱 내 미리보기를 지원하지 않는 파일입니다. OS 기본 미리보기로 확인하세요.',
               })}
             </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void openPath(focusedItem.sourcePath)}
-                className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--bg-tertiary)]"
-              >
-                <IconExternalLink size={14} />
-                Source 열기
-              </button>
-              <button
-                type="button"
-                onClick={() => void openPath(focusedItem.targetPath)}
-                className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--bg-tertiary)]"
-              >
-                <IconExternalLink size={14} />
-                Target 열기
-              </button>
-            </div>
+            {renderOpenPreviewButtons(focusedItem.sourcePath, focusedItem.targetPath)}
           </div>
         )}
       </section>

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { ask } from '@tauri-apps/plugin-dialog';
+import { openPath } from '@tauri-apps/plugin-opener';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import ConflictReviewWindow from './ConflictReviewWindow';
@@ -77,6 +78,7 @@ function buildSession() {
 describe('ConflictReviewWindow', () => {
   const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
   const mockAsk = ask as unknown as ReturnType<typeof vi.fn>;
+  const mockOpenPath = openPath as unknown as ReturnType<typeof vi.fn>;
   const mockListen = listen as unknown as ReturnType<typeof vi.fn>;
   const mockGetCurrentWindow = getCurrentWebviewWindow as unknown as ReturnType<typeof vi.fn>;
 
@@ -142,5 +144,103 @@ describe('ConflictReviewWindow', () => {
         mockInvoke.mock.calls.some(([command]) => command === 'resolve_conflict_items')
       ).toBe(true);
     });
+  });
+
+  it('closes immediately when current session is already missing', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_conflict_review_session') {
+        throw new Error('Conflict session not found: session-1');
+      }
+      if (command === 'get_conflict_item_preview') {
+        return {
+          kind: 'other',
+          sourceText: null,
+          targetText: null,
+          sourceTruncated: false,
+          targetTruncated: false,
+        };
+      }
+      if (command === 'close_conflict_review_session') {
+        return { closed: true, hadPending: false, skippedCount: 0 };
+      }
+      return null;
+    });
+
+    render(<ConflictReviewWindow />);
+    await screen.findByText('선택된 세션이 없습니다.');
+
+    fireEvent.click(screen.getByRole('button', { name: /close/i }));
+
+    await waitFor(() => {
+      expect(closeWindowMock).toHaveBeenCalled();
+    });
+    expect(
+      mockInvoke.mock.calls.some(([command]) => command === 'close_conflict_review_session')
+    ).toBe(false);
+    expect(showToastMock).not.toHaveBeenCalled();
+  });
+
+  it('closes window when close command races with already-removed session', async () => {
+    mockInvoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'get_conflict_review_session') {
+        return buildSession();
+      }
+      if (command === 'get_conflict_item_preview') {
+        return {
+          kind: 'other',
+          sourceText: null,
+          targetText: null,
+          sourceTruncated: false,
+          targetTruncated: false,
+        };
+      }
+      if (command === 'close_conflict_review_session') {
+        if (args?.forceSkipPending) {
+          return { closed: true, hadPending: true, skippedCount: 1 };
+        }
+        throw new Error('Conflict session not found: session-1');
+      }
+      return null;
+    });
+
+    render(<ConflictReviewWindow />);
+    await screen.findByText('타겟 최신 파일 검토');
+
+    fireEvent.click(screen.getByRole('button', { name: /close/i }));
+
+    await waitFor(() => {
+      expect(closeWindowMock).toHaveBeenCalled();
+    });
+    expect(showToastMock).not.toHaveBeenCalled();
+  });
+
+  it('shows media fallback when image preview fails to load', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_conflict_review_session') {
+        return buildSession();
+      }
+      if (command === 'get_conflict_item_preview') {
+        return {
+          kind: 'image',
+          sourceText: null,
+          targetText: null,
+          sourceTruncated: false,
+          targetTruncated: false,
+        };
+      }
+      return null;
+    });
+
+    render(<ConflictReviewWindow />);
+
+    const sourceImage = await screen.findByAltText('source preview');
+    fireEvent.error(sourceImage);
+
+    expect(
+      await screen.findByText('미리보기를 불러오지 못했습니다. 아래 버튼으로 OS 기본 앱에서 확인하세요.')
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source 열기' }));
+    expect(mockOpenPath).toHaveBeenCalledWith('/src/a.txt');
   });
 });
