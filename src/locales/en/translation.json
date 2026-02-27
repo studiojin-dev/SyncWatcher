@@ -249,7 +249,8 @@
           "description": "How UUID-based source paths are resolved at runtime.",
           "tokenResolve": "Source tokens like [DISK_UUID:...] or [VOLUME_UUID:...] resolve to the currently mounted volume path.",
           "notMounted": "If the UUID is not mounted, path resolution fails and sync/watch cannot start.",
-          "subPath": "You can set a sub path inside the mounted volume to sync only part of the device."
+          "subPath": "You can set a sub path inside the mounted volume to sync only part of the device.",
+          "autoCopyOnInsert": "When a removable disk such as an SD card is inserted, copy runs automatically. You can configure automatic unmount after copy completes."
         }
       },
       "syncEngine": {

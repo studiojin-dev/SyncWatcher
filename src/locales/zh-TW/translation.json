@@ -252,7 +252,8 @@
                     "description": "UUID 來源路徑在執行階段的解析方式。",
                     "tokenResolve": "如 [DISK_UUID:...] 或 [VOLUME_UUID:...] 的 source token 會解析到當前已掛載磁碟區路徑。",
                     "notMounted": "若對應 UUID 未掛載，路徑解析會失敗，無法啟動同步/監控。",
-                    "subPath": "可指定掛載磁碟區內的子路徑，僅同步裝置中的部分目錄。"
+                    "subPath": "可指定掛載磁碟區內的子路徑，僅同步裝置中的部分目錄。",
+                    "autoCopyOnInsert": "插入 SD 卡等可攜式磁碟時會自動執行複製。你可以在設定中啟用複製完成後自動卸載。"
                 }
             },
             "syncEngine": {

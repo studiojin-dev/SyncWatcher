@@ -77,6 +77,7 @@ function HelpView() {
         t('help.sections.uuidSource.tokenResolve'),
         t('help.sections.uuidSource.notMounted'),
         t('help.sections.uuidSource.subPath'),
+        t('help.sections.uuidSource.autoCopyOnInsert'),
       ],
     },
   ];

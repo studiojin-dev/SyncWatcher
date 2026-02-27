@@ -252,7 +252,8 @@
           "description": "Cómo se resuelven en runtime las rutas de origen basadas en UUID.",
           "tokenResolve": "Tokens como [DISK_UUID:...] o [VOLUME_UUID:...] se resuelven a la ruta del volumen montado actualmente.",
           "notMounted": "Si el UUID no está montado, falla la resolución de ruta y no puede iniciar sync/watch.",
-          "subPath": "Puede definir un sub path dentro del volumen montado para sincronizar solo parte del dispositivo."
+          "subPath": "Puede definir un sub path dentro del volumen montado para sincronizar solo parte del dispositivo.",
+          "autoCopyOnInsert": "Cuando se inserta un disco extraíble como una tarjeta SD, la copia se ejecuta automáticamente. Puede configurar el desmontaje automático al finalizar la copia."
         }
       },
       "syncEngine": {
