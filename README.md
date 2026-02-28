@@ -87,6 +87,29 @@ npm run build
 npm run tauri build
 ```
 
+### macOS Installation
+
+1. Download the macOS installer package from GitHub Releases.
+2. Open the downloaded file (`.dmg`) and move `SyncWatcher.app` to `Applications`.
+   - DMG 설치 화면에 보안 안내와 설치 방법(우클릭 열기/보안 설정 허용)이 함께 표시됩니다.
+3. Run `SyncWatcher`.
+
+## Security & Permissions (Important)
+
+This app is currently distributed via GitHub Releases and is **not notarized** with Apple Developer Program.
+
+On first launch, macOS may show a security warning (Gatekeeper) such as "cannot be opened because the developer cannot be verified."
+
+- To run the app for the first time:
+  1. Open the app with right-click (Control-click) → **Open**.
+  2. In the dialog, click **Open** again.
+- If still blocked:
+  1. Open **System Settings** → **Privacy & Security**.
+  2. In the **Security** section, click **Allow** for `SyncWatcher` when available.
+  3. Launch `SyncWatcher` again.
+
+If you operate in a corporate environment, you may need administrator approval to allow this app once at the OS policy level.
+
 ### CLI Usage
 
 The CLI can be run independently of the GUI for testing and verification:
