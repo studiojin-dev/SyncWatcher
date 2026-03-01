@@ -53,7 +53,7 @@ function AboutView() {
         </h1>
       </header>
 
-      <div className="flex flex-col gap-6 max-w-2xl">
+      <div data-testid="about-content-container" className="flex flex-col gap-6 w-full">
         <div className="neo-box p-8 text-center bg-[var(--bg-primary)]">
           <div className="text-6xl mb-4 animate-bounce-slow">
             🔄

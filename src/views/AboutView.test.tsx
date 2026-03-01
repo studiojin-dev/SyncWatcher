@@ -160,6 +160,14 @@ describe('AboutView', () => {
     expect(title).toHaveClass('text-3xl');
   });
 
+  it('should stretch content container to full width under the header', async () => {
+    render(<AboutView />);
+
+    const contentContainer = await screen.findByTestId('about-content-container');
+    expect(contentContainer).toHaveClass('w-full');
+    expect(contentContainer).not.toHaveClass('max-w-2xl');
+  });
+
   it('should show all sections in correct order', async () => {
     render(<AboutView />);
 

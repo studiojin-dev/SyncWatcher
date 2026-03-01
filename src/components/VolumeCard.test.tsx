@@ -22,7 +22,7 @@ vi.mock('../hooks/useSettings', () => ({
 }));
 
 describe('VolumeCard', () => {
-  it('renders free and total capacity for local volume', () => {
+  it('renders used, free and total capacity for local volume', () => {
     render(
       <VolumeCard
         volume={{
@@ -37,6 +37,7 @@ describe('VolumeCard', () => {
     );
 
     expect(screen.getByText('/Volumes/USB')).toBeInTheDocument();
+    expect(screen.getByText(/60 MiB USED/)).toBeInTheDocument();
     expect(screen.getByText(/FREE/)).toBeInTheDocument();
     expect(screen.getByText(/\/ 100 MiB/)).toBeInTheDocument();
   });

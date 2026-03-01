@@ -18,7 +18,7 @@ interface VolumeCardProps {
 
 /**
  * Volume Card component - Ghost glass aesthetic
- * Shows volume name, mount point, free/total space
+ * Shows volume name, mount point, used/free/total space
  */
 function VolumeCard({ volume }: VolumeCardProps) {
     const { t } = useTranslation();
@@ -69,7 +69,10 @@ function VolumeCard({ volume }: VolumeCardProps) {
             </div>
 
             {hasCapacity ? (
-                <div className="flex justify-between items-center font-mono text-xs font-bold">
+                <div className="flex flex-wrap items-center gap-2 font-mono text-xs font-bold">
+                    <span className="bg-[var(--accent-main)] text-white px-2 py-1 border-2 border-[var(--border-main)] shadow-[2px_2px_0_0_#000]">
+                        {formatBytes(usedBytes, settings.dataUnitSystem)} USED
+                    </span>
                     <span className="bg-[var(--accent-success)] text-black px-2 py-1 border-2 border-[var(--border-main)] shadow-[2px_2px_0_0_#000]">
                         {formatBytes(availableBytes, settings.dataUnitSystem)} FREE
                     </span>
