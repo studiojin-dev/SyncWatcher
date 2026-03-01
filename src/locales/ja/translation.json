@@ -95,7 +95,12 @@
       },
       "warnings": {
         "targetInWatchedSource": "ターゲットが他の監視ソースと重複し、同期ループの原因になる可能性があります。"
-      }
+      },
+      "autoUnmountPendingStatus": "Unmount confirmation pending",
+      "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
+      "autoUnmountConfirmedStatus": "Unmount confirmed",
+      "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
+      "autoUnmountFailedStatus": "Unmount failed"
     },
     "dryRun": {
       "totalFiles": "総ファイル数",

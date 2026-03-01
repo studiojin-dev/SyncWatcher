@@ -1,4 +1,4 @@
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -26,6 +26,9 @@ const runtimeState: MockRuntimeState = {
 };
 
 const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
+const { setLastLogMock } = vi.hoisted(() => ({
+  setLastLogMock: vi.fn(),
+}));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -33,6 +36,13 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: () => ({
+    label: 'main',
+    isVisible: vi.fn().mockResolvedValue(true),
+  }),
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -61,6 +71,14 @@ vi.mock('./hooks/useSettings', () => ({
     updateSettings: vi.fn(),
     resetSettings: vi.fn(),
   }),
+}));
+
+vi.mock('./hooks/useSyncTaskStatus', () => ({
+  useSyncTaskStatusStore: {
+    getState: () => ({
+      setLastLog: setLastLogMock,
+    }),
+  },
 }));
 
 vi.mock('./context/SettingsContext', () => ({
@@ -101,6 +119,23 @@ vi.mock('./components/layout/AppShell', () => ({
 
 vi.mock('./components/runtime/BackendRuntimeBridge', () => ({
   default: () => null,
+}));
+
+vi.mock('./components/ui/AutoUnmountConfirmModal', () => ({
+  default: ({
+    opened,
+    onConfirm,
+    onCancel,
+  }: {
+    opened: boolean;
+    onConfirm: () => void;
+    onCancel: () => void;
+  }) => (opened ? (
+    <>
+      <button type="button" onClick={onConfirm}>confirm-auto-unmount</button>
+      <button type="button" onClick={onCancel}>cancel-auto-unmount</button>
+    </>
+  ) : null),
 }));
 
 vi.mock('./components/features/UpdateChecker', () => ({
@@ -167,6 +202,7 @@ async function emitEvent(eventName: string, payload?: unknown) {
 describe('App close lifecycle', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    setLastLogMock.mockReset();
     runtimeState.settingsLoaded = true;
     runtimeState.tasksLoaded = true;
     runtimeState.setsLoaded = true;
@@ -377,5 +413,62 @@ describe('App close lifecycle', () => {
     expect(
       invokeMock.mock.calls.filter((call) => call[0] === 'quit_app'),
     ).toHaveLength(1);
+  });
+
+  it('updates pending status when runtime auto-unmount confirmation is requested', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('runtime-auto-unmount-request')).toBe(true);
+    });
+
+    await emitEvent('runtime-auto-unmount-request', {
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      source: '/Volumes/CARD',
+      filesCopied: 0,
+      bytesCopied: 0,
+      reason: 'zero-copy',
+    });
+
+    expect(setLastLogMock).toHaveBeenCalledWith('task-1', expect.objectContaining({
+      message: 'syncTasks.autoUnmountPendingStatus',
+      level: 'warning',
+    }));
+  });
+
+  it('disables auto-unmount for this session when user cancels confirmation', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('runtime-auto-unmount-request')).toBe(true);
+    });
+
+    await emitEvent('runtime-auto-unmount-request', {
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      source: '/Volumes/CARD',
+      filesCopied: 0,
+      bytesCopied: 0,
+      reason: 'zero-copy',
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('cancel-auto-unmount')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('cancel-auto-unmount'));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('set_auto_unmount_session_disabled', {
+        taskId: 'task-1',
+        disabled: true,
+      });
+    });
+
+    expect(setLastLogMock).toHaveBeenCalledWith('task-1', expect.objectContaining({
+      message: 'syncTasks.autoUnmountCancelledStatus',
+      level: 'warning',
+    }));
   });
 });

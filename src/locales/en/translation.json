@@ -92,7 +92,12 @@
       },
       "warnings": {
         "targetInWatchedSource": "Target overlaps another watch source and may cause sync loops."
-      }
+      },
+      "autoUnmountPendingStatus": "Unmount confirmation pending",
+      "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
+      "autoUnmountConfirmedStatus": "Unmount confirmed",
+      "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
+      "autoUnmountFailedStatus": "Unmount failed"
     },
     "dryRun": {
       "totalFiles": "Total files",

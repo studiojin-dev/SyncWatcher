@@ -162,6 +162,8 @@ pub struct AppState {
     runtime_config_apply_lock: Arc<Mutex<()>>,
     /// 런타임이 관리 중인 watcher source 추적 (task_id -> source)
     runtime_watch_sources: Arc<RwLock<HashMap<String, String>>>,
+    /// auto-unmount 세션 비활성화 task 집합 (앱 재시작 시 초기화)
+    auto_unmount_session_disabled_tasks: Arc<RwLock<HashSet<String>>>,
     /// 타겟 최신 파일 충돌 검토 세션
     conflict_review_sessions: Arc<RwLock<HashMap<String, ConflictReviewSession>>>,
     /// 충돌 세션/랜덤 토큰 생성 시퀀스
@@ -1409,6 +1411,32 @@ async fn runtime_get_state_internal(state: &AppState) -> RuntimeState {
     }
 }
 
+async fn set_auto_unmount_session_disabled_internal(
+    task_id: &str,
+    disabled: bool,
+    state: &AppState,
+) {
+    let mut disabled_tasks = state.auto_unmount_session_disabled_tasks.write().await;
+    if disabled {
+        disabled_tasks.insert(task_id.to_string());
+    } else {
+        disabled_tasks.remove(task_id);
+    }
+}
+
+async fn is_auto_unmount_session_disabled_internal(task_id: &str, state: &AppState) -> bool {
+    let disabled_tasks = state.auto_unmount_session_disabled_tasks.read().await;
+    disabled_tasks.contains(task_id)
+}
+
+async fn prune_auto_unmount_session_disabled_tasks(
+    valid_task_ids: &HashSet<String>,
+    state: &AppState,
+) {
+    let mut disabled_tasks = state.auto_unmount_session_disabled_tasks.write().await;
+    disabled_tasks.retain(|task_id| valid_task_ids.contains(task_id));
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncOrigin {
     Manual,
@@ -1795,12 +1823,25 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     .await;
 
     if let Ok(exec_result) = &result {
+        let auto_unmount_session_disabled =
+            is_auto_unmount_session_disabled_internal(&task.id, &state).await;
+        let effective_auto_unmount = task.auto_unmount && !auto_unmount_session_disabled;
+
         match decide_runtime_auto_unmount(
-            task.auto_unmount,
+            effective_auto_unmount,
             exec_result.has_pending_conflicts,
             exec_result.sync_result.files_copied,
         ) {
-            RuntimeAutoUnmountDecision::SkipDisabled => {}
+            RuntimeAutoUnmountDecision::SkipDisabled => {
+                if task.auto_unmount && auto_unmount_session_disabled {
+                    state.log_manager.log_with_category(
+                        "info",
+                        "Auto unmount skipped for this session (user declined)",
+                        Some(task.id.clone()),
+                        LogCategory::Other,
+                    );
+                }
+            }
             RuntimeAutoUnmountDecision::SkipDueConflicts => {
                 state.log_manager.log_with_category(
                     "warning",
@@ -3003,6 +3044,7 @@ async fn runtime_set_config(
     let _apply_guard = state.runtime_config_apply_lock.lock().await;
 
     validate_runtime_tasks(&payload.tasks)?;
+    let valid_task_ids: HashSet<String> = payload.tasks.iter().map(|task| task.id.clone()).collect();
 
     for set in &payload.exclusion_sets {
         input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
@@ -3012,6 +3054,7 @@ async fn runtime_set_config(
         let mut config = state.runtime_config.write().await;
         *config = payload;
     }
+    prune_auto_unmount_session_disabled_tasks(&valid_task_ids, state.inner()).await;
 
     reconcile_runtime_watchers(app.clone(), state.inner().clone()).await?;
 
@@ -3034,6 +3077,26 @@ async fn runtime_validate_tasks(tasks: Vec<RuntimeSyncTask>) -> Result<(), Strin
 #[tauri::command]
 async fn runtime_get_state(state: tauri::State<'_, AppState>) -> Result<RuntimeState, String> {
     Ok(runtime_get_state_internal(state.inner()).await)
+}
+
+#[tauri::command]
+async fn set_auto_unmount_session_disabled(
+    task_id: String,
+    disabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    set_auto_unmount_session_disabled_internal(&task_id, disabled, state.inner()).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn is_auto_unmount_session_disabled(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    Ok(is_auto_unmount_session_disabled_internal(&task_id, state.inner()).await)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -3462,6 +3525,7 @@ pub fn run() {
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
+            auto_unmount_session_disabled_tasks: Arc::new(RwLock::new(HashSet::new())),
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
         })
@@ -3493,6 +3557,8 @@ pub fn run() {
             runtime_set_config,
             runtime_validate_tasks,
             runtime_get_state,
+            set_auto_unmount_session_disabled,
+            is_auto_unmount_session_disabled,
             get_app_config_dir,
             join_paths,
             read_yaml_file,

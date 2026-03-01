@@ -484,11 +484,41 @@ function SyncTasksView() {
                         'warning'
                     );
                 } else {
+                    const isSessionDisabled = await invoke<boolean>('is_auto_unmount_session_disabled', {
+                        taskId: task.id,
+                    });
+                    if (isSessionDisabled) {
+                        const suppressedMessage = t('syncTasks.autoUnmountSuppressedStatus', {
+                            defaultValue: '이번 세션에서는 auto-unmount가 비활성화되어 마운트를 유지합니다.',
+                        });
+                        useSyncTaskStatusStore.getState().setLastLog(task.id, {
+                            message: suppressedMessage,
+                            timestamp: new Date().toLocaleTimeString(),
+                            level: 'warning',
+                        });
+                        showToast(suppressedMessage, 'info');
+                        return;
+                    }
+
                     try {
                         await invoke('unmount_volume', { path: task.source });
+                        useSyncTaskStatusStore.getState().setLastLog(task.id, {
+                            message: t('syncTasks.autoUnmountConfirmedStatus', {
+                                defaultValue: 'Unmount 확인 완료',
+                            }),
+                            timestamp: new Date().toLocaleTimeString(),
+                            level: 'success',
+                        });
                         showToast(t('syncTasks.unmountSuccess', { defaultValue: '볼륨이 안전하게 제거되었습니다.' }), 'success');
                     } catch (unmountErr) {
                         console.error('Auto unmount failed:', unmountErr);
+                        useSyncTaskStatusStore.getState().setLastLog(task.id, {
+                            message: t('syncTasks.autoUnmountFailedStatus', {
+                                defaultValue: 'Unmount 실패',
+                            }),
+                            timestamp: new Date().toLocaleTimeString(),
+                            level: 'warning',
+                        });
                         // unmount 실패는 동기화 실패는 아니므로 경고만 표시
                         showToast(t('syncTasks.unmountFailed', { defaultValue: '볼륨 제거 실패' }), 'warning');
                     }

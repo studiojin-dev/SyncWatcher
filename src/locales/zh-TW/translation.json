@@ -95,7 +95,12 @@
             },
             "warnings": {
                 "targetInWatchedSource": "目標與其他監控任務的來源路徑重疊，可能導致同步迴圈。"
-            }
+            },
+            "autoUnmountPendingStatus": "Unmount confirmation pending",
+            "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
+            "autoUnmountConfirmedStatus": "Unmount confirmed",
+            "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
+            "autoUnmountFailedStatus": "Unmount failed"
         },
         "dryRun": {
             "totalFiles": "檔案總數",

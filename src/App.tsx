@@ -6,6 +6,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import AppShell from './components/layout/AppShell';
 import { useSettings } from './hooks/useSettings';
+import { useSyncTaskStatusStore } from './hooks/useSyncTaskStatus';
 import { SettingsProvider } from './context/SettingsContext';
 import { useSyncTasksContext, SyncTasksProvider } from './context/SyncTasksContext';
 import { useExclusionSetsContext, ExclusionSetsProvider } from './context/ExclusionSetsContext';
@@ -59,6 +60,17 @@ function AppContent() {
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
   const { updateSettings } = useSettings();
+  const setTaskLastLog = useCallback((
+    taskId: string,
+    message: string,
+    level: 'info' | 'success' | 'warning' | 'error' = 'info',
+  ) => {
+    useSyncTaskStatusStore.getState().setLastLog(taskId, {
+      message,
+      timestamp: new Date().toLocaleTimeString(),
+      level,
+    });
+  }, []);
 
   // 앱 시작 시 라이선스 검증
   useEffect(() => {
@@ -302,6 +314,13 @@ function AppContent() {
       'runtime-auto-unmount-request',
       (event) => {
         const payload = event.payload;
+        setTaskLastLog(
+          payload.taskId,
+          t('syncTasks.autoUnmountPendingStatus', {
+            defaultValue: 'Unmount 확인 대기',
+          }),
+          'warning',
+        );
         void invoke('send_notification', {
           title: t('appName'),
           body: t('app.autoUnmountConfirmNotification', {
@@ -326,7 +345,7 @@ function AppContent() {
           console.warn('[App] Failed to unlisten runtime-auto-unmount-request', err);
         });
     };
-  }, [t]);
+  }, [setTaskLastLog, t]);
 
   useEffect(() => {
     if (activeAutoUnmountRequest || pendingAutoUnmountRequests.length === 0) {
@@ -373,16 +392,51 @@ function AppContent() {
 
     try {
       await invoke('unmount_volume', { path: activeAutoUnmountRequest.source });
+      setTaskLastLog(
+        activeAutoUnmountRequest.taskId,
+        t('syncTasks.autoUnmountConfirmedStatus', {
+          defaultValue: 'Unmount 확인 완료',
+        }),
+        'success',
+      );
     } catch (error) {
       console.error('Failed to unmount from auto-unmount confirmation:', error);
+      setTaskLastLog(
+        activeAutoUnmountRequest.taskId,
+        t('syncTasks.autoUnmountFailedStatus', {
+          defaultValue: 'Unmount 실패',
+        }),
+        'warning',
+      );
     } finally {
       setActiveAutoUnmountRequest(null);
     }
-  }, [activeAutoUnmountRequest]);
+  }, [activeAutoUnmountRequest, setTaskLastLog, t]);
 
-  const cancelAutoUnmount = useCallback(() => {
-    setActiveAutoUnmountRequest(null);
-  }, []);
+  const cancelAutoUnmount = useCallback(async () => {
+    if (!activeAutoUnmountRequest) {
+      return;
+    }
+
+    try {
+      await invoke('set_auto_unmount_session_disabled', {
+        taskId: activeAutoUnmountRequest.taskId,
+        disabled: true,
+      });
+      setTaskLastLog(
+        activeAutoUnmountRequest.taskId,
+        t('syncTasks.autoUnmountCancelledStatus', {
+          defaultValue: 'Unmount 취소(마운트 유지)',
+        }),
+        'warning',
+      );
+    } catch (error) {
+      console.error('Failed to set auto-unmount session suppression:', error);
+      setTaskLastLog(activeAutoUnmountRequest.taskId, String(error), 'error');
+    } finally {
+      setActiveAutoUnmountRequest(null);
+    }
+  }, [activeAutoUnmountRequest, setTaskLastLog, t]);
 
   useEffect(() => {
     if (!isLifecycleReady || pendingCloseIntentRef.current === null) {

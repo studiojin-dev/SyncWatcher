@@ -95,7 +95,12 @@
       },
       "warnings": {
         "targetInWatchedSource": "El destino se superpone con otro origen vigilado y puede causar bucles."
-      }
+      },
+      "autoUnmountPendingStatus": "Unmount confirmation pending",
+      "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
+      "autoUnmountConfirmedStatus": "Unmount confirmed",
+      "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
+      "autoUnmountFailedStatus": "Unmount failed"
     },
     "dryRun": {
       "totalFiles": "Archivos totales",

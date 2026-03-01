@@ -14,6 +14,8 @@ mod integration_tests {
         remove_runtime_sync_task_state, take_runtime_pending_sync_task,
         resolve_runtime_exclude_patterns,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        set_auto_unmount_session_disabled_internal, is_auto_unmount_session_disabled_internal,
+        prune_auto_unmount_session_disabled_tasks,
         validate_runtime_tasks, AppState, DataUnitSystem, RuntimeExclusionSet,
         RuntimeSyncEnqueueResult, RuntimeSyncTask,
         volume_watch_next_tick_delay,
@@ -76,6 +78,7 @@ mod integration_tests {
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
+            auto_unmount_session_disabled_tasks: Arc::new(RwLock::new(HashSet::new())),
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
         }
@@ -595,6 +598,33 @@ mod integration_tests {
     fn test_decide_runtime_auto_unmount_unmounts_when_files_copied() {
         let decision = decide_runtime_auto_unmount(true, false, 2);
         assert_eq!(decision, RuntimeAutoUnmountDecision::UnmountNow);
+    }
+
+    #[tokio::test]
+    async fn test_auto_unmount_session_disabled_internal_toggle() {
+        let state = build_app_state();
+
+        assert!(!is_auto_unmount_session_disabled_internal("task-1", &state).await);
+
+        set_auto_unmount_session_disabled_internal("task-1", true, &state).await;
+        assert!(is_auto_unmount_session_disabled_internal("task-1", &state).await);
+
+        set_auto_unmount_session_disabled_internal("task-1", false, &state).await;
+        assert!(!is_auto_unmount_session_disabled_internal("task-1", &state).await);
+    }
+
+    #[tokio::test]
+    async fn test_prune_auto_unmount_session_disabled_tasks_removes_orphans() {
+        let state = build_app_state();
+
+        set_auto_unmount_session_disabled_internal("keep-task", true, &state).await;
+        set_auto_unmount_session_disabled_internal("removed-task", true, &state).await;
+
+        let valid_task_ids = HashSet::from(["keep-task".to_string()]);
+        prune_auto_unmount_session_disabled_tasks(&valid_task_ids, &state).await;
+
+        assert!(is_auto_unmount_session_disabled_internal("keep-task", &state).await);
+        assert!(!is_auto_unmount_session_disabled_internal("removed-task", &state).await);
     }
 
     #[test]

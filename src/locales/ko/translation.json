@@ -95,7 +95,12 @@
       },
       "warnings": {
         "targetInWatchedSource": "대상이 다른 감시 작업의 원본과 겹쳐 루프가 발생할 수 있습니다."
-      }
+      },
+      "autoUnmountPendingStatus": "Unmount 확인 대기",
+      "autoUnmountCancelledStatus": "Unmount 취소(마운트 유지)",
+      "autoUnmountConfirmedStatus": "Unmount 확인 완료",
+      "autoUnmountSuppressedStatus": "이번 세션에서는 auto-unmount가 비활성화되어 마운트를 유지합니다.",
+      "autoUnmountFailedStatus": "Unmount 실패"
     },
     "dryRun": {
       "totalFiles": "총 파일 수",

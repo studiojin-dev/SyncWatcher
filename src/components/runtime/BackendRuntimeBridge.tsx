@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 import { useSyncTasksContext } from '../../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../../context/ExclusionSetsContext';
 import { useSettings } from '../../hooks/useSettings';
@@ -36,6 +37,12 @@ interface BackendRuntimeBridgeProps {
 const QUEUED_STATUS_DEMOTION_DELAY_MS = 80;
 const INITIAL_RUNTIME_SYNC_TIMEOUT_MS = 10_000;
 const RUNTIME_SYNC_ERROR_TOAST_DEDUP_WINDOW_MS = 3_000;
+const AUTO_UNMOUNT_STATUS_KEYS = [
+    'syncTasks.autoUnmountPendingStatus',
+    'syncTasks.autoUnmountCancelledStatus',
+    'syncTasks.autoUnmountConfirmedStatus',
+    'syncTasks.autoUnmountSuppressedStatus',
+] as const;
 
 function applyRuntimeSnapshotToStore(state: RuntimeState) {
     const store = useSyncTaskStatusStore.getState();
@@ -104,6 +111,7 @@ function shouldShowRuntimeSyncErrorToast(
 }
 
 function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBridgeProps) {
+    const { t } = useTranslation();
     const { tasks, loaded: tasksLoaded } = useSyncTasksContext();
     const { sets, loaded: setsLoaded } = useExclusionSetsContext();
     const { settings, loaded: settingsLoaded } = useSettings();
@@ -113,6 +121,10 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
     const initialSyncResolvedRef = useRef(false);
     const queuedStatusDemotionTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
     const lastRuntimeSyncErrorToastRef = useRef<{ message: string; at: number } | null>(null);
+    const autoUnmountStatusMessages = useMemo(() => {
+        const localized = AUTO_UNMOUNT_STATUS_KEYS.map((key) => t(key));
+        return new Set<string>([...AUTO_UNMOUNT_STATUS_KEYS, ...localized]);
+    }, [t]);
 
     const payload = useMemo<RuntimeConfigPayload>(() => ({
         tasks: tasks.map(toRuntimeTask),
@@ -244,11 +256,24 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
                 currentFileTotalBytes: 0,
             });
 
+            const currentLastLog = store.getStatus(taskId)?.lastLog?.message;
+            const hasExplicitAutoUnmountStatus = Boolean(
+                currentLastLog && autoUnmountStatusMessages.has(currentLastLog)
+            );
+
             if (reason) {
+                if (!hasExplicitAutoUnmountStatus) {
+                    store.setLastLog(taskId, {
+                        message: reason,
+                        timestamp: new Date().toLocaleTimeString(),
+                        level: 'error',
+                    });
+                }
+            } else if (!hasExplicitAutoUnmountStatus) {
                 store.setLastLog(taskId, {
-                    message: reason,
+                    message: t('sync.syncComplete', { defaultValue: 'Sync complete' }),
                     timestamp: new Date().toLocaleTimeString(),
-                    level: 'error',
+                    level: 'success',
                 });
             }
 
@@ -270,7 +295,7 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             unlistenQueueState.then((fn) => fn());
             unlistenSyncState.then((fn) => fn());
         };
-    }, []);
+    }, [autoUnmountStatusMessages, t]);
 
     useEffect(() => {
         if (!ready) {

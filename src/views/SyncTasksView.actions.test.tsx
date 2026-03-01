@@ -20,6 +20,7 @@ const {
     watchingTaskIds: new Set<string>(['task-1']),
     queuedTaskIds: new Set<string>(),
     syncingTaskIds: new Set<string>(),
+    setLastLog: vi.fn(),
   };
   const useSyncTaskStatusStoreMock = Object.assign(
     () => statusState,
@@ -114,6 +115,7 @@ describe('SyncTasksView action confirmations', () => {
     statusState.queuedTaskIds = new Set();
     statusState.syncingTaskIds = new Set();
     statusState.statuses = new Map();
+    statusState.setLastLog.mockReset();
     listenMock.mockResolvedValue(() => {});
     openMock.mockResolvedValue(null);
     askMock.mockResolvedValue(true);
@@ -196,5 +198,51 @@ describe('SyncTasksView action confirmations', () => {
       expect(askMock).toHaveBeenCalled();
     });
     expect(updateTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('skips manual auto-unmount when session suppression is enabled', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'start_sync') {
+        return {
+          syncResult: {
+            files_copied: 0,
+            bytes_copied: 0,
+            errors: [],
+          },
+          conflictSessionId: null,
+          conflictCount: 0,
+          hasPendingConflicts: false,
+        };
+      }
+      if (command === 'is_auto_unmount_session_disabled') {
+        return true;
+      }
+      return undefined;
+    });
+
+    render(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.startSync')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('is_auto_unmount_session_disabled', {
+        taskId: 'task-1',
+      });
+    });
+
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'unmount_volume'),
+    ).toBe(false);
+    expect(statusState.setLastLog).toHaveBeenCalledWith('task-1', expect.objectContaining({
+      message: 'syncTasks.autoUnmountSuppressedStatus',
+      level: 'warning',
+    }));
   });
 });

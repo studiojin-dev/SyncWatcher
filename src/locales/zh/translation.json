@@ -95,7 +95,12 @@
       },
       "warnings": {
         "targetInWatchedSource": "目标与其他监控任务的源路径重叠，可能导致同步循环。"
-      }
+      },
+      "autoUnmountPendingStatus": "Unmount confirmation pending",
+      "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
+      "autoUnmountConfirmedStatus": "Unmount confirmed",
+      "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
+      "autoUnmountFailedStatus": "Unmount failed"
     },
     "dryRun": {
       "totalFiles": "文件总数",
