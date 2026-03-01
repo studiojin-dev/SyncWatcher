@@ -28,6 +28,11 @@ jobs:
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "release_channel=beta" >> "$GITHUB_OUTPUT"
             echo "Beta pre-release tag detected: $tag"
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc([0-9]+|\.[0-9]+)?$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "release_channel=rc" >> "$GITHUB_OUTPUT"
+            echo "RC pre-release tag detected: $tag"
           else
             echo "is_release=false" >> "$GITHUB_OUTPUT"
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
@@ -37,7 +42,7 @@ jobs:
       - name: Log skip reason for non-release tag
         if: steps.check_tag.outputs.is_release == 'false'
         run: |
-          echo "Skipping release job because tag is not release semver/beta: ${GITHUB_REF_NAME}"
+          echo "Skipping release job because tag is not release semver/beta/rc: ${GITHUB_REF_NAME}"
 
   release:
     needs: tag_gate
