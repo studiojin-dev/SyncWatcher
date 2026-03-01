@@ -11,6 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
+use tokio_util::sync::CancellationToken;
 use walkdir::WalkDir;
 use globset::{Glob, GlobSetBuilder};
 use anyhow::Context; // Import Context trait
@@ -91,7 +92,12 @@ impl SyncEngine {
         Ok(format!("{:x}", hasher.finish()))
     }
 
-    async fn read_directory(&self, dir: &Path, exclude_patterns: &[String]) -> Result<Vec<FileMetadata>> {
+    async fn read_directory(
+        &self,
+        dir: &Path,
+        exclude_patterns: &[String],
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<Vec<FileMetadata>> {
         let dir_buf = dir.to_path_buf();
         let patterns = exclude_patterns.to_vec();
 
@@ -100,7 +106,7 @@ impl SyncEngine {
 
             // Pattern validation constants
             const MAX_PATTERN_LENGTH: usize = 255;
-            const MAX_PATTERN_COUNT: usize = 100;
+            const MAX_PATTERN_COUNT: usize = 300;
 
             // Validate pattern count
             if patterns.len() > MAX_PATTERN_COUNT {
@@ -180,6 +186,12 @@ impl SyncEngine {
             });
 
             for entry in walker.filter_map(|e| e.ok()) {
+                if let Some(token) = cancel_token.as_ref() {
+                    if token.is_cancelled() {
+                        anyhow::bail!("Dry run cancelled by user");
+                    }
+                }
+
                 let path = entry.path();
                 
                 // Root directory itself is yielded, skip it
@@ -213,6 +225,7 @@ impl SyncEngine {
     async fn compare_dirs_internal(
         &self,
         options: &SyncOptions,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)> {
         // 1. Canonicalize source to resolve symlinks and .. (TOCTOU protection)
         let source_canonical = tokio::fs::canonicalize(&self.source)
@@ -252,12 +265,12 @@ impl SyncEngine {
 
         // 5. Use canonicalized paths for all operations
         let source_files = self
-            .read_directory(&source_canonical, &options.exclude_patterns)
+            .read_directory(&source_canonical, &options.exclude_patterns, cancel_token.clone())
             .await
             .context("Failed to read source directory")?;
 
         let target_files = if let Some(ref target) = target_canonical {
-            self.read_directory(target, &options.exclude_patterns)
+            self.read_directory(target, &options.exclude_patterns, cancel_token.clone())
                 .await
                 .context("Failed to read target directory")?
         } else {
@@ -381,7 +394,7 @@ impl SyncEngine {
     }
 
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
-        let (dry_run, _) = self.compare_dirs_internal(options).await?;
+        let (dry_run, _) = self.compare_dirs_internal(options, None).await?;
         Ok(dry_run)
     }
 
@@ -389,7 +402,7 @@ impl SyncEngine {
         &self,
         options: &SyncOptions,
     ) -> Result<Vec<TargetNewerConflictCandidate>> {
-        let (_, conflicts) = self.compare_dirs_internal(options).await?;
+        let (_, conflicts) = self.compare_dirs_internal(options, None).await?;
         Ok(conflicts)
     }
 
@@ -397,12 +410,21 @@ impl SyncEngine {
         self.compare_dirs(options).await
     }
 
+    pub async fn dry_run_with_cancel(
+        &self,
+        options: &SyncOptions,
+        cancel_token: CancellationToken,
+    ) -> Result<DryRunResult> {
+        let (dry_run, _) = self.compare_dirs_internal(options, Some(cancel_token)).await?;
+        Ok(dry_run)
+    }
+
     pub async fn sync_files(
         &self,
         options: &SyncOptions,
         progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
     ) -> Result<SyncResult> {
-        let (dry_run, _) = self.compare_dirs_internal(options).await?;
+        let (dry_run, _) = self.compare_dirs_internal(options, None).await?;
 
         let mut result = SyncResult {
             files_copied: 0,
@@ -432,6 +454,7 @@ impl SyncEngine {
             total_bytes,
             processed_bytes: 0,
             bytes_copied_current_file: 0,
+            current_file_total_bytes: 0,
         };
 
         // Initial progress report
@@ -445,20 +468,25 @@ impl SyncEngine {
                 FileDiffKind::New | FileDiffKind::Modified => {
                     current_progress.current_file = Some(diff.path.to_string_lossy().to_string());
                     current_progress.bytes_copied_current_file = 0;
-                    progress_callback(current_progress.clone());
-
                     let file_size = diff.source_size.unwrap_or(0);
+                    current_progress.current_file_total_bytes = file_size;
+                    progress_callback(current_progress.clone());
+                    let mut last_emitted_current_file_bytes = 0u64;
 
                     if let Err(e) = self
                         .copy_file_chunked(&source_path, &target_path, options, |written_chunk| {
                             current_progress.processed_bytes += written_chunk;
                             current_progress.bytes_copied_current_file += written_chunk;
-                            // Reduce callback frequency for large files? 
-                            // Current `copy_file_chunked` calls back every 64KB.
-                            // For large files this is spammy. 
-                            // But `start_sync` throttles the event emission. 
-                            // The issue is `log_with_event` in `start_sync` which is called when file matches.
-                            progress_callback(current_progress.clone());
+                            const PROGRESS_EMIT_CHUNK_BYTES: u64 = 1024 * 1024;
+                            let should_emit = current_progress
+                                .bytes_copied_current_file
+                                .saturating_sub(last_emitted_current_file_bytes)
+                                >= PROGRESS_EMIT_CHUNK_BYTES;
+                            if should_emit {
+                                last_emitted_current_file_bytes =
+                                    current_progress.bytes_copied_current_file;
+                                progress_callback(current_progress.clone());
+                            }
                         })
                         .await
                     {
@@ -475,6 +503,7 @@ impl SyncEngine {
                     } else {
                         result.files_copied += 1;
                         result.bytes_copied += file_size;
+                        current_progress.bytes_copied_current_file = file_size;
                     }
 
                     current_progress.processed_files += 1;
@@ -512,11 +541,11 @@ impl SyncEngine {
         };
 
         let source_files = self
-            .read_directory(&source_canonical, exclude_patterns)
+            .read_directory(&source_canonical, exclude_patterns, None)
             .await
             .context("Failed to read source directory")?;
         let target_files = self
-            .read_directory(&target_canonical, exclude_patterns)
+            .read_directory(&target_canonical, exclude_patterns, None)
             .await
             .context("Failed to read target directory")?;
 
@@ -1036,9 +1065,15 @@ mod tests {
         
         let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
         
-        // Test count limit (101개 패턴 -> MAX_PATTERN_COUNT=100 초과)
+        // Test count boundary (300개 패턴 -> MAX_PATTERN_COUNT=300 허용)
         let mut options = SyncOptions::default();
-        options.exclude_patterns = (0..101).map(|i| format!("pattern_{}", i)).collect();
+        options.exclude_patterns = (0..300).map(|i| format!("pattern_{}", i)).collect();
+        let ok_result = engine.dry_run(&options).await;
+        assert!(ok_result.is_ok(), "Expected 300 patterns to be allowed");
+
+        // Test count limit (301개 패턴 -> MAX_PATTERN_COUNT=300 초과)
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = (0..301).map(|i| format!("pattern_{}", i)).collect();
         let result = engine.dry_run(&options).await;
         
         // 에러 체인 전체를 확인 (anyhow는 context로 래핑되므로 :# 포맷 사용)
@@ -1072,6 +1107,26 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_with_cancel_respects_token() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        // Ensure traversal starts with at least one real file.
+        fs::write(source_dir.path().join("test.txt"), b"test").await?;
+
+        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let options = SyncOptions::default();
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+
+        let result = engine.dry_run_with_cancel(&options, cancel_token).await;
+        assert!(result.is_err());
+        assert!(format!("{:#}", result.unwrap_err()).contains("cancelled by user"));
 
         Ok(())
     }

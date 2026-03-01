@@ -3,22 +3,29 @@ mod integration_tests {
     use crate::logging::LogManager;
     use crate::watcher::WatcherManager;
     use crate::{
+        cancel_operation_internal, CancelOperationType,
         compute_volume_mount_diff, format_bytes_with_unit, get_app_version,
+        decide_runtime_auto_unmount, RuntimeAutoUnmountDecision,
         enqueue_runtime_sync_task_internal, dequeue_runtime_sync_task,
         handle_volume_watch_event, handle_volume_watch_tick,
         is_runtime_watch_task_active, join_paths, progress_phase_to_log_category,
+        ensure_non_overlapping_paths, normalize_uuid_sub_path,
         parse_uuid_source_path,
         remove_runtime_sync_task_state, take_runtime_pending_sync_task,
+        resolve_runtime_exclude_patterns,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        validate_runtime_tasks, AppState, DataUnitSystem, RuntimeSyncEnqueueResult, RuntimeSyncTask,
+        validate_runtime_tasks, AppState, DataUnitSystem, RuntimeExclusionSet,
+        RuntimeSyncEnqueueResult, RuntimeSyncTask,
         volume_watch_next_tick_delay,
         VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
+    use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tokio::sync::{Mutex, Notify, RwLock};
+    use tokio_util::sync::CancellationToken;
 
     fn build_runtime_task(id: &str, source: &str, watch_mode: bool) -> RuntimeSyncTask {
         RuntimeSyncTask {
@@ -57,6 +64,7 @@ mod integration_tests {
         AppState {
             log_manager: Arc::new(LogManager::new(100)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(Default::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -148,6 +156,45 @@ mod integration_tests {
         assert_eq!(desired.get("a"), Some(&"/src/a".to_string()));
         assert_eq!(desired.get("c"), Some(&"/src/c".to_string()));
         assert!(!desired.contains_key("b"));
+    }
+
+    #[test]
+    fn test_resolve_runtime_exclude_patterns_deduplicates_preserving_order() {
+        let task = RuntimeSyncTask {
+            id: "task-1".to_string(),
+            name: "task-1".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            watch_mode: true,
+            auto_unmount: false,
+            verify_after_copy: true,
+            exclusion_sets: vec!["set-a".to_string(), "set-b".to_string()],
+        };
+
+        let sets = vec![
+            RuntimeExclusionSet {
+                id: "set-a".to_string(),
+                name: "Set A".to_string(),
+                patterns: vec!["dist".to_string(), "build".to_string(), "coverage".to_string()],
+            },
+            RuntimeExclusionSet {
+                id: "set-b".to_string(),
+                name: "Set B".to_string(),
+                patterns: vec!["build".to_string(), "coverage".to_string(), ".cache".to_string()],
+            },
+        ];
+
+        let resolved = resolve_runtime_exclude_patterns(&task, &sets);
+        assert_eq!(
+            resolved,
+            vec![
+                "dist".to_string(),
+                "build".to_string(),
+                "coverage".to_string(),
+                ".cache".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -289,6 +336,37 @@ mod integration_tests {
         });
     }
 
+    #[tokio::test]
+    async fn test_cancel_operation_internal_cancels_dry_run_token() {
+        let state = build_app_state();
+        let token = CancellationToken::new();
+
+        {
+            let mut tokens = state.dry_run_cancel_tokens.write().await;
+            tokens.insert("task-1".to_string(), token.clone());
+        }
+
+        let cancelled =
+            cancel_operation_internal("task-1", CancelOperationType::DryRun, &state).await;
+        assert!(cancelled);
+        assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_operation_internal_cancels_sync_token() {
+        let state = build_app_state();
+        let token = CancellationToken::new();
+
+        {
+            let mut tokens = state.cancel_tokens.write().await;
+            tokens.insert("task-1".to_string(), token.clone());
+        }
+
+        let cancelled = cancel_operation_internal("task-1", CancelOperationType::Sync, &state).await;
+        assert!(cancelled);
+        assert!(token.is_cancelled());
+    }
+
     #[test]
     fn test_validate_runtime_tasks_allows_distinct_sources_and_targets() {
         let tasks = vec![
@@ -422,6 +500,101 @@ mod integration_tests {
 
         assert!(parse_uuid_source_path("[DISK_UUID:abc/without-bracket").is_none());
         assert!(parse_uuid_source_path("[CUSTOM_UUID:abc]/DCIM").is_none());
+    }
+
+    #[test]
+    fn test_normalize_uuid_sub_path_normalizes_common_cases() {
+        assert_eq!(normalize_uuid_sub_path("").unwrap(), "/");
+        assert_eq!(normalize_uuid_sub_path("DCIM").unwrap(), "/DCIM");
+        assert_eq!(
+            normalize_uuid_sub_path("//DCIM//100MSDCF//").unwrap(),
+            "/DCIM/100MSDCF"
+        );
+    }
+
+    #[test]
+    fn test_normalize_uuid_sub_path_rejects_parent_traversal() {
+        let result = normalize_uuid_sub_path("/DCIM/../secret");
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("escapes the mounted volume root"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_malformed_uuid_token() {
+        let tasks = vec![build_runtime_task_with_paths(
+            "invalid",
+            "[VOLUME_UUID:broken-token",
+            "/dst/invalid",
+            false,
+        )];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Invalid UUID source token format"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_uuid_subpath_escape() {
+        let tasks = vec![build_runtime_task_with_paths(
+            "escape",
+            "[VOLUME_UUID:uuid-a]/../../outside",
+            "/dst/escape",
+            false,
+        )];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("escapes the mounted volume root"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_normalizes_unmounted_uuid_tokens_before_overlap_check() {
+        let test_uuid = "NOT_A_REAL_UUID_FOR_TEST_ONLY";
+        let source = format!("[DISK_UUID:{test_uuid}]DCIM");
+        let target = format!("[DISK_UUID:{test_uuid}]/DCIM");
+        let tasks = vec![build_runtime_task_with_paths("normalize", &source, &target, false)];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("overlapping source/target paths"));
+    }
+
+    #[test]
+    fn test_ensure_non_overlapping_paths_rejects_nested_target() {
+        let result = ensure_non_overlapping_paths(
+            Path::new("/Volumes/CARD"),
+            Path::new("/Volumes/CARD/DCIM"),
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("overlap"));
+    }
+
+    #[test]
+    fn test_decide_runtime_auto_unmount_requests_confirmation_when_zero_copy() {
+        let decision = decide_runtime_auto_unmount(true, false, 0);
+        assert_eq!(decision, RuntimeAutoUnmountDecision::RequestConfirmation);
+    }
+
+    #[test]
+    fn test_decide_runtime_auto_unmount_unmounts_when_files_copied() {
+        let decision = decide_runtime_auto_unmount(true, false, 2);
+        assert_eq!(decision, RuntimeAutoUnmountDecision::UnmountNow);
     }
 
     #[test]

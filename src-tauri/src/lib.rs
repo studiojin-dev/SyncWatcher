@@ -138,6 +138,8 @@ pub struct AppState {
     log_manager: Arc<LogManager>,
     /// 현재 실행 중인 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// 현재 실행 중인 dry-run 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
+    dry_run_cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// 파일 시스템 감시 매니저
     watcher_manager: Arc<RwLock<WatcherManager>>,
     /// 프론트엔드에서 전달된 최신 런타임 설정
@@ -242,6 +244,30 @@ struct RuntimeSyncQueueStateEvent {
     task_id: String,
     queued: bool,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeAutoUnmountRequestEvent {
+    task_id: String,
+    task_name: String,
+    source: String,
+    files_copied: u64,
+    bytes_copied: u64,
+    reason: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum CloseRequestSource {
+    WindowClose,
+    CmdQuit,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseRequestedEvent {
+    source: CloseRequestSource,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -558,6 +584,31 @@ fn emit_runtime_sync_queue_state(
     let _ = app.emit("runtime-sync-queue-state", &event);
 }
 
+fn emit_runtime_auto_unmount_request(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    task_name: &str,
+    source: &str,
+    files_copied: u64,
+    bytes_copied: u64,
+    reason: &str,
+) {
+    let event = RuntimeAutoUnmountRequestEvent {
+        task_id: task_id.to_string(),
+        task_name: task_name.to_string(),
+        source: source.to_string(),
+        files_copied,
+        bytes_copied,
+        reason: reason.to_string(),
+    };
+    let _ = app.emit("runtime-auto-unmount-request", &event);
+}
+
+fn emit_close_requested(app: &tauri::AppHandle, source: CloseRequestSource) {
+    let event = CloseRequestedEvent { source };
+    let _ = app.emit("close-requested", &event);
+}
+
 fn unix_now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -817,10 +868,74 @@ fn uuid_token_label(token_type: UuidTokenType) -> &'static str {
     }
 }
 
-fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
-    let Some(parsed) = parse_uuid_source_path(path_str) else {
-        return Ok(PathBuf::from(path_str));
+fn uuid_token_prefix(token_type: UuidTokenType) -> &'static str {
+    match token_type {
+        UuidTokenType::Disk => "[DISK_UUID:",
+        UuidTokenType::Volume => "[VOLUME_UUID:",
+        UuidTokenType::Legacy => "[UUID:",
+    }
+}
+
+fn normalize_uuid_sub_path(sub_path: &str) -> Result<String, String> {
+    let trimmed = sub_path.trim();
+    if trimmed.is_empty() {
+        return Ok("/".to_string());
+    }
+
+    let with_leading = if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{}", trimmed)
     };
+
+    let mut normalized = with_leading;
+    while normalized.contains("//") {
+        normalized = normalized.replace("//", "/");
+    }
+    if normalized.len() > 1 {
+        normalized = normalized.trim_end_matches('/').to_string();
+    }
+
+    for component in Path::new(&normalized).components() {
+        if matches!(component, Component::ParentDir) {
+            return Err("UUID source path is invalid or escapes the mounted volume root".to_string());
+        }
+    }
+
+    if normalized.is_empty() {
+        return Ok("/".to_string());
+    }
+
+    Ok(normalized)
+}
+
+enum ResolvePathWithUuidOutcome {
+    Resolved(PathBuf),
+    UuidNotMounted {
+        token_type: UuidTokenType,
+        uuid: String,
+        normalized_source: String,
+    },
+}
+
+fn resolve_path_with_uuid_outcome(path_str: &str) -> Result<ResolvePathWithUuidOutcome, String> {
+    if !has_uuid_source_prefix(path_str) {
+        return Ok(ResolvePathWithUuidOutcome::Resolved(PathBuf::from(path_str)));
+    }
+
+    let parsed = parse_uuid_source_path(path_str)
+        .ok_or_else(|| "Invalid UUID source token format".to_string())?;
+    if parsed.uuid.trim().is_empty() {
+        return Err("Invalid UUID source token format".to_string());
+    }
+
+    let normalized_sub_path = normalize_uuid_sub_path(parsed.sub_path)?;
+    let normalized_source = format!(
+        "{}{}]{}",
+        uuid_token_prefix(parsed.token_type),
+        parsed.uuid,
+        normalized_sub_path
+    );
 
     let monitor = DiskMonitor::new();
     let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
@@ -844,17 +959,38 @@ fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
                     .find(|v| v.volume_uuid.as_deref() == Some(parsed.uuid))
                     .cloned()
             }),
-    }
-    .ok_or_else(|| {
-        format!(
-            "Volume with {} {} not found (not mounted?)",
-            uuid_token_label(parsed.token_type),
-            parsed.uuid
-        )
-    })?;
+    };
 
-    let clean_sub_path = parsed.sub_path.trim_start_matches('/');
-    Ok(volume.mount_point.join(clean_sub_path))
+    let Some(volume) = volume else {
+        return Ok(ResolvePathWithUuidOutcome::UuidNotMounted {
+            token_type: parsed.token_type,
+            uuid: parsed.uuid.to_string(),
+            normalized_source,
+        });
+    };
+
+    let clean_sub_path = normalized_sub_path.trim_start_matches('/');
+    let resolved = volume.mount_point.join(clean_sub_path);
+    let mount_root_key = path_key_for_compare(&volume.mount_point);
+    let resolved_key = path_key_for_compare(&resolved);
+    if !is_same_or_subpath(&mount_root_key, &resolved_key) {
+        return Err("UUID source path is invalid or escapes the mounted volume root".to_string());
+    }
+
+    Ok(ResolvePathWithUuidOutcome::Resolved(resolved))
+}
+
+fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
+    match resolve_path_with_uuid_outcome(path_str)? {
+        ResolvePathWithUuidOutcome::Resolved(path) => Ok(path),
+        ResolvePathWithUuidOutcome::UuidNotMounted {
+            token_type, uuid, ..
+        } => Err(format!(
+            "Volume with {} {} not found (not mounted?)",
+            uuid_token_label(token_type),
+            uuid
+        )),
+    }
 }
 
 fn resolve_runtime_exclude_patterns(
@@ -866,10 +1002,18 @@ fn resolve_runtime_exclude_patterns(
     }
 
     let selected: HashSet<&str> = task.exclusion_sets.iter().map(String::as_str).collect();
-    sets.iter()
-        .filter(|set| selected.contains(set.id.as_str()))
-        .flat_map(|set| set.patterns.clone())
-        .collect()
+    let mut resolved_patterns = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+
+    for set in sets.iter().filter(|set| selected.contains(set.id.as_str())) {
+        for pattern in &set.patterns {
+            if seen.insert(pattern.as_str()) {
+                resolved_patterns.push(pattern.clone());
+            }
+        }
+    }
+
+    resolved_patterns
 }
 
 fn normalize_path_components(path: &Path) -> PathBuf {
@@ -909,16 +1053,27 @@ fn is_path_overlap(a: &str, b: &str) -> bool {
     is_same_or_subpath(a, b) || is_same_or_subpath(b, a)
 }
 
+fn ensure_non_overlapping_paths(source: &Path, target: &Path) -> Result<(), String> {
+    let source_key = path_key_for_compare(source);
+    let target_key = path_key_for_compare(target);
+
+    if is_path_overlap(&source_key, &target_key) {
+        return Err(format!(
+            "Source and target paths overlap and are not allowed. source='{}', target='{}'",
+            source.display(),
+            target.display()
+        ));
+    }
+
+    Ok(())
+}
+
 fn resolved_path_key(path: &str) -> Result<String, String> {
-    match resolve_path_with_uuid(path) {
-        Ok(resolved) => Ok(path_key_for_compare(&resolved)),
-        Err(err) => {
-            if has_uuid_source_prefix(path) {
-                Ok(path_key_for_compare(&PathBuf::from(path)))
-            } else {
-                Err(err)
-            }
-        }
+    match resolve_path_with_uuid_outcome(path)? {
+        ResolvePathWithUuidOutcome::Resolved(path) => Ok(path_key_for_compare(&path)),
+        ResolvePathWithUuidOutcome::UuidNotMounted {
+            normalized_source, ..
+        } => Ok(path_key_for_compare(&PathBuf::from(normalized_source))),
     }
 }
 
@@ -1260,6 +1415,31 @@ enum SyncOrigin {
     Watch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeAutoUnmountDecision {
+    SkipDisabled,
+    SkipDueConflicts,
+    RequestConfirmation,
+    UnmountNow,
+}
+
+fn decide_runtime_auto_unmount(
+    auto_unmount: bool,
+    has_pending_conflicts: bool,
+    files_copied: u64,
+) -> RuntimeAutoUnmountDecision {
+    if !auto_unmount {
+        return RuntimeAutoUnmountDecision::SkipDisabled;
+    }
+    if has_pending_conflicts {
+        return RuntimeAutoUnmountDecision::SkipDueConflicts;
+    }
+    if files_copied == 0 {
+        return RuntimeAutoUnmountDecision::RequestConfirmation;
+    }
+    RuntimeAutoUnmountDecision::UnmountNow
+}
+
 async fn create_conflict_review_session(
     task_id: &str,
     task_name: &str,
@@ -1365,6 +1545,7 @@ async fn execute_sync_internal(
     let sync_result = async {
         let source = resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
         let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        ensure_non_overlapping_paths(&source, &target)?;
 
         // Validate all inputs
         input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -1406,12 +1587,16 @@ async fn execute_sync_internal(
         let app_clone = app.clone();
 
         #[derive(serde::Serialize, Clone)]
+        #[serde(rename_all = "camelCase")]
         struct ProgressEvent {
-            #[serde(rename = "taskId")]
             task_id: String,
             message: String,
             current: u64,
             total: u64,
+            processed_bytes: u64,
+            total_bytes: u64,
+            current_file_bytes_copied: u64,
+            current_file_total_bytes: u64,
         }
 
         let progress_state = SyncProgressState::new();
@@ -1431,7 +1616,10 @@ async fn execute_sync_internal(
                         if progress_state_closure.should_update_file(&category, current) {
                             let now = chrono::Utc::now().to_rfc3339();
                             let message = match &category {
-                                LogCategory::FileCopied => format!("Copy: {}", current),
+                                LogCategory::FileCopied => {
+                                    let file_size = format_bytes(progress.current_file_total_bytes);
+                                    format!("Copy: {} ({})", current, file_size)
+                                }
                                 LogCategory::FileDeleted => format!("Delete: {}", current),
                                 _ => current.to_string(),
                             };
@@ -1464,6 +1652,10 @@ async fn execute_sync_internal(
                         message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
                         current: progress.processed_files,
                         total: progress.total_files,
+                        processed_bytes: progress.processed_bytes,
+                        total_bytes: progress.total_bytes,
+                        current_file_bytes_copied: progress.bytes_copied_current_file,
+                        current_file_total_bytes: progress.current_file_total_bytes,
                     };
                     let _ = app_clone.emit("sync-progress", &event);
                 }
@@ -1603,23 +1795,48 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     .await;
 
     if let Ok(exec_result) = &result {
-        if task.auto_unmount && !exec_result.has_pending_conflicts {
-            if let Ok(source_path) = resolve_path_with_uuid(&task.source) {
-                if let Err(err) = DiskMonitor::unmount_volume(&source_path) {
-                    state.log_manager.log(
-                        "warning",
-                        &format!("Auto unmount failed: {}", err),
-                        Some(task.id.clone()),
-                    );
+        match decide_runtime_auto_unmount(
+            task.auto_unmount,
+            exec_result.has_pending_conflicts,
+            exec_result.sync_result.files_copied,
+        ) {
+            RuntimeAutoUnmountDecision::SkipDisabled => {}
+            RuntimeAutoUnmountDecision::SkipDueConflicts => {
+                state.log_manager.log_with_category(
+                    "warning",
+                    "Auto unmount skipped because conflict review is pending",
+                    Some(task.id.clone()),
+                    LogCategory::Other,
+                );
+            }
+            RuntimeAutoUnmountDecision::RequestConfirmation => {
+                state.log_manager.log_with_category(
+                    "info",
+                    "Auto unmount deferred: no files were copied, waiting for user confirmation",
+                    Some(task.id.clone()),
+                    LogCategory::Other,
+                );
+                emit_runtime_auto_unmount_request(
+                    &app,
+                    &task.id,
+                    &task.name,
+                    &task.source,
+                    exec_result.sync_result.files_copied,
+                    exec_result.sync_result.bytes_copied,
+                    "zero-copy",
+                );
+            }
+            RuntimeAutoUnmountDecision::UnmountNow => {
+                if let Ok(source_path) = resolve_path_with_uuid(&task.source) {
+                    if let Err(err) = DiskMonitor::unmount_volume(&source_path) {
+                        state.log_manager.log(
+                            "warning",
+                            &format!("Auto unmount failed: {}", err),
+                            Some(task.id.clone()),
+                        );
+                    }
                 }
             }
-        } else if task.auto_unmount && exec_result.has_pending_conflicts {
-            state.log_manager.log_with_category(
-                "warning",
-                "Auto unmount skipped because conflict review is pending",
-                Some(task.id.clone()),
-                LogCategory::Other,
-            );
         }
     }
 
@@ -1987,6 +2204,7 @@ async fn sync_dry_run(
         resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
     let target =
         resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    ensure_non_overlapping_paths(&source, &target)?;
 
     // Validate all inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -2009,7 +2227,20 @@ async fn sync_dry_run(
         exclude_patterns,
     };
 
-    match engine.dry_run(&options).await {
+    let cancel_token = CancellationToken::new();
+    {
+        let mut tokens = state.dry_run_cancel_tokens.write().await;
+        tokens.insert(task_id.clone(), cancel_token.clone());
+    }
+
+    let result = engine.dry_run_with_cancel(&options, cancel_token).await;
+
+    {
+        let mut tokens = state.dry_run_cancel_tokens.write().await;
+        tokens.remove(&task_id);
+    }
+
+    match result {
         Ok(result) => {
             let unit_system = state.runtime_config.read().await.settings.data_unit_system;
             let msg = format!(
@@ -2021,9 +2252,17 @@ async fn sync_dry_run(
             Ok(result)
         }
         Err(e) => {
-            let msg = format!("Dry run failed: {:#}", e);
-            state.log_manager.log("error", &msg, Some(task_id));
-            Err(format!("{:#}", e))
+            let err_text = format!("{:#}", e);
+            if err_text.contains("cancelled by user") {
+                state
+                    .log_manager
+                    .log("warning", "Dry run cancelled by user", Some(task_id));
+                Err("Dry run cancelled by user".to_string())
+            } else {
+                let msg = format!("Dry run failed: {err_text}");
+                state.log_manager.log("error", &msg, Some(task_id));
+                Err(err_text)
+            }
         }
     }
 }
@@ -2040,6 +2279,7 @@ async fn find_orphan_files(
         resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
     let target =
         resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    ensure_non_overlapping_paths(&source, &target)?;
 
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
     input_validation::validate_path_argument(source.to_str().unwrap_or(""))
@@ -2644,22 +2884,52 @@ async fn list_sync_tasks() -> Result<Vec<SyncTask>, String> {
     Ok(vec![])
 }
 
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum CancelOperationType {
+    Sync,
+    DryRun,
+}
+
+async fn cancel_operation_internal(
+    task_id: &str,
+    operation_type: CancelOperationType,
+    state: &AppState,
+) -> bool {
+    let token = match operation_type {
+        CancelOperationType::Sync => {
+            let tokens = state.cancel_tokens.read().await;
+            tokens.get(task_id).cloned()
+        }
+        CancelOperationType::DryRun => {
+            let tokens = state.dry_run_cancel_tokens.read().await;
+            tokens.get(task_id).cloned()
+        }
+    };
+
+    if let Some(token) = token {
+        token.cancel();
+        let message = match operation_type {
+            CancelOperationType::Sync => "Sync cancelled by user",
+            CancelOperationType::DryRun => "Dry run cancelled by user",
+        };
+        state
+            .log_manager
+            .log("warning", message, Some(task_id.to_string()));
+        true
+    } else {
+        false
+    }
+}
+
 /// 실행 중인 동기화 작업을 취소합니다.
 #[tauri::command]
 async fn cancel_operation(
     task_id: String,
+    operation_type: CancelOperationType,
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, String> {
-    let tokens = state.cancel_tokens.read().await;
-    if let Some(token) = tokens.get(&task_id) {
-        token.cancel();
-        state
-            .log_manager
-            .log("warning", "Operation cancelled by user", Some(task_id));
-        Ok(true)
-    } else {
-        Ok(false) // 해당 task_id로 실행 중인 작업 없음
-    }
+    Ok(cancel_operation_internal(&task_id, operation_type, state.inner()).await)
 }
 
 /// 파일 시스템 감시를 시작합니다.
@@ -3019,7 +3289,7 @@ pub fn run() {
                 main_window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
-                        let _ = app_handle.emit("close-requested", ());
+                        emit_close_requested(&app_handle, CloseRequestSource::WindowClose);
                     }
                 });
             }
@@ -3180,6 +3450,7 @@ pub fn run() {
         .manage(AppState {
             log_manager: managed_log_manager,
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(RuntimeConfigPayload::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -3246,7 +3517,7 @@ pub fn run() {
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             if code.is_none() {
                 api.prevent_exit();
-                let _ = app_handle.emit("close-requested", ());
+                emit_close_requested(app_handle, CloseRequestSource::CmdQuit);
             }
         }
     });
