@@ -74,7 +74,7 @@ export function ExclusionSetsManager() {
                                             <li>Use <code>*</code> for wildcards (e.g., <code>*.txt</code>)</li>
                                             <li>Use <code>**</code> for nested directories (e.g., <code>node_modules/**</code>)</li>
                                             <li>One pattern per line</li>
-                                            <li>Max 100 patterns, 255 chars each</li>
+                                            <li>Max 300 patterns, 255 chars each</li>
                                         </ul>
                                     </div>
                                     <div className="flex justify-end gap-2">
@@ -142,7 +142,7 @@ export function ExclusionSetsManager() {
                                     <li>Use <code>*</code> for wildcards (e.g., <code>*.txt</code>)</li>
                                     <li>Use <code>**</code> for nested directories (e.g., <code>node_modules/**</code>)</li>
                                     <li>One pattern per line</li>
-                                    <li>Max 100 patterns, 255 chars each</li>
+                                    <li>Max 300 patterns, 255 chars each</li>
                                 </ul>
                             </div>
                             <div className="flex justify-end gap-2">

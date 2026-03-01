@@ -271,6 +271,7 @@ export default function ConflictReviewWindow() {
       if (result.failures.length > 0) {
         showToast(
           t('conflict.partialFailure', {
+            count: result.failures.length,
             defaultValue: `${result.failures.length} item(s) failed.`,
           }),
           'warning'
@@ -278,6 +279,7 @@ export default function ConflictReviewWindow() {
       } else {
         showToast(
           t('conflict.actionComplete', {
+            count: result.processedCount,
             defaultValue: `Processed ${result.processedCount} item(s).`,
           }),
           'success'

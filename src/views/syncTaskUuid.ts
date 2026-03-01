@@ -83,7 +83,23 @@ export function parseUuidOptionValue(value: string): { uuidType: SourceUuidType;
 
 export function buildUuidSourceToken(uuidType: SourceUuidType, uuid: string, subPath: string): string {
     const prefix = uuidType === 'disk' ? DISK_UUID_PREFIX : VOLUME_UUID_PREFIX;
-    return `${prefix}${uuid}]${subPath}`;
+    return `${prefix}${uuid}]${normalizeUuidSubPath(subPath)}`;
+}
+
+export function normalizeUuidSubPath(subPath: string): string {
+    const trimmed = subPath.trim();
+    if (!trimmed) {
+        return '/';
+    }
+
+    const withLeadingSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    const collapsedSlashes = withLeadingSlash.replace(/\/{2,}/g, '/');
+
+    if (collapsedSlashes.length > 1) {
+        return collapsedSlashes.replace(/\/+$/, '');
+    }
+
+    return '/';
 }
 
 export function toUuidSubPath(mountPoint: string, selectedPath: string): string | null {

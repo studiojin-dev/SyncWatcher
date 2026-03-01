@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useYamlStore } from './useYamlStore';
+import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
 
 export interface SyncTask {
     id: string;
@@ -33,7 +34,7 @@ interface PersistedSyncTask extends SyncTask {
 const DEFAULT_TASKS: PersistedSyncTask[] = [];
 
 function normalizeTask(task: PersistedSyncTask): SyncTask {
-    return {
+    const normalizedTask: SyncTask = {
         id: task.id,
         name: task.name,
         source: task.source,
@@ -48,6 +49,9 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         sourceUuidType: task.sourceUuidType,
         sourceSubPath: task.sourceSubPath,
     };
+
+    normalizedTask.autoUnmount = shouldEnableAutoUnmount(normalizedTask);
+    return normalizedTask;
 }
 
 export function useSyncTasks() {
@@ -80,6 +84,7 @@ export function useSyncTasks() {
             ...task,
             id: crypto.randomUUID(),
         };
+        newTask.autoUnmount = shouldEnableAutoUnmount(newTask);
 
         await saveTasks([...tasks, newTask]);
         return newTask;
@@ -87,7 +92,16 @@ export function useSyncTasks() {
 
     const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
         const newTasks = tasks.map((t) =>
-            t.id === id ? { ...t, ...updates } : t
+            t.id === id
+                ? {
+                    ...t,
+                    ...updates,
+                    autoUnmount: shouldEnableAutoUnmount({
+                        ...t,
+                        ...updates,
+                    }),
+                }
+                : t
         );
         await saveTasks(newTasks);
     }, [tasks, saveTasks]);

@@ -80,3 +80,28 @@ npm run tauri <command>
 
 - Place documents under `doc/`
 - Place ADRs under `doc/adr/`
+
+## Documentation Workflow
+
+The following terms are to be interpreted as described in RFC 2119:
+“MUST”, “MUST NOT”, “SHOULD”, and “MAY”.
+
+1. ADRs MUST be written in `doc/adr/*.md`.
+
+2. When an ADR is added or modified, `doc/adr/index.json` MUST be updated accordingly.
+
+3. The ADR index MUST be generated using the `adr-index` skill.
+
+4. AGENTS.md MUST NOT accumulate completed work logs.
+   Architectural decisions MUST be recorded in ADRs.
+   AGENTS.md MAY contain only links to ADRs or brief summaries.
+
+### ADR Detection Rule
+
+If you make or rely on a decision that:
+- introduces architectural constraints,
+- involves trade-offs,
+- or is not obvious from code alone,
+
+you MUST pause and explicitly state:
+"An ADR is required for this decision."

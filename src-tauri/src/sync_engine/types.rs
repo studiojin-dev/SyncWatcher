@@ -100,6 +100,7 @@ pub struct SyncProgress {
     pub total_bytes: u64,
     pub processed_bytes: u64,
     pub bytes_copied_current_file: u64,
+    pub current_file_total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

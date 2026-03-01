@@ -1,6 +1,7 @@
 import { SyncTask } from '../hooks/useSyncTasks';
 import { ExclusionSet } from '../hooks/useExclusionSets';
 import { DataUnitSystem } from '../utils/formatBytes';
+import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
 
 export interface RuntimeSyncTask {
     id: string;
@@ -54,6 +55,19 @@ export interface RuntimeSyncQueueStateEvent {
     reason?: string;
 }
 
+export interface RuntimeAutoUnmountRequestEvent {
+    taskId: string;
+    taskName: string;
+    source: string;
+    filesCopied: number;
+    bytesCopied: number;
+    reason: 'zero-copy' | string;
+}
+
+export interface CloseRequestedEventPayload {
+    source?: 'window-close' | 'cmd-quit';
+}
+
 export function toRuntimeTask(task: SyncTask): RuntimeSyncTask {
     return {
         id: task.id,
@@ -62,7 +76,7 @@ export function toRuntimeTask(task: SyncTask): RuntimeSyncTask {
         target: task.target,
         checksumMode: task.checksumMode,
         watchMode: task.watchMode ?? false,
-        autoUnmount: task.autoUnmount ?? false,
+        autoUnmount: shouldEnableAutoUnmount(task),
         verifyAfterCopy: task.verifyAfterCopy ?? true,
         exclusionSets: task.exclusionSets ?? [],
     };

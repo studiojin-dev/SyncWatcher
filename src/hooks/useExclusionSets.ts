@@ -25,12 +25,72 @@ const DEFAULT_SETS: ExclusionSet[] = [
     {
         id: 'nodejs',
         name: 'Node.js',
-        patterns: ['node_modules', 'dist', 'build', '.npm', 'coverage']
+        patterns: [
+            'node_modules',
+            '.pnpm',
+            '.pnpm-store',
+            '.npm',
+            '.yarn/cache',
+            '.yarn/unplugged',
+            '.pnp',
+            '.pnp.js',
+            'jspm_packages',
+            'web_modules',
+            '.next',
+            'out',
+            '.nuxt',
+            '.output',
+            '.svelte-kit',
+            '.angular',
+            '.vite',
+            '.parcel-cache',
+            '.cache',
+            '.docusaurus',
+            '.turbo',
+            '.nx',
+            '.temp',
+            '.tmp',
+            'dist',
+            'build',
+            'coverage',
+            '.serverless',
+            '.firebase',
+            '.vercel'
+        ]
     },
     {
         id: 'python',
         name: 'Python',
-        patterns: ['__pycache__', '*.pyc', '.venv', 'venv', '.env']
+        patterns: [
+            '__pycache__',
+            '*.pyc',
+            '.venv',
+            'venv',
+            'env',
+            'ENV',
+            '.tox',
+            '.nox',
+            '.pytest_cache',
+            '.mypy_cache',
+            '.ruff_cache',
+            '.hypothesis',
+            '.pyre',
+            '.pytype',
+            '__pypackages__',
+            '.pdm-build',
+            '.pdm-python',
+            '.pixi',
+            '.ipynb_checkpoints',
+            'htmlcov',
+            '.eggs',
+            '*.egg-info',
+            'build',
+            'dist',
+            '.pybuilder',
+            'cython_debug',
+            'instance',
+            '.scrapy'
+        ]
     },
     {
         id: 'git',
@@ -40,12 +100,91 @@ const DEFAULT_SETS: ExclusionSet[] = [
     {
         id: 'rust',
         name: 'Rust (Tauri)',
-        patterns: ['src-tauri/target', '**/src-tauri/target', 'Cargo.lock', '**/*.rs.bk']
+        patterns: [
+            'src-tauri/target',
+            '**/src-tauri/target',
+            'target',
+            'debug',
+            'Cargo.lock',
+            '**/*.rs.bk',
+            '**/mutants.out*'
+        ]
+    },
+    {
+        id: 'jvm-build',
+        name: 'JVM (Java/Kotlin/Gradle)',
+        patterns: ['.gradle', '.kotlin', 'build', 'out', 'target', '.gradletasknamecache', '.mtj.tmp']
+    },
+    {
+        id: 'dotnet',
+        name: '.NET',
+        patterns: ['bin', 'obj', 'Debug', 'Release', 'artifacts', 'TestResults', 'CodeCoverage', 'Logs']
+    },
+    {
+        id: 'ruby-rails',
+        name: 'Ruby/Rails',
+        patterns: [
+            '.bundle',
+            'vendor/bundle',
+            'tmp',
+            'log',
+            'coverage',
+            '.yardoc',
+            '_yardoc',
+            'public/packs',
+            'public/packs-test',
+            'public/assets'
+        ]
+    },
+    {
+        id: 'php-laravel',
+        name: 'PHP/Laravel',
+        patterns: ['vendor', 'bootstrap/cache', 'storage', 'public/storage', 'public/build', 'public/hot', '.vagrant']
+    },
+    {
+        id: 'dart-flutter',
+        name: 'Dart/Flutter',
+        patterns: [
+            '.dart_tool',
+            '.pub',
+            '.pub-preload-cache',
+            '.flutter-plugins',
+            '.flutter-plugins-dependencies',
+            '.packages',
+            '.packages.generated',
+            'build',
+            'coverage',
+            '**/Flutter/ephemeral'
+        ]
+    },
+    {
+        id: 'swift-xcode',
+        name: 'Swift/Xcode',
+        patterns: ['DerivedData', '.build', 'Carthage/Build', 'Pods', 'xcuserdata']
+    },
+    {
+        id: 'infra-terraform',
+        name: 'Terraform',
+        patterns: ['.terraform', '.terragrunt-cache']
     }
 ];
 
 const LEGACY_STORAGE_KEY = 'exclusion_sets';
+export const EXCLUSION_SETS_DEFAULTS_VERSION_KEY = 'exclusion_sets_defaults_version';
+export const EXCLUSION_SETS_DEFAULTS_VERSION = 2;
 const EXCLUSION_SETS_FILE_NAME = 'exclusion_sets.yaml';
+
+export function mergeMissingDefaultSets(
+    sets: ExclusionSet[],
+    defaultSets: ExclusionSet[] = DEFAULT_SETS
+): ExclusionSet[] {
+    const existingIds = new Set(sets.map((set) => set.id));
+    const missingDefaults = defaultSets.filter((set) => !existingIds.has(set.id));
+    if (missingDefaults.length === 0) {
+        return sets;
+    }
+    return [...sets, ...missingDefaults];
+}
 
 function sanitizeSet(raw: unknown): ExclusionSet | null {
     if (!raw || typeof raw !== 'object') {
@@ -77,45 +216,85 @@ export function useExclusionSets() {
         defaultData: DEFAULT_SETS,
     });
 
-    const didMigrateLegacyStorage = useRef(false);
+    const didRunStartupMigrations = useRef(false);
 
     useEffect(() => {
-        if (!loaded || didMigrateLegacyStorage.current) {
+        if (!loaded || didRunStartupMigrations.current) {
             return;
         }
 
-        didMigrateLegacyStorage.current = true;
+        didRunStartupMigrations.current = true;
 
         try {
+            let nextSets = sets;
+            let shouldSave = false;
+            let shouldRemoveLegacyStorage = false;
+
             const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
-            if (!legacyRaw) {
+            if (legacyRaw) {
+                const parsed = JSON.parse(legacyRaw);
+                if (Array.isArray(parsed)) {
+                    const migratedSets = parsed
+                        .map(sanitizeSet)
+                        .filter((set): set is ExclusionSet => set !== null);
+
+                    // Only apply migration when current file still has defaults.
+                    const currentIsDefault = JSON.stringify(sets) === JSON.stringify(DEFAULT_SETS);
+                    if (currentIsDefault && migratedSets.length > 0) {
+                        nextSets = migratedSets;
+                        shouldSave = true;
+                        shouldRemoveLegacyStorage = true;
+                        console.info('Migrated legacy exclusion sets from localStorage to YAML');
+                    }
+                }
+            }
+
+            const storedDefaultsVersionRaw = localStorage.getItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY);
+            const storedDefaultsVersion = Number.parseInt(storedDefaultsVersionRaw ?? '0', 10);
+            const shouldMigrateDefaults =
+                Number.isNaN(storedDefaultsVersion) || storedDefaultsVersion < EXCLUSION_SETS_DEFAULTS_VERSION;
+
+            if (shouldMigrateDefaults) {
+                const mergedSets = mergeMissingDefaultSets(nextSets);
+                if (mergedSets.length !== nextSets.length) {
+                    nextSets = mergedSets;
+                    shouldSave = true;
+                    console.info('Merged missing default exclusion sets');
+                }
+
+                if (shouldSave) {
+                    void saveSets(nextSets)
+                        .then(() => {
+                            if (shouldRemoveLegacyStorage) {
+                                localStorage.removeItem(LEGACY_STORAGE_KEY);
+                            }
+                            localStorage.setItem(
+                                EXCLUSION_SETS_DEFAULTS_VERSION_KEY,
+                                String(EXCLUSION_SETS_DEFAULTS_VERSION)
+                            );
+                        })
+                        .catch((err) => {
+                            console.error('Failed to migrate exclusion set defaults:', err);
+                        });
+                } else {
+                    localStorage.setItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY, String(EXCLUSION_SETS_DEFAULTS_VERSION));
+                }
                 return;
             }
 
-            const parsed = JSON.parse(legacyRaw);
-            if (!Array.isArray(parsed)) {
-                return;
+            if (shouldSave && nextSets !== sets) {
+                void saveSets(nextSets)
+                    .then(() => {
+                        if (shouldRemoveLegacyStorage) {
+                            localStorage.removeItem(LEGACY_STORAGE_KEY);
+                        }
+                    })
+                    .catch((err) => {
+                        console.error('Failed to run exclusion set startup migrations:', err);
+                    });
             }
-
-            const migratedSets = parsed
-                .map(sanitizeSet)
-                .filter((set): set is ExclusionSet => set !== null);
-
-            if (migratedSets.length === 0) {
-                return;
-            }
-
-            // Only apply migration when current file still has defaults.
-            const currentIsDefault = JSON.stringify(sets) === JSON.stringify(DEFAULT_SETS);
-            if (!currentIsDefault) {
-                return;
-            }
-
-            void saveSets(migratedSets);
-            localStorage.removeItem(LEGACY_STORAGE_KEY);
-            console.info('Migrated legacy exclusion sets from localStorage to YAML');
         } catch (err) {
-            console.error('Failed to migrate legacy exclusion sets:', err);
+            console.error('Failed to run exclusion set startup migrations:', err);
         }
     }, [loaded, sets, saveSets]);
 

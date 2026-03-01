@@ -21,6 +21,10 @@ interface SyncProgressEvent {
     message?: string;
     current?: number;
     total?: number;
+    processedBytes?: number;
+    totalBytes?: number;
+    currentFileBytesCopied?: number;
+    currentFileTotalBytes?: number;
 }
 
 export type InitialRuntimeSyncState = 'idle' | 'pending' | 'success' | 'error';
@@ -124,11 +128,27 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
                 return;
             }
 
-            useSyncTaskStatusStore.getState().setLastLog(event.payload.taskId, {
-                message: event.payload.message || 'Syncing...',
-                timestamp: new Date().toLocaleTimeString(),
-                level: 'info',
+            const store = useSyncTaskStatusStore.getState();
+            const taskId = event.payload.taskId;
+            const message = event.payload.message || 'Syncing...';
+            store.setProgress(taskId, {
+                current: event.payload.current || 0,
+                total: event.payload.total || 0,
+                currentFile: event.payload.message,
+                processedBytes: event.payload.processedBytes || 0,
+                totalBytes: event.payload.totalBytes || 0,
+                currentFileBytesCopied: event.payload.currentFileBytesCopied || 0,
+                currentFileTotalBytes: event.payload.currentFileTotalBytes || 0,
             });
+
+            const previousMessage = store.getStatus(taskId)?.lastLog?.message;
+            if (previousMessage !== message) {
+                store.setLastLog(taskId, {
+                    message,
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: 'info',
+                });
+            }
         });
 
         const unlistenWatchState = listen<RuntimeWatchStateEvent>('runtime-watch-state', (event) => {
@@ -213,6 +233,16 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
                 store.setStatus(taskId, 'syncing');
                 return;
             }
+
+            store.setProgress(taskId, {
+                current: 0,
+                total: 0,
+                currentFile: undefined,
+                processedBytes: 0,
+                totalBytes: 0,
+                currentFileBytesCopied: 0,
+                currentFileTotalBytes: 0,
+            });
 
             if (reason) {
                 store.setLastLog(taskId, {

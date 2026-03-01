@@ -3,6 +3,7 @@ import {
     buildUuidSourceOptions,
     buildUuidSourceToken,
     inferUuidTypeFromVolumes,
+    normalizeUuidSubPath,
     parseUuidSourceToken,
     toUuidSubPath,
 } from './syncTaskUuid';
@@ -72,6 +73,15 @@ describe('SyncTasksView UUID helpers', () => {
     it('builds source token from selected UUID type', () => {
         expect(buildUuidSourceToken('disk', 'disk-a', '/DCIM')).toBe('[DISK_UUID:disk-a]/DCIM');
         expect(buildUuidSourceToken('volume', 'volume-a', '/DCIM')).toBe('[VOLUME_UUID:volume-a]/DCIM');
+        expect(buildUuidSourceToken('volume', 'volume-a', 'DCIM')).toBe('[VOLUME_UUID:volume-a]/DCIM');
+        expect(buildUuidSourceToken('volume', 'volume-a', '')).toBe('[VOLUME_UUID:volume-a]/');
+    });
+
+    it('normalizes UUID sub path input', () => {
+        expect(normalizeUuidSubPath('')).toBe('/');
+        expect(normalizeUuidSubPath('/')).toBe('/');
+        expect(normalizeUuidSubPath('DCIM')).toBe('/DCIM');
+        expect(normalizeUuidSubPath('//DCIM//100MSDCF//')).toBe('/DCIM/100MSDCF');
     });
 
     it('parses disk/volume/legacy UUID tokens', () => {

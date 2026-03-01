@@ -9,7 +9,7 @@ use anyhow::{Result, bail};
 ///
 /// Ensures patterns are safe, properly formatted, and within reasonable limits.
 pub fn validate_exclude_patterns(patterns: &[String]) -> Result<()> {
-    const MAX_PATTERNS: usize = 100;
+    const MAX_PATTERNS: usize = 300;
     const MAX_PATTERN_LENGTH: usize = 255;
 
     if patterns.len() > MAX_PATTERNS {
@@ -120,8 +120,14 @@ mod tests {
 
     #[test]
     fn test_validate_exclude_patterns_too_many() {
-        let patterns: Vec<String> = (0..101).map(|i| format!("pattern_{}", i)).collect();
+        let patterns: Vec<String> = (0..301).map(|i| format!("pattern_{}", i)).collect();
         assert!(validate_exclude_patterns(&patterns).is_err());
+    }
+
+    #[test]
+    fn test_validate_exclude_patterns_max_count_boundary() {
+        let patterns: Vec<String> = (0..300).map(|i| format!("pattern_{}", i)).collect();
+        assert!(validate_exclude_patterns(&patterns).is_ok());
     }
 
     #[test]

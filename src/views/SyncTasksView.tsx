@@ -20,6 +20,7 @@ import DryRunResultView from '../components/features/DryRunResultView';
 import ConflictSessionListPanel from '../components/features/ConflictSessionListPanel';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
 import { formatBytes } from '../utils/formatBytes';
+import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
 import type {
     ConflictReviewQueueChangedEvent,
     ConflictSessionSummary,
@@ -31,6 +32,7 @@ import {
     buildUuidSourceOptions,
     buildUuidSourceToken,
     inferUuidTypeFromVolumes,
+    normalizeUuidSubPath,
     parseUuidOptionValue,
     parseUuidSourceToken,
     toUuidSubPath,
@@ -181,13 +183,15 @@ function SyncTasksView() {
             const resolvedSourceType: 'path' | 'uuid' =
                 editingTask.sourceType || (parsedSourceToken ? 'uuid' : 'path');
             const resolvedSourceUuid = editingTask.sourceUuid || parsedSourceToken?.uuid || '';
-            const resolvedSourceSubPath = editingTask.sourceSubPath ?? parsedSourceToken?.subPath ?? '';
+            const resolvedSourceSubPath = normalizeUuidSubPath(
+                editingTask.sourceSubPath ?? parsedSourceToken?.subPath ?? '/'
+            );
 
             setSelectedSets(editingTask.exclusionSets || []);
             setSourcePath(editingTask.source || '');
             setTargetPath(editingTask.target || '');
             setWatchMode(editingTask.watchMode || false);
-            setAutoUnmount(editingTask.autoUnmount || false);
+            setAutoUnmount(shouldEnableAutoUnmount(editingTask));
             // UUID 관련 상태 복원
             setSourceType(resolvedSourceType);
             setSourceUuid(resolvedSourceType === 'uuid' ? resolvedSourceUuid : '');
@@ -341,6 +345,7 @@ function SyncTasksView() {
         const resolvedSourceUuidType: SourceUuidType | undefined = sourceType === 'uuid'
             ? (sourceUuidType || inferUuidTypeFromVolumes(sourceUuid, volumes) || 'disk')
             : undefined;
+        const normalizedSourceSubPath = normalizeUuidSubPath(sourceSubPath);
 
         if (sourceType === 'uuid') {
             if (!sourceUuid) {
@@ -353,7 +358,7 @@ function SyncTasksView() {
 
             const selectedUuidType = resolvedSourceUuidType || 'disk';
             // UUID 모드에서는 token 값 저장 (실제 경로는 동기화 시 resolve)
-            finalSource = buildUuidSourceToken(selectedUuidType, sourceUuid, sourceSubPath);
+            finalSource = buildUuidSourceToken(selectedUuidType, sourceUuid, normalizedSourceSubPath);
         }
 
         const taskData = {
@@ -363,12 +368,17 @@ function SyncTasksView() {
             checksumMode: formData.get('checksumMode') === 'on',
             exclusionSets: selectedSets,
             watchMode: watchMode,
-            autoUnmount: autoUnmount,
+            autoUnmount: shouldEnableAutoUnmount({
+                source: finalSource,
+                sourceType,
+                watchMode,
+                autoUnmount,
+            }),
             // UUID 관련 필드
             sourceType: sourceType,
             sourceUuid: sourceType === 'uuid' ? sourceUuid : undefined,
             sourceUuidType: sourceType === 'uuid' ? resolvedSourceUuidType : undefined,
-            sourceSubPath: sourceType === 'uuid' ? sourceSubPath : undefined,
+            sourceSubPath: sourceType === 'uuid' ? normalizedSourceSubPath : undefined,
         };
 
         try {
@@ -406,6 +416,19 @@ function SyncTasksView() {
         }
 
         if (syncing) return; // 다른 태스크가 실행 중이면 무시
+
+        const confirmed = await ask(
+            t('syncTasks.confirmStartSync', {
+                defaultValue: "지금 동기화를 시작할까요?",
+            }),
+            {
+                title: t('syncTasks.startSync'),
+                kind: 'warning',
+            }
+        );
+        if (!confirmed) {
+            return;
+        }
 
         try {
             setSyncing(task.id);
@@ -452,7 +475,7 @@ function SyncTasksView() {
             }
 
             // 동기화 성공 후 autoUnmount 처리
-            if (task.autoUnmount) {
+            if (shouldEnableAutoUnmount(task)) {
                 if (execution.hasPendingConflicts) {
                     showToast(
                         t('conflict.autoUnmountSkipped', {
@@ -486,6 +509,21 @@ function SyncTasksView() {
 
         const previousWatchMode = task.watchMode ?? false;
         const nextWatchMode = !previousWatchMode;
+
+        if (previousWatchMode && !nextWatchMode) {
+            const confirmed = await ask(
+                t('syncTasks.confirmWatchDisable', {
+                    defaultValue: "Watch Mode를 끄시겠습니까?",
+                }),
+                {
+                    title: t('syncTasks.watchToggleOff'),
+                    kind: 'warning',
+                }
+            );
+            if (!confirmed) {
+                return;
+            }
+        }
 
         setWatchTogglePendingIds((prev) => {
             const next = new Set(prev);
@@ -526,6 +564,19 @@ function SyncTasksView() {
         if (dryRunning === task.id) {
             // 이미 실행 중이면 취소 확인 모달 표시
             setCancelConfirm({ type: 'dryRun', taskId: task.id });
+            return;
+        }
+
+        const confirmed = await ask(
+            t('syncTasks.confirmDryRun', {
+                defaultValue: "Dry Run을 시작할까요?",
+            }),
+            {
+                title: t('syncTasks.dryRun'),
+                kind: 'warning',
+            }
+        );
+        if (!confirmed) {
             return;
         }
 
@@ -581,7 +632,10 @@ function SyncTasksView() {
         if (!cancelConfirm) return;
 
         try {
-            await invoke('cancel_operation', { taskId: cancelConfirm.taskId });
+            await invoke('cancel_operation', {
+                taskId: cancelConfirm.taskId,
+                operationType: cancelConfirm.type,
+            });
             showToast(t('syncTasks.cancelled', { defaultValue: '작업이 취소되었습니다.' }), 'warning');
         } catch (err) {
             console.error('Cancel failed:', err);
@@ -677,7 +731,10 @@ function SyncTasksView() {
                                                 type="radio"
                                                 name="sourceType"
                                                 checked={sourceType === 'path'}
-                                                onChange={() => setSourceType('path')}
+                                                onChange={() => {
+                                                    setSourceType('path');
+                                                    setAutoUnmount(false);
+                                                }}
                                                 className="w-4 h-4"
                                             />
                                             <span className="text-sm font-mono">📁 {t('syncTasks.sourceTypePath', { defaultValue: '디렉토리 경로' })}</span>
@@ -843,7 +900,11 @@ function SyncTasksView() {
                                                 type="checkbox"
                                                 checked={watchMode}
                                                 onChange={(e) => {
-                                                    setWatchMode(e.target.checked);
+                                                    const nextWatchMode = e.target.checked;
+                                                    setWatchMode(nextWatchMode);
+                                                    if (!nextWatchMode) {
+                                                        setAutoUnmount(false);
+                                                    }
                                                 }}
                                                 className="peer sr-only"
                                             />
@@ -858,8 +919,8 @@ function SyncTasksView() {
                                         </div>
                                     )}
 
-                                    {/* 자동 unmount (감시 모드에서만 표시) */}
-                                    {watchMode && (
+                                    {/* 자동 unmount (감시 + UUID 소스에서만 표시) */}
+                                    {watchMode && sourceType === 'uuid' && (
                                         <label className="flex items-center gap-2 cursor-pointer select-none ml-4">
                                             <div className="relative">
                                                 <input
@@ -1100,7 +1161,28 @@ function SyncTasksView() {
                                     <div className="mt-2 h-8 px-2 border-2 border-dashed border-[var(--border-main)] bg-[var(--bg-tertiary)] font-mono text-xs flex items-center min-w-0 w-full overflow-hidden">
                                         {(() => {
                                             const taskStatus = statuses.get(task.id);
+                                            const progress = taskStatus?.progress;
+                                            let progressSuffix = '';
+                                            if (progress) {
+                                                const overallPercent = progress.totalBytes && progress.totalBytes > 0
+                                                    ? Math.min(100, Math.round(((
+                                                        progress.processedBytes || 0
+                                                    ) / progress.totalBytes) * 100))
+                                                    : (progress.total > 0
+                                                        ? Math.min(100, Math.round((progress.current / progress.total) * 100))
+                                                        : 0);
+                                                const currentFileSize = progress.currentFileTotalBytes || 0;
+                                                const currentFilePercent = currentFileSize > 0
+                                                    ? Math.min(100, Math.round(((progress.currentFileBytesCopied || 0) / currentFileSize) * 100))
+                                                    : 0;
+                                                if (currentFileSize > 0) {
+                                                    progressSuffix = ` | ${formatBytes(currentFileSize, settings.dataUnitSystem)} • ${currentFilePercent}% • ${overallPercent}%`;
+                                                } else if (overallPercent > 0) {
+                                                    progressSuffix = ` | ${overallPercent}%`;
+                                                }
+                                            }
                                             if (taskStatus?.lastLog) {
+                                                const renderedMessage = `${taskStatus.lastLog.message}${progressSuffix}`;
                                                 return (
                                                     <div className="flex-1 min-w-0 flex items-center">
                                                         <span className="text-[var(--text-secondary)] mr-2 shrink-0 whitespace-nowrap">
@@ -1112,9 +1194,9 @@ function SyncTasksView() {
                                                                     taskStatus.lastLog.level === 'warning' ? 'text-[var(--color-accent-warning)]' :
                                                                         'text-[var(--text-primary)]'
                                                                 }`}
-                                                            title={taskStatus.lastLog.message}
+                                                            title={renderedMessage}
                                                         >
-                                                            {taskStatus.lastLog.message}
+                                                            {renderedMessage}
                                                         </span>
                                                     </div>
                                                 );

@@ -2,7 +2,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ask } from '@tauri-apps/plugin-dialog';
+import { ask, message } from '@tauri-apps/plugin-dialog';
 import type { ReactNode } from 'react';
 import type { SyncTask } from './hooks/useSyncTasks';
 import App from './App';
@@ -25,7 +25,20 @@ const runtimeState: MockRuntimeState = {
   tasks: [],
 };
 
-const eventHandlers = new Map<string, () => unknown>();
+const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  ask: vi.fn(),
+  message: vi.fn(),
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -90,8 +103,13 @@ vi.mock('./components/runtime/BackendRuntimeBridge', () => ({
   default: () => null,
 }));
 
+vi.mock('./components/features/UpdateChecker', () => ({
+  default: () => null,
+}));
+
 vi.mock('./components/ui/Animations', () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
+  CardAnimation: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('./components/ui/StartupProgressOverlay', () => ({
@@ -133,20 +151,22 @@ function createDeferred<T>() {
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
 const askMock = ask as unknown as ReturnType<typeof vi.fn>;
+const messageMock = message as unknown as ReturnType<typeof vi.fn>;
 
-async function emitEvent(eventName: string) {
+async function emitEvent(eventName: string, payload?: unknown) {
   const handler = eventHandlers.get(eventName);
   if (!handler) {
     throw new Error(`Event handler not registered: ${eventName}`);
   }
 
   await act(async () => {
-    await handler();
+    await handler({ payload });
   });
 }
 
 describe('App close lifecycle', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     runtimeState.settingsLoaded = true;
     runtimeState.tasksLoaded = true;
     runtimeState.setsLoaded = true;
@@ -156,7 +176,7 @@ describe('App close lifecycle', () => {
 
     eventHandlers.clear();
 
-    listenMock.mockImplementation(async (eventName: string, handler: () => unknown) => {
+    listenMock.mockImplementation(async (eventName: string, handler: (event?: { payload?: unknown }) => unknown) => {
       eventHandlers.set(eventName, handler);
       return () => {
         if (eventHandlers.get(eventName) === handler) {
@@ -170,6 +190,7 @@ describe('App close lifecycle', () => {
         return {
           watchingTasks: [],
           syncingTasks: [],
+          queuedTasks: [],
         };
       }
 
@@ -177,16 +198,11 @@ describe('App close lifecycle', () => {
     });
 
     askMock.mockResolvedValue(true);
+    messageMock.mockResolvedValue('Cancel');
   });
 
-  it('shows confirmation and quits when runtime state lookup fails', async () => {
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'runtime_get_state') {
-        throw new Error('runtime unavailable');
-      }
-
-      return undefined;
-    });
+  it('keeps window-close background behavior without cmd+q prompt', async () => {
+    runtimeState.closeAction = 'background';
 
     render(<App />);
 
@@ -194,24 +210,15 @@ describe('App close lifecycle', () => {
       expect(eventHandlers.has('close-requested')).toBe(true);
     });
 
-    await emitEvent('close-requested');
+    await emitEvent('close-requested', { source: 'window-close' });
 
-    expect(askMock).toHaveBeenCalledWith('app.quitConfirmMessageStateUnknown', {
-      title: 'app.quitConfirmTitle',
-      kind: 'warning',
-    });
-    expect(invokeMock).toHaveBeenCalledWith('quit_app');
+    expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
+    expect(messageMock).not.toHaveBeenCalled();
   });
 
-  it('cancels quit when user rejects runtime-unknown confirmation', async () => {
-    askMock.mockResolvedValue(false);
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'runtime_get_state') {
-        throw new Error('runtime unavailable');
-      }
-
-      return undefined;
-    });
+  it('runs background path when cmd+q chooses background under background mode', async () => {
+    runtimeState.closeAction = 'background';
+    messageMock.mockResolvedValue('app.cmdQuitBackgroundOption');
 
     render(<App />);
 
@@ -219,42 +226,95 @@ describe('App close lifecycle', () => {
       expect(eventHandlers.has('close-requested')).toBe(true);
     });
 
-    await emitEvent('close-requested');
+    await emitEvent('close-requested', { source: 'cmd-quit' });
 
-    expect(askMock).toHaveBeenCalledTimes(1);
+    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
     ).toBe(false);
   });
 
-  it('queues close-requested until lifecycle is ready and then applies closeAction', async () => {
-    runtimeState.settingsLoaded = false;
-    runtimeState.tasksLoaded = false;
+  it('runs full quit path when cmd+q chooses quit under background mode', async () => {
     runtimeState.closeAction = 'background';
+    messageMock.mockResolvedValue('app.cmdQuitFullQuitOption');
 
-    const view = render(<App />);
+    render(<App />);
 
     await waitFor(() => {
       expect(eventHandlers.has('close-requested')).toBe(true);
     });
 
-    await emitEvent('close-requested');
+    await emitEvent('close-requested', { source: 'cmd-quit' });
 
+    expect(invokeMock).toHaveBeenCalledWith('quit_app');
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'hide_to_background'),
     ).toBe(false);
+  });
+
+  it('cancels when cmd+q dialog chooses cancel under background mode', async () => {
+    runtimeState.closeAction = 'background';
+    messageMock.mockResolvedValue('Cancel');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('close-requested')).toBe(true);
+    });
+
+    await emitEvent('close-requested', { source: 'cmd-quit' });
+
+    expect(messageMock).toHaveBeenCalledTimes(1);
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
     ).toBe(false);
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'hide_to_background'),
+    ).toBe(false);
+  });
 
-    runtimeState.settingsLoaded = true;
-    runtimeState.tasksLoaded = true;
+  it('auto-quits after 10 seconds when cmd+q in quit mode has no response', async () => {
+    runtimeState.closeAction = 'quit';
+    const askDeferred = createDeferred<boolean>();
+    askMock.mockReturnValueOnce(askDeferred.promise);
 
-    view.rerender(<App />);
+    render(<App />);
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
+      expect(eventHandlers.has('close-requested')).toBe(true);
     });
+
+    vi.useFakeTimers();
+    const emitPromise = emitEvent('close-requested', { source: 'cmd-quit' });
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    await emitPromise;
+
+    expect(invokeMock).toHaveBeenCalledWith('quit_app');
+  });
+
+  it('does not quit when cmd+q in quit mode is cancelled before timeout', async () => {
+    runtimeState.closeAction = 'quit';
+    askMock.mockResolvedValue(false);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('close-requested')).toBe(true);
+    });
+
+    vi.useFakeTimers();
+    await emitEvent('close-requested', { source: 'cmd-quit' });
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
     ).toBe(false);
@@ -286,9 +346,9 @@ describe('App close lifecycle', () => {
     ).toBe(false);
   });
 
-  it('prevents duplicate confirmation dialogs on repeated close events', async () => {
+  it('prevents duplicate dialogs on repeated cmd+q close events', async () => {
+    runtimeState.closeAction = 'quit';
     runtimeState.tasks = [createTask({ watchMode: true })];
-
     const askDeferred = createDeferred<boolean>();
     askMock.mockReturnValueOnce(askDeferred.promise);
 
@@ -304,8 +364,8 @@ describe('App close lifecycle', () => {
     }
 
     await act(async () => {
-      const firstCall = closeHandler();
-      const secondCall = closeHandler();
+      const firstCall = closeHandler({ payload: { source: 'cmd-quit' } });
+      const secondCall = closeHandler({ payload: { source: 'cmd-quit' } });
 
       await Promise.resolve();
       expect(askMock).toHaveBeenCalledTimes(1);
@@ -314,7 +374,6 @@ describe('App close lifecycle', () => {
       await Promise.all([firstCall, secondCall]);
     });
 
-    expect(invokeMock).toHaveBeenCalledWith('quit_app');
     expect(
       invokeMock.mock.calls.filter((call) => call[0] === 'quit_app'),
     ).toHaveLength(1);

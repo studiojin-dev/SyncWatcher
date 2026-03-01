@@ -12,6 +12,10 @@ export interface TaskStatus {
         current: number;
         total: number;
         currentFile?: string;
+        processedBytes?: number;
+        totalBytes?: number;
+        currentFileBytesCopied?: number;
+        currentFileTotalBytes?: number;
     };
 }
 

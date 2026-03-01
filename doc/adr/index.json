@@ -1,5 +1,38 @@
 [
   {
+    "id": "ADR-20260301-0008",
+    "title": "watchMode zero-copy auto-unmount deferred confirmation",
+    "tags": [
+      "watch-mode",
+      "auto-unmount",
+      "ux",
+      "notification",
+      "safety",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-01",
+    "tldr": "When watch sync copies zero files, replace immediate auto-unmount with notification + deferred in-app confirmation, and unmount only after explicit approval.",
+    "path": "doc/adr/ADR-20260301-0008-watchmode-zero-copy-auto-unmount-deferred-confirm.md"
+  },
+  {
+    "id": "ADR-20260228-0007",
+    "title": "Exclusion template expansion and exclusion-pattern limit increase",
+    "tags": [
+      "sync-task",
+      "exclusion",
+      "templates",
+      "reliability",
+      "performance",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-02-28",
+    "tldr": "Expand default exclusion templates across major ecosystems, merge missing defaults for existing users once, and raise exclusion-pattern limit from 100 to 300 with runtime deduplication.",
+    "path": "doc/adr/ADR-20260228-0007-exclusion-template-expansion-and-pattern-limit.md"
+  },
+  {
     "id": "ADR-20260227-0006",
     "title": "Target-newer conflict hash-equivalence exception",
     "tags": [
@@ -50,7 +83,7 @@
   },
   {
     "id": "ADR-20260211-0003",
-    "title": "Sync task target conflict policy and orphan cleanup workflow",
+    "title": "Sync task target conflict policy, UUID runtime validation, and orphan cleanup workflow",
     "tags": [
       "sync-task",
       "safety",
@@ -60,7 +93,7 @@
     ],
     "status": "Accepted",
     "date": "2026-02-11",
-    "tldr": "Remove automatic deletion, block conflicting target/source path combinations, and add explicit orphan scan plus confirmed manual cleanup.",
+    "tldr": "Remove automatic target-side deletion, enforce source/target overlap constraints at runtime (including UUID sources), and replace deletion with explicit orphan scan and confirmed manual cleanup.",
     "path": "doc/adr/ADR-20260211-0003-sync-task-target-conflict-and-orphan-cleanup.md"
   },
   {
@@ -70,11 +103,12 @@
       "lifecycle",
       "tray",
       "background",
+      "cmd-quit",
       "macos"
     ],
     "status": "Accepted",
     "date": "2026-02-10",
-    "tldr": "Define closeAction setting (quit/background), conservative quit confirmation on runtime-state lookup failure, close-event queuing during startup, and tray window restoration semantics.",
+    "tldr": "Keep window-close behavior stable under closeAction, add source-aware close events, and apply Cmd+Q-only confirmation policies.",
     "path": "doc/adr/ADR-20260210-0002-app-lifecycle-background-tray.md"
   },
   {

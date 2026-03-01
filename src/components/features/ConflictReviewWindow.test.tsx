@@ -43,7 +43,17 @@ vi.mock('../../hooks/useSettings', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? '',
+    t: (
+      key: string,
+      options?: { defaultValue?: string; count?: number }
+    ) => {
+      const templates: Record<string, string> = {
+        'conflict.partialFailure': '{{count}}개 항목 처리에 실패했습니다.',
+        'conflict.actionComplete': '{{count}}개 항목을 처리했습니다.',
+      };
+      const template = templates[key] ?? options?.defaultValue ?? '';
+      return template.replace('{{count}}', String(options?.count ?? '{{count}}'));
+    },
   }),
 }));
 
@@ -144,6 +154,7 @@ describe('ConflictReviewWindow', () => {
         mockInvoke.mock.calls.some(([command]) => command === 'resolve_conflict_items')
       ).toBe(true);
     });
+    expect(showToastMock).toHaveBeenCalledWith('1개 항목을 처리했습니다.', 'success');
   });
 
   it('closes immediately when current session is already missing', async () => {

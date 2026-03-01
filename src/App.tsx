@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { ask } from '@tauri-apps/plugin-dialog';
+import { ask, message } from '@tauri-apps/plugin-dialog';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppShell from './components/layout/AppShell';
@@ -14,11 +14,16 @@ import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import UpdateChecker from './components/features/UpdateChecker';
+import AutoUnmountConfirmModal from './components/ui/AutoUnmountConfirmModal';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
 import ConflictReviewWindow from './components/features/ConflictReviewWindow';
 // SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
 import SyncTasksView from './views/SyncTasksView';
-import type { RuntimeState } from './types/runtime';
+import type {
+  CloseRequestedEventPayload,
+  RuntimeAutoUnmountRequestEvent,
+  RuntimeState,
+} from './types/runtime';
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ActivityLogView = lazy(() => import('./views/ActivityLogView'));
 const SettingsView = lazy(() => import('./views/SettingsView'));
@@ -26,7 +31,7 @@ const HelpView = lazy(() => import('./views/HelpView'));
 const AboutView = lazy(() => import('./views/AboutView'));
 
 const BACKGROUND_INTRO_STORAGE_KEY = 'syncwatcher_bg_intro_shown';
-type CloseIntent = 'window-close' | 'tray-quit';
+type CloseIntent = 'window-close' | 'cmd-quit' | 'tray-quit';
 
 function getCurrentWindowLabel(): string {
   try {
@@ -48,6 +53,8 @@ function AppContent() {
   const { loaded: setsLoaded } = useExclusionSetsContext();
   const [initialRuntimeSync, setInitialRuntimeSync] = useState<InitialRuntimeSyncState>('idle');
   const [showBackgroundIntro, setShowBackgroundIntro] = useState(false);
+  const [pendingAutoUnmountRequests, setPendingAutoUnmountRequests] = useState<RuntimeAutoUnmountRequestEvent[]>([]);
+  const [activeAutoUnmountRequest, setActiveAutoUnmountRequest] = useState<RuntimeAutoUnmountRequestEvent | null>(null);
   const isHandlingCloseRef = useRef(false);
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
@@ -94,7 +101,11 @@ function AppContent() {
 
   const queueCloseIntent = useCallback((intent: CloseIntent) => {
     const currentIntent = pendingCloseIntentRef.current;
-    if (intent === 'tray-quit' || currentIntent === null) {
+    const shouldOverride =
+      intent === 'tray-quit'
+      || currentIntent === null
+      || (intent === 'cmd-quit' && currentIntent === 'window-close');
+    if (shouldOverride) {
       pendingCloseIntentRef.current = intent;
     }
   }, []);
@@ -113,6 +124,44 @@ function AppContent() {
       }
     }
   }, [settings.notifications, t]);
+
+  const askWithTimeout = useCallback(
+    async (messageKey: string, timeoutMs: number): Promise<boolean> => (
+      new Promise<boolean>((resolve) => {
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          resolve(true);
+        }, timeoutMs);
+
+        ask(t(messageKey), {
+          title: t('app.quitConfirmTitle'),
+          kind: 'warning',
+        })
+          .then((confirmed) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(confirmed);
+          })
+          .catch((error) => {
+            console.error('Failed to show timeout confirmation:', error);
+            if (settled) {
+              return;
+            }
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          });
+      })
+    ),
+    [t]
+  );
 
   const handleQuitWithConfirmation = useCallback(async () => {
     const hasWatchModeTasks = tasks.some((task) => task.watchMode ?? false);
@@ -143,8 +192,45 @@ function AppContent() {
     await invoke('quit_app');
   }, [tasks, t]);
 
+  const handleCmdQuitWithPolicy = useCallback(async () => {
+    if (settings.closeAction === 'background') {
+      const backgroundLabel = t('app.cmdQuitBackgroundOption');
+      const quitLabel = t('app.cmdQuitFullQuitOption');
+      const cancelLabel = t('app.cmdQuitCancelOption', { defaultValue: t('common.cancel') });
+      const result = await message(t('app.cmdQuitBackgroundPrompt'), {
+        title: t('app.quitConfirmTitle'),
+        kind: 'warning',
+        buttons: {
+          yes: backgroundLabel,
+          no: quitLabel,
+          cancel: cancelLabel,
+        },
+      });
+
+      if (result === backgroundLabel || result === 'Yes') {
+        await hideToBackground();
+        return;
+      }
+
+      if (result === quitLabel || result === 'No') {
+        await invoke('quit_app');
+      }
+      return;
+    }
+
+    const confirmed = await askWithTimeout('app.cmdQuitPrompt', 10_000);
+    if (confirmed) {
+      await invoke('quit_app');
+    }
+  }, [askWithTimeout, hideToBackground, settings.closeAction, t]);
+
   const executeCloseIntent = useCallback(async (intent: CloseIntent) => {
     try {
+      if (intent === 'cmd-quit') {
+        await handleCmdQuitWithPolicy();
+        return;
+      }
+
       if (intent === 'window-close' && settings.closeAction === 'background') {
         await hideToBackground();
         return;
@@ -154,7 +240,7 @@ function AppContent() {
     } catch (err) {
       console.error('Failed to process close action:', err);
     }
-  }, [handleQuitWithConfirmation, hideToBackground, settings.closeAction]);
+  }, [handleCmdQuitWithPolicy, handleQuitWithConfirmation, hideToBackground, settings.closeAction]);
 
   const requestCloseIntent = useCallback(async (intent: CloseIntent) => {
     if (!isLifecycleReady) {
@@ -183,8 +269,9 @@ function AppContent() {
   }, [settingsLoaded]);
 
   useEffect(() => {
-    const unlistenPromise = listen('close-requested', async () => {
-      await requestCloseIntent('window-close');
+    const unlistenPromise = listen<CloseRequestedEventPayload>('close-requested', async (event) => {
+      const source = event.payload?.source === 'cmd-quit' ? 'cmd-quit' : 'window-close';
+      await requestCloseIntent(source);
     });
 
     return () => {
@@ -206,9 +293,96 @@ function AppContent() {
         .then((unlisten) => unlisten())
         .catch((err) => {
           console.warn('[App] Failed to unlisten tray-quit-requested', err);
-        });
+      });
     };
   }, [requestCloseIntent]);
+
+  useEffect(() => {
+    const unlistenPromise = listen<RuntimeAutoUnmountRequestEvent>(
+      'runtime-auto-unmount-request',
+      (event) => {
+        const payload = event.payload;
+        void invoke('send_notification', {
+          title: t('appName'),
+          body: t('app.autoUnmountConfirmNotification', {
+            taskName: payload.taskName,
+            defaultValue: `[${payload.taskName}] 복사된 파일이 없어 unmount 전에 확인이 필요합니다.`,
+          }),
+        }).catch((error) => {
+          console.error('Failed to send auto-unmount notification:', error);
+        });
+
+        setPendingAutoUnmountRequests((prev) => [
+          ...prev.filter((item) => item.taskId !== payload.taskId),
+          payload,
+        ]);
+      }
+    );
+
+    return () => {
+      void unlistenPromise
+        .then((unlisten) => unlisten())
+        .catch((err) => {
+          console.warn('[App] Failed to unlisten runtime-auto-unmount-request', err);
+        });
+    };
+  }, [t]);
+
+  useEffect(() => {
+    if (activeAutoUnmountRequest || pendingAutoUnmountRequests.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const tryActivate = async () => {
+      const next = pendingAutoUnmountRequests[0];
+      if (!next) {
+        return;
+      }
+
+      let visible = true;
+      try {
+        visible = await getCurrentWebviewWindow().isVisible();
+      } catch (error) {
+        console.error('Failed to inspect window visibility:', error);
+      }
+
+      if (cancelled || !visible) {
+        return;
+      }
+
+      setActiveAutoUnmountRequest(next);
+      setPendingAutoUnmountRequests((prev) => prev.slice(1));
+    };
+
+    void tryActivate();
+    const timer = window.setInterval(() => {
+      void tryActivate();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeAutoUnmountRequest, pendingAutoUnmountRequests]);
+
+  const confirmAutoUnmount = useCallback(async () => {
+    if (!activeAutoUnmountRequest) {
+      return;
+    }
+
+    try {
+      await invoke('unmount_volume', { path: activeAutoUnmountRequest.source });
+    } catch (error) {
+      console.error('Failed to unmount from auto-unmount confirmation:', error);
+    } finally {
+      setActiveAutoUnmountRequest(null);
+    }
+  }, [activeAutoUnmountRequest]);
+
+  const cancelAutoUnmount = useCallback(() => {
+    setActiveAutoUnmountRequest(null);
+  }, []);
 
   useEffect(() => {
     if (!isLifecycleReady || pendingCloseIntentRef.current === null) {
@@ -282,6 +456,15 @@ function AppContent() {
           </Suspense>
         </AppShell>
       ) : null}
+      <AutoUnmountConfirmModal
+        opened={activeAutoUnmountRequest !== null}
+        taskName={activeAutoUnmountRequest?.taskName || ''}
+        source={activeAutoUnmountRequest?.source || ''}
+        filesCopied={activeAutoUnmountRequest?.filesCopied || 0}
+        bytesCopied={activeAutoUnmountRequest?.bytesCopied || 0}
+        onConfirm={confirmAutoUnmount}
+        onCancel={cancelAutoUnmount}
+      />
       <StartupProgressOverlay
         settingsLoaded={settingsLoaded}
         tasksLoaded={tasksLoaded}
