@@ -386,14 +386,15 @@ function AppContent() {
   }, [activeAutoUnmountRequest, pendingAutoUnmountRequests]);
 
   const confirmAutoUnmount = useCallback(async () => {
-    if (!activeAutoUnmountRequest) {
+    const request = activeAutoUnmountRequest;
+    if (!request) {
       return;
     }
 
     try {
-      await invoke('unmount_volume', { path: activeAutoUnmountRequest.source });
+      await invoke('unmount_volume', { path: request.source });
       setTaskLastLog(
-        activeAutoUnmountRequest.taskId,
+        request.taskId,
         t('syncTasks.autoUnmountConfirmedStatus', {
           defaultValue: 'Unmount 확인 완료',
         }),
@@ -402,29 +403,34 @@ function AppContent() {
     } catch (error) {
       console.error('Failed to unmount from auto-unmount confirmation:', error);
       setTaskLastLog(
-        activeAutoUnmountRequest.taskId,
+        request.taskId,
         t('syncTasks.autoUnmountFailedStatus', {
           defaultValue: 'Unmount 실패',
         }),
         'warning',
       );
     } finally {
+      useSyncTaskStatusStore.getState().setQueued(request.taskId, false);
+      setPendingAutoUnmountRequests((prev) =>
+        prev.filter((item) => item.taskId !== request.taskId)
+      );
       setActiveAutoUnmountRequest(null);
     }
   }, [activeAutoUnmountRequest, setTaskLastLog, t]);
 
   const cancelAutoUnmount = useCallback(async () => {
-    if (!activeAutoUnmountRequest) {
+    const request = activeAutoUnmountRequest;
+    if (!request) {
       return;
     }
 
     try {
       await invoke('set_auto_unmount_session_disabled', {
-        taskId: activeAutoUnmountRequest.taskId,
+        taskId: request.taskId,
         disabled: true,
       });
       setTaskLastLog(
-        activeAutoUnmountRequest.taskId,
+        request.taskId,
         t('syncTasks.autoUnmountCancelledStatus', {
           defaultValue: 'Unmount 취소(마운트 유지)',
         }),
@@ -432,8 +438,12 @@ function AppContent() {
       );
     } catch (error) {
       console.error('Failed to set auto-unmount session suppression:', error);
-      setTaskLastLog(activeAutoUnmountRequest.taskId, String(error), 'error');
+      setTaskLastLog(request.taskId, String(error), 'error');
     } finally {
+      useSyncTaskStatusStore.getState().setQueued(request.taskId, false);
+      setPendingAutoUnmountRequests((prev) =>
+        prev.filter((item) => item.taskId !== request.taskId)
+      );
       setActiveAutoUnmountRequest(null);
     }
   }, [activeAutoUnmountRequest, setTaskLastLog, t]);

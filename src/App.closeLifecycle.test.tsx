@@ -26,8 +26,9 @@ const runtimeState: MockRuntimeState = {
 };
 
 const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
-const { setLastLogMock } = vi.hoisted(() => ({
+const { setLastLogMock, setQueuedMock } = vi.hoisted(() => ({
   setLastLogMock: vi.fn(),
+  setQueuedMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -77,6 +78,7 @@ vi.mock('./hooks/useSyncTaskStatus', () => ({
   useSyncTaskStatusStore: {
     getState: () => ({
       setLastLog: setLastLogMock,
+      setQueued: setQueuedMock,
     }),
   },
 }));
@@ -203,6 +205,7 @@ describe('App close lifecycle', () => {
   beforeEach(() => {
     vi.useRealTimers();
     setLastLogMock.mockReset();
+    setQueuedMock.mockReset();
     runtimeState.settingsLoaded = true;
     runtimeState.tasksLoaded = true;
     runtimeState.setsLoaded = true;
@@ -470,5 +473,6 @@ describe('App close lifecycle', () => {
       message: 'syncTasks.autoUnmountCancelledStatus',
       level: 'warning',
     }));
+    expect(setQueuedMock).toHaveBeenCalledWith('task-1', false);
   });
 });
