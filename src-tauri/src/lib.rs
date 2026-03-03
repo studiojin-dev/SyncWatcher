@@ -170,6 +170,11 @@ pub struct AppState {
     conflict_review_seq: Arc<AtomicU64>,
 }
 
+#[derive(Default)]
+struct AppExitControl {
+    allow_force_exit: AtomicBool,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeConfigPayload {
@@ -3185,7 +3190,11 @@ async fn hide_to_background(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn quit_app(app: tauri::AppHandle) -> Result<(), String> {
+async fn quit_app(
+    app: tauri::AppHandle,
+    exit_control: tauri::State<'_, AppExitControl>,
+) -> Result<(), String> {
+    exit_control.allow_force_exit.store(true, Ordering::SeqCst);
     app.exit(0);
     Ok(())
 }
@@ -3295,6 +3304,23 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .on_menu_event(|app, event| {
+            eprintln!("[App] Menu event: {}", event.id.as_ref());
+            let menu_id = event.id.as_ref().to_ascii_lowercase();
+            let looks_like_quit = menu_id == "quit"
+                || menu_id.ends_with("-quit")
+                || menu_id.ends_with("_quit")
+                || menu_id.ends_with(".quit")
+                || menu_id.ends_with(":quit");
+
+            if looks_like_quit
+                && !menu_id.starts_with("tray_")
+                && !menu_id.starts_with("tray-")
+            {
+                eprintln!("[App] Menu event mapped to cmd-quit");
+                emit_close_requested(app, CloseRequestSource::CmdQuit);
+            }
+        })
         .setup(move |app| {
             // 윈도우 위치 조정
             if let Some(main_window) = app.get_webview_window("main") {
@@ -3350,11 +3376,12 @@ pub fn run() {
             if let Some(main_window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
                 main_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        emit_close_requested(&app_handle, CloseRequestSource::WindowClose);
-                    }
-                });
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                eprintln!("[App] Window close requested");
+                api.prevent_close();
+                emit_close_requested(&app_handle, CloseRequestSource::WindowClose);
+            }
+        });
             }
 
             // /Volumes 디렉토리 감시 시작 (볼륨 마운트/언마운트 감지)
@@ -3529,6 +3556,7 @@ pub fn run() {
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
         })
+        .manage(AppExitControl::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_app_version,
@@ -3581,10 +3609,21 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
-            if code.is_none() {
-                api.prevent_exit();
-                emit_close_requested(app_handle, CloseRequestSource::CmdQuit);
+            let allow_force_exit = app_handle
+                .state::<AppExitControl>()
+                .allow_force_exit
+                .swap(false, Ordering::SeqCst);
+
+            if allow_force_exit {
+                return;
             }
+
+            eprintln!(
+                "[App] ExitRequested intercepted by frontend close flow (code={:?})",
+                code
+            );
+            api.prevent_exit();
+            emit_close_requested(app_handle, CloseRequestSource::CmdQuit);
         }
     });
 }

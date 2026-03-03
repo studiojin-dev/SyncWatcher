@@ -57,7 +57,9 @@ function AppContent() {
   const [pendingAutoUnmountRequests, setPendingAutoUnmountRequests] = useState<RuntimeAutoUnmountRequestEvent[]>([]);
   const [activeAutoUnmountRequest, setActiveAutoUnmountRequest] = useState<RuntimeAutoUnmountRequestEvent | null>(null);
   const isHandlingCloseRef = useRef(false);
+  const activeCloseIntentRef = useRef<CloseIntent | null>(null);
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
+  const recentCmdQAtRef = useRef(0);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
   const { updateSettings } = useSettings();
   const setTaskLastLog = useCallback((
@@ -112,7 +114,7 @@ function AppContent() {
   }, []);
 
   const queueCloseIntent = useCallback((intent: CloseIntent) => {
-    const currentIntent = pendingCloseIntentRef.current;
+    const currentIntent = pendingCloseIntentRef.current ?? activeCloseIntentRef.current;
     const shouldOverride =
       intent === 'tray-quit'
       || currentIntent === null
@@ -244,6 +246,11 @@ function AppContent() {
       }
 
       if (intent === 'window-close' && settings.closeAction === 'background') {
+        await Promise.resolve();
+        if (pendingCloseIntentRef.current === 'cmd-quit' || pendingCloseIntentRef.current === 'tray-quit') {
+          return;
+        }
+
         await hideToBackground();
         return;
       }
@@ -254,16 +261,37 @@ function AppContent() {
     }
   }, [handleCmdQuitWithPolicy, handleQuitWithConfirmation, hideToBackground, settings.closeAction]);
 
+  const drainCloseIntents = useCallback(async () => {
+    if (!isLifecycleReady) {
+      return;
+    }
+
+    if (!pendingCloseIntentRef.current && !activeCloseIntentRef.current) {
+      return;
+    }
+
+    await runExclusiveCloseAction(async () => {
+      while (pendingCloseIntentRef.current) {
+        const nextIntent = pendingCloseIntentRef.current;
+        pendingCloseIntentRef.current = null;
+
+        activeCloseIntentRef.current = nextIntent;
+        await executeCloseIntent(nextIntent);
+      }
+
+      activeCloseIntentRef.current = null;
+    });
+  }, [isLifecycleReady, executeCloseIntent, runExclusiveCloseAction]);
+
   const requestCloseIntent = useCallback(async (intent: CloseIntent) => {
     if (!isLifecycleReady) {
       queueCloseIntent(intent);
       return;
     }
 
-    await runExclusiveCloseAction(async () => {
-      await executeCloseIntent(intent);
-    });
-  }, [executeCloseIntent, isLifecycleReady, queueCloseIntent, runExclusiveCloseAction]);
+    queueCloseIntent(intent);
+    await drainCloseIntents();
+  }, [drainCloseIntents, isLifecycleReady, queueCloseIntent]);
 
   useEffect(() => {
     if (!settingsLoaded) {
@@ -281,8 +309,35 @@ function AppContent() {
   }, [settingsLoaded]);
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'q') {
+        recentCmdQAtRef.current = Date.now();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void requestCloseIntent('cmd-quit');
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [requestCloseIntent]);
+
+  useEffect(() => {
     const unlistenPromise = listen<CloseRequestedEventPayload>('close-requested', async (event) => {
-      const source = event.payload?.source === 'cmd-quit' ? 'cmd-quit' : 'window-close';
+      const likelyCmdQ = Date.now() - recentCmdQAtRef.current <= 1200;
+      const source = event.payload?.source === 'cmd-quit'
+        ? 'cmd-quit'
+        : event.payload?.source === 'window-close'
+          ? 'window-close'
+          : (likelyCmdQ ? 'cmd-quit' : 'window-close');
+
+      if (source === 'cmd-quit') {
+        recentCmdQAtRef.current = 0;
+      }
+
       await requestCloseIntent(source);
     });
 
@@ -296,16 +351,38 @@ function AppContent() {
   }, [requestCloseIntent]);
 
   useEffect(() => {
+    let isActive = true;
+    const unlistenClosePromise = getCurrentWebviewWindow().onCloseRequested(async (event) => {
+      const isLikelyCmdQClose = Date.now() - recentCmdQAtRef.current <= 1200;
+      if (!isLikelyCmdQClose) {
+        return;
+      }
+
+      event.preventDefault();
+      recentCmdQAtRef.current = 0;
+      await requestCloseIntent('cmd-quit');
+    });
+
+    void unlistenClosePromise
+      .then((unlisten) => {
+        if (!isActive) {
+          unlisten();
+          return;
+        }
+      });
+
     const unlistenPromise = listen('tray-quit-requested', async () => {
       await requestCloseIntent('tray-quit');
     });
 
     return () => {
+      isActive = false;
       void unlistenPromise
         .then((unlisten) => unlisten())
         .catch((err) => {
           console.warn('[App] Failed to unlisten tray-quit-requested', err);
       });
+      void unlistenClosePromise.then((unlisten) => unlisten());
     };
   }, [requestCloseIntent]);
 
@@ -449,17 +526,8 @@ function AppContent() {
   }, [activeAutoUnmountRequest, setTaskLastLog, t]);
 
   useEffect(() => {
-    if (!isLifecycleReady || pendingCloseIntentRef.current === null) {
-      return;
-    }
-
-    const pendingIntent = pendingCloseIntentRef.current;
-    pendingCloseIntentRef.current = null;
-
-    void runExclusiveCloseAction(async () => {
-      await executeCloseIntent(pendingIntent);
-    });
-  }, [executeCloseIntent, isLifecycleReady, runExclusiveCloseAction]);
+    void drainCloseIntents();
+  }, [drainCloseIntents, isLifecycleReady]);
 
   const renderContent = () => {
     switch (activeTab) {

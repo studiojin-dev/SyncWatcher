@@ -43,6 +43,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
   getCurrentWebviewWindow: () => ({
     label: 'main',
     isVisible: vi.fn().mockResolvedValue(true),
+    onCloseRequested: vi.fn().mockResolvedValue(() => {}),
   }),
 }));
 
@@ -271,6 +272,66 @@ describe('App close lifecycle', () => {
     expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
+    ).toBe(false);
+  });
+
+  it('prioritizes cmd+q over concurrent window-close in background mode (background option)', async () => {
+    runtimeState.closeAction = 'background';
+    messageMock.mockResolvedValue('app.cmdQuitBackgroundOption');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('close-requested')).toBe(true);
+    });
+
+    const closeHandler = eventHandlers.get('close-requested');
+    if (!closeHandler) {
+      throw new Error('close-requested handler not found');
+    }
+
+    await act(async () => {
+      const windowClose = closeHandler({ payload: { source: 'window-close' } });
+      const cmdQuit = closeHandler({ payload: { source: 'cmd-quit' } });
+      await Promise.all([windowClose, cmdQuit]);
+    });
+
+    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'hide_to_background'),
+    ).toHaveLength(1);
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
+    ).toBe(false);
+  });
+
+  it('prioritizes cmd+q over concurrent window-close in background mode (full quit option)', async () => {
+    runtimeState.closeAction = 'background';
+    messageMock.mockResolvedValue('app.cmdQuitFullQuitOption');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('close-requested')).toBe(true);
+    });
+
+    const closeHandler = eventHandlers.get('close-requested');
+    if (!closeHandler) {
+      throw new Error('close-requested handler not found');
+    }
+
+    await act(async () => {
+      const windowClose = closeHandler({ payload: { source: 'window-close' } });
+      const cmdQuit = closeHandler({ payload: { source: 'cmd-quit' } });
+      await Promise.all([windowClose, cmdQuit]);
+    });
+
+    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'quit_app'),
+    ).toHaveLength(1);
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'hide_to_background'),
     ).toBe(false);
   });
 
