@@ -273,6 +273,14 @@
           "notMounted": "指定UUIDが未マウントの場合、パス解決に失敗し、同期/監視を開始できません。",
           "subPath": "マウント済みボリューム内のサブパスを指定し、デバイスの一部だけを同期できます。",
           "autoCopyOnInsert": "SDカードなどのリムーバブルディスクを挿入すると、自動でコピーを実行します。設定でコピー完了後の自動アンマウントを有効にできます。"
+        },
+        "uninstallCleanup": {
+          "title": "クリーンアンインストール (macOS)",
+          "description": "アプリ本体に加えて、必要に応じてローカル設定/データも削除する方法です。",
+          "moveToTrash": "SyncWatcher を終了し、Applications の SyncWatcher.app をゴミ箱へ移動します。",
+          "removeAppSupport": "同期タスク状態と YAML データを削除するには、~/Library/Application Support/dev.studiojin.syncwatcher/ を削除します。",
+          "removePreferences": "UI/設定を削除するには、~/Library/Preferences/dev.studiojin.syncwatcher.plist を削除します。",
+          "removeCaches": "任意のクリーンアップ: ~/Library/Caches/dev.studiojin.syncwatcher/ を削除し、ゴミ箱を空にします。"
         }
       },
       "syncEngine": {

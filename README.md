@@ -94,6 +94,23 @@ npm run tauri build
    - The DMG may show a Gatekeeper message depending on your macOS settings.
 3. Run `SyncWatcher`.
 
+### macOS Uninstall (Keep vs Remove Data)
+
+To remove only the app:
+
+1. Quit `SyncWatcher`.
+2. Move `SyncWatcher.app` from `Applications` to Trash.
+
+To remove app data/settings too (clean uninstall), additionally delete:
+
+- `~/Library/Application Support/dev.studiojin.syncwatcher/` (sync task/runtime YAML state)
+- `~/Library/Preferences/dev.studiojin.syncwatcher.plist` (UI/settings preferences)
+- `~/Library/Caches/dev.studiojin.syncwatcher/` (cache, optional)
+
+Then empty Trash.
+
+> We intentionally do **not** show an in-app “Uninstall” action by default. This keeps the app focused on sync workflows while still giving clear removal guidance in documentation and Help.
+
 ### macOS Latest Installer (curl script)
 
 Use this one-liner to install the latest build directly from GitHub Releases:

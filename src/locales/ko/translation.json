@@ -273,6 +273,14 @@
           "notMounted": "해당 UUID가 마운트되어 있지 않으면 경로 해석에 실패해 동기화/감시를 시작할 수 없습니다.",
           "subPath": "마운트된 볼륨 내부 하위 경로를 지정해 장치의 일부만 동기화할 수 있습니다.",
           "autoCopyOnInsert": "SDCard 등 이동식 디스크가 삽입되면 자동으로 복사를 실행하는 기능입니다. 설정을 통해 복사 후 자동으로 언마운트 할 수 있습니다."
+        },
+        "uninstallCleanup": {
+          "title": "깔끔한 제거 (macOS)",
+          "description": "앱을 삭제하고 원하면 로컬 설정/데이터까지 함께 지우는 방법입니다.",
+          "moveToTrash": "SyncWatcher를 종료한 뒤 Applications의 SyncWatcher.app을 휴지통으로 이동하세요.",
+          "removeAppSupport": "동기화 작업 상태와 YAML 데이터를 지우려면 ~/Library/Application Support/dev.studiojin.syncwatcher/ 를 삭제하세요.",
+          "removePreferences": "UI/설정 값을 지우려면 ~/Library/Preferences/dev.studiojin.syncwatcher.plist 를 삭제하세요.",
+          "removeCaches": "선택 정리: ~/Library/Caches/dev.studiojin.syncwatcher/ 를 삭제한 뒤 휴지통을 비우세요."
         }
       },
       "syncEngine": {

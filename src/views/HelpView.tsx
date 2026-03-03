@@ -7,6 +7,7 @@ import {
   IconShield,
   IconEye,
   IconBrandGithub,
+  IconTrash,
 } from '@tabler/icons-react';
 
 function HelpView() {
@@ -78,6 +79,18 @@ function HelpView() {
         t('help.sections.uuidSource.notMounted'),
         t('help.sections.uuidSource.subPath'),
         t('help.sections.uuidSource.autoCopyOnInsert'),
+      ],
+    },
+    {
+      id: 'uninstallCleanup',
+      icon: IconTrash,
+      title: t('help.sections.uninstallCleanup.title'),
+      description: t('help.sections.uninstallCleanup.description'),
+      features: [
+        t('help.sections.uninstallCleanup.moveToTrash'),
+        t('help.sections.uninstallCleanup.removeAppSupport'),
+        t('help.sections.uninstallCleanup.removePreferences'),
+        t('help.sections.uninstallCleanup.removeCaches'),
       ],
     },
   ];

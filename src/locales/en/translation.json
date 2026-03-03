@@ -270,6 +270,14 @@
           "notMounted": "If the UUID is not mounted, path resolution fails and sync/watch cannot start.",
           "subPath": "You can set a sub path inside the mounted volume to sync only part of the device.",
           "autoCopyOnInsert": "When a removable disk such as an SD card is inserted, copy runs automatically. You can configure automatic unmount after copy completes."
+        },
+        "uninstallCleanup": {
+          "title": "Clean Uninstall (macOS)",
+          "description": "How to remove the app and optionally delete local settings/data.",
+          "moveToTrash": "Quit SyncWatcher, then move SyncWatcher.app from Applications to Trash.",
+          "removeAppSupport": "To remove sync task state and YAML data, delete ~/Library/Application Support/dev.studiojin.syncwatcher/.",
+          "removePreferences": "To remove UI/settings preferences, delete ~/Library/Preferences/dev.studiojin.syncwatcher.plist.",
+          "removeCaches": "Optional cleanup: delete ~/Library/Caches/dev.studiojin.syncwatcher/, then empty Trash."
         }
       },
       "syncEngine": {

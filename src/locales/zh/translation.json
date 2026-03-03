@@ -273,6 +273,14 @@
           "notMounted": "若对应 UUID 未挂载，路径解析会失败，无法启动同步/监控。",
           "subPath": "可指定挂载卷内的子路径，仅同步设备中的部分目录。",
           "autoCopyOnInsert": "插入 SD 卡等可移动磁盘时会自动执行复制。你可以在设置中启用复制完成后自动卸载。"
+        },
+        "uninstallCleanup": {
+          "title": "彻底卸载（macOS）",
+          "description": "除了删除应用本体外，也可按需删除本地设置/数据。",
+          "moveToTrash": "先退出 SyncWatcher，再将 Applications 中的 SyncWatcher.app 移到废纸篓。",
+          "removeAppSupport": "若要删除同步任务状态与 YAML 数据，请删除 ~/Library/Application Support/dev.studiojin.syncwatcher/。",
+          "removePreferences": "若要删除界面/设置偏好，请删除 ~/Library/Preferences/dev.studiojin.syncwatcher.plist。",
+          "removeCaches": "可选清理：删除 ~/Library/Caches/dev.studiojin.syncwatcher/，然后清空废纸篓。"
         }
       },
       "syncEngine": {
