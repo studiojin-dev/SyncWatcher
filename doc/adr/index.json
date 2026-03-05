@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260305-0009",
+    "title": "Release SBOM generation and optional cosign attestation",
+    "tags": [
+      "release",
+      "security",
+      "sbom",
+      "attestation",
+      "ci",
+      "supply-chain"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-05",
+    "tldr": "Generate CycloneDX/SPDX SBOMs on tagged releases, attach them as release assets, and optionally produce keyless cosign attestations for shipped binaries.",
+    "path": "doc/adr/ADR-20260305-0009-release-sbom-and-optional-cosign-attestation.md"
+  },
+  {
     "id": "ADR-20260301-0008",
     "title": "watchMode zero-copy auto-unmount deferred confirmation",
     "tags": [

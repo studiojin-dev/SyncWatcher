@@ -97,8 +97,105 @@ jobs:
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           args: ${{ matrix.args }}
 
-  publish_release:
+  sbom_and_attest:
     needs: [tag_gate, release]
+    if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG_NAME: ${{ github.ref_name }}
+      ENABLE_COSIGN_ATTESTATION: ${{ vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM (CycloneDX / SPDX)
+        run: |
+          syft scan . \
+            -o cyclonedx-json=sbom-${TAG_NAME}.cdx.json \
+            -o spdx-json=sbom-${TAG_NAME}.spdx.json
+
+      - name: Upload SBOM assets to release
+        run: |
+          gh release upload "$TAG_NAME" \
+            "sbom-${TAG_NAME}.cdx.json" \
+            "sbom-${TAG_NAME}.spdx.json" \
+            --clobber
+
+      - name: Download release artifacts for attestation
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true'
+        id: prepare_attestation
+        run: |
+          mkdir -p release-assets
+          gh release download "$TAG_NAME" --dir release-assets
+          mapfile -t artifacts < <(find release-assets -maxdepth 1 -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) | sort)
+          if [[ "${#artifacts[@]}" -eq 0 ]]; then
+            echo "has_artifacts=false" >> "$GITHUB_OUTPUT"
+            echo "No DMG or app tarball artifacts found; skipping attestation."
+            exit 0
+          fi
+          printf '%s\n' "${artifacts[@]}" > attestation-targets.txt
+          echo "has_artifacts=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true' && steps.prepare_attestation.outputs.has_artifacts == 'true'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Generate keyless cosign attestations
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true' && steps.prepare_attestation.outputs.has_artifacts == 'true'
+        run: |
+          while IFS= read -r artifact; do
+            file_name="$(basename "$artifact")"
+            file_sha256="$(sha256sum "$artifact" | awk '{print $1}')"
+            predicate_file="attestation-${file_name}.predicate.json"
+            bundle_file="attestation-${file_name}.bundle.json"
+
+            cat > "$predicate_file" <<EOF
+          {
+            "buildType": "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml",
+            "invocation": {
+              "runId": "${GITHUB_RUN_ID}",
+              "runAttempt": "${GITHUB_RUN_ATTEMPT}",
+              "ref": "${GITHUB_REF}",
+              "sha": "${GITHUB_SHA}"
+            },
+            "subject": {
+              "name": "${file_name}",
+              "digest": {
+                "sha256": "${file_sha256}"
+              }
+            },
+            "sbom": [
+              "sbom-${TAG_NAME}.cdx.json",
+              "sbom-${TAG_NAME}.spdx.json"
+            ],
+            "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+            cosign attest-blob \
+              --yes \
+              --oidc-provider github-actions \
+              --predicate "$predicate_file" \
+              --type https://syncwatcher.dev/attestation/release-asset/v1 \
+              --bundle "$bundle_file" \
+              "$artifact"
+          done < attestation-targets.txt
+
+      - name: Upload attestation bundles to release
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true' && steps.prepare_attestation.outputs.has_artifacts == 'true'
+        run: |
+          gh release upload "$TAG_NAME" attestation-*.bundle.json --clobber
+
+  publish_release:
+    needs: [tag_gate, release, sbom_and_attest]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
