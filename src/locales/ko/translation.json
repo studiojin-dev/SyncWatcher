@@ -186,6 +186,8 @@
       "stateLocation": "상태 저장 위치",
       "stateLocationPlaceholder": "기본값: Tauri AppData",
       "maxLogLines": "최대 로그 라인 수",
+      "mcpEnabled": "MCP 제어 허용",
+      "mcpEnabledDesc": "로컬 MCP 클라이언트가 현재 실행 중인 앱을 제어할 수 있습니다. SyncWatcher는 MCP 때문에 자동 실행되지 않습니다.",
       "closeAction": "종료 동작",
       "closeActionDesc": "앱을 닫을 때의 동작을 선택합니다",
       "closeActionQuit": "완전 종료",

@@ -186,6 +186,8 @@
             "stateLocation": "狀態儲存位置",
             "stateLocationPlaceholder": "預設: Tauri AppData",
             "maxLogLines": "最大日誌行數",
+            "mcpEnabled": "啟用 MCP 控制",
+            "mcpEnabledDesc": "允許本機 MCP 用戶端控制目前正在執行的應用程式。SyncWatcher 不會因為 MCP 自動啟動。",
             "closeAction": "關閉動作",
             "closeActionDesc": "選擇關閉應用程式時的行為",
             "closeActionQuit": "退出應用程式",

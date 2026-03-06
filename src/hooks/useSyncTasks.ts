@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useYamlStore } from './useYamlStore';
+import { invoke } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
+import type { YamlStoreError } from './useYamlStore';
+import { listenConfigStoreChanged, parseConfigError, readConfigCollection, readConfigRecord } from '../utils/configStore';
 
 export interface SyncTask {
     id: string;
@@ -55,29 +57,59 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
 }
 
 export function useSyncTasks() {
-    const { data: storedTasks, saveData: saveTasks, loaded, error, reload } = useYamlStore<PersistedSyncTask[]>({
-        fileName: 'tasks.yaml',
-        defaultData: DEFAULT_TASKS,
-    });
-
-    const migrationCheckedRef = useRef(false);
+    const [storedTasks, setStoredTasks] = useState<PersistedSyncTask[]>(DEFAULT_TASKS);
+    const [loaded, setLoaded] = useState(false);
+    const [error, setError] = useState<YamlStoreError | null>(null);
+    const tasksRef = useRef<PersistedSyncTask[]>(DEFAULT_TASKS);
     const tasks = useMemo(() => storedTasks.map(normalizeTask), [storedTasks]);
 
     useEffect(() => {
-        if (!loaded || migrationCheckedRef.current) {
-            return;
-        }
+        tasksRef.current = storedTasks;
+    }, [storedTasks]);
 
-        migrationCheckedRef.current = true;
-        const hasLegacyFields = storedTasks.some((task) =>
-            'enabled' in task || 'watching' in task || 'deleteMissing' in task
-        );
-        if (!hasLegacyFields) {
-            return;
-        }
+    const loadTasks = useCallback(async () => {
+        try {
+            const response = await invoke<unknown>('list_sync_tasks');
+            const responseError = readConfigRecord<YamlStoreError>(response, ['error']);
+            if (responseError && responseError.type === 'PARSE_ERROR') {
+                setStoredTasks(DEFAULT_TASKS);
+                setError(responseError as YamlStoreError);
+                return;
+            }
 
-        void saveTasks(tasks);
-    }, [loaded, storedTasks, tasks, saveTasks]);
+            const nextTasks = readConfigCollection<PersistedSyncTask>(response, ['tasks', 'syncTasks']);
+            setStoredTasks(nextTasks);
+            setError(null);
+        } catch (err) {
+            const parsedError = parseConfigError(err);
+            const nextError = readConfigRecord<YamlStoreError>(parsedError, ['error']);
+            setStoredTasks(DEFAULT_TASKS);
+            setError(nextError && nextError.type === 'PARSE_ERROR' ? nextError as YamlStoreError : null);
+            console.error('Failed to load sync tasks:', err);
+        } finally {
+            setLoaded(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        void loadTasks();
+
+        let disposed = false;
+        const unlistenPromise = listenConfigStoreChanged(['syncTasks'], () => {
+            if (!disposed) {
+                void loadTasks();
+            }
+        });
+
+        return () => {
+            disposed = true;
+            void unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((error) => {
+                    console.warn('Failed to unlisten config-store-changed for sync tasks', error);
+                });
+        };
+    }, [loadTasks]);
 
     const addTask = useCallback(async (task: Omit<SyncTask, 'id'>) => {
         const newTask: SyncTask = {
@@ -86,12 +118,34 @@ export function useSyncTasks() {
         };
         newTask.autoUnmount = shouldEnableAutoUnmount(newTask);
 
-        await saveTasks([...tasks, newTask]);
+        const nextTasks = [...tasksRef.current, newTask];
+        tasksRef.current = nextTasks;
+        setStoredTasks(nextTasks);
+
+        try {
+            const response = await invoke<unknown>('create_sync_task', { task: newTask });
+            const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
+            if (persistedTask) {
+                const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);
+                const persistedTasks = nextTasks.map((candidate) =>
+                    candidate.id === newTask.id ? normalizedTask : candidate
+                );
+                tasksRef.current = persistedTasks;
+                setStoredTasks(persistedTasks);
+            }
+            setError(null);
+        } catch (err) {
+            tasksRef.current = tasksRef.current.filter((candidate) => candidate.id !== newTask.id);
+            setStoredTasks(tasksRef.current);
+            throw err;
+        }
+
         return newTask;
-    }, [tasks, saveTasks]);
+    }, []);
 
     const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
-        const newTasks = tasks.map((t) =>
+        const previousTasks = tasksRef.current;
+        const newTasks = previousTasks.map((t) =>
             t.id === id
                 ? {
                     ...t,
@@ -103,12 +157,48 @@ export function useSyncTasks() {
                 }
                 : t
         );
-        await saveTasks(newTasks);
-    }, [tasks, saveTasks]);
+        tasksRef.current = newTasks;
+        setStoredTasks(newTasks);
+
+        try {
+            const response = await invoke<unknown>('update_sync_task', { id, updates });
+            const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
+            if (persistedTask) {
+                const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);
+                const persistedTasks = newTasks.map((candidate) =>
+                    candidate.id === id ? normalizedTask : candidate
+                );
+                tasksRef.current = persistedTasks;
+                setStoredTasks(persistedTasks);
+            }
+            setError(null);
+        } catch (err) {
+            tasksRef.current = previousTasks;
+            setStoredTasks(previousTasks);
+            throw err;
+        }
+    }, []);
 
     const deleteTask = useCallback(async (id: string) => {
-        await saveTasks(tasks.filter((t) => t.id !== id));
-    }, [tasks, saveTasks]);
+        const previousTasks = tasksRef.current;
+        const nextTasks = previousTasks.filter((task) => task.id !== id);
+        tasksRef.current = nextTasks;
+        setStoredTasks(nextTasks);
+
+        try {
+            await invoke('delete_sync_task', { id });
+            setError(null);
+        } catch (err) {
+            tasksRef.current = previousTasks;
+            setStoredTasks(previousTasks);
+            throw err;
+        }
+    }, []);
+
+    const reload = useCallback(async () => {
+        setError(null);
+        await loadTasks();
+    }, [loadTasks]);
 
     return {
         tasks,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
@@ -8,14 +8,12 @@ import { useSettings } from '../../hooks/useSettings';
 import { useSyncTaskStatusStore } from '../../hooks/useSyncTaskStatus';
 import { useToast } from '../ui/Toast';
 import {
-    RuntimeConfigPayload,
     RuntimeState,
     RuntimeSyncQueueStateEvent,
     RuntimeSyncStateEvent,
     RuntimeWatchStateEvent,
-    toRuntimeExclusionSet,
-    toRuntimeTask,
 } from '../../types/runtime';
+import { listenConfigStoreChanged } from '../../utils/configStore';
 
 interface SyncProgressEvent {
     taskId?: string;
@@ -112,9 +110,9 @@ function shouldShowRuntimeSyncErrorToast(
 
 function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBridgeProps) {
     const { t } = useTranslation();
-    const { tasks, loaded: tasksLoaded } = useSyncTasksContext();
-    const { sets, loaded: setsLoaded } = useExclusionSetsContext();
-    const { settings, loaded: settingsLoaded } = useSettings();
+    const { loaded: tasksLoaded } = useSyncTasksContext();
+    const { loaded: setsLoaded } = useExclusionSetsContext();
+    const { loaded: settingsLoaded } = useSettings();
     const { showToast } = useToast();
     const ready = tasksLoaded && setsLoaded && settingsLoaded;
     const watchingTasksRef = useRef<Set<string>>(new Set());
@@ -125,14 +123,6 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
         const localized = AUTO_UNMOUNT_STATUS_KEYS.map((key) => t(key));
         return new Set<string>([...AUTO_UNMOUNT_STATUS_KEYS, ...localized]);
     }, [t]);
-
-    const payload = useMemo<RuntimeConfigPayload>(() => ({
-        tasks: tasks.map(toRuntimeTask),
-        exclusionSets: sets.map(toRuntimeExclusionSet),
-        settings: {
-            dataUnitSystem: settings.dataUnitSystem,
-        },
-    }), [tasks, sets, settings.dataUnitSystem]);
 
     useEffect(() => {
         const unlistenProgress = listen<SyncProgressEvent>('sync-progress', (event) => {
@@ -297,82 +287,94 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
         };
     }, [autoUnmountStatusMessages, t]);
 
+    const syncRuntimeState = useCallback(async (options?: { initial?: boolean }) => {
+        const isInitialSyncAttempt = options?.initial ?? false;
+
+        if (isInitialSyncAttempt) {
+            onInitialRuntimeSyncChange?.('pending');
+        }
+
+        try {
+            const invokePromise = invoke<RuntimeState>('runtime_get_state');
+            const nextState = isInitialSyncAttempt
+                ? await withTimeout(
+                    invokePromise,
+                    INITIAL_RUNTIME_SYNC_TIMEOUT_MS,
+                    `runtime_get_state timed out after ${INITIAL_RUNTIME_SYNC_TIMEOUT_MS}ms`
+                )
+                : await invokePromise;
+
+            watchingTasksRef.current = new Set(nextState.watchingTasks);
+            applyRuntimeSnapshotToStore(nextState);
+
+            if (isInitialSyncAttempt) {
+                initialSyncResolvedRef.current = true;
+                onInitialRuntimeSyncChange?.('success');
+            }
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            console.error('Runtime state sync command failed', {
+                command: 'runtime_get_state',
+                error: errorMessage,
+            });
+            useSyncTaskStatusStore.getState().setLastLog('__runtime__', {
+                message: `[runtime_get_state] ${errorMessage}`,
+                timestamp: new Date().toLocaleTimeString(),
+                level: 'error',
+            });
+            const now = Date.now();
+            if (shouldShowRuntimeSyncErrorToast(lastRuntimeSyncErrorToastRef.current, errorMessage, now)) {
+                showToast('Failed to read runtime state', 'error');
+                lastRuntimeSyncErrorToastRef.current = {
+                    message: errorMessage,
+                    at: now,
+                };
+            }
+
+            if (isInitialSyncAttempt) {
+                initialSyncResolvedRef.current = true;
+                onInitialRuntimeSyncChange?.('error');
+            }
+        }
+    }, [onInitialRuntimeSyncChange, showToast]);
+
     useEffect(() => {
         if (!ready) {
             return;
         }
 
-        let cancelled = false;
-        const isInitialSyncAttempt = !initialSyncResolvedRef.current;
-
         if (!hasTauriInvokeBridge()) {
-            if (isInitialSyncAttempt) {
+            if (!initialSyncResolvedRef.current) {
                 initialSyncResolvedRef.current = true;
                 onInitialRuntimeSyncChange?.('error');
             }
             return;
         }
 
-        const syncRuntimeConfig = async () => {
-            if (isInitialSyncAttempt) {
-                onInitialRuntimeSyncChange?.('pending');
-            }
+        let cancelled = false;
+        const isInitialSyncAttempt = !initialSyncResolvedRef.current;
 
-            try {
-                const invokePromise = invoke<RuntimeState>('runtime_set_config', { payload });
-                const nextState = isInitialSyncAttempt
-                    ? await withTimeout(
-                        invokePromise,
-                        INITIAL_RUNTIME_SYNC_TIMEOUT_MS,
-                        `runtime_set_config timed out after ${INITIAL_RUNTIME_SYNC_TIMEOUT_MS}ms`
-                    )
-                    : await invokePromise;
-                if (cancelled) {
-                    return;
-                }
-
-                watchingTasksRef.current = new Set(nextState.watchingTasks);
-                applyRuntimeSnapshotToStore(nextState);
-
-                if (isInitialSyncAttempt) {
-                    initialSyncResolvedRef.current = true;
-                    onInitialRuntimeSyncChange?.('success');
-                }
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                console.error('Runtime sync command failed', {
-                    command: 'runtime_set_config',
-                    taskCount: payload.tasks.length,
-                    exclusionSetCount: payload.exclusionSets.length,
-                    error: errorMessage,
-                });
-                useSyncTaskStatusStore.getState().setLastLog('__runtime__', {
-                    message: `[runtime_set_config] ${errorMessage}`,
-                    timestamp: new Date().toLocaleTimeString(),
-                    level: 'error',
-                });
-                const now = Date.now();
-                if (shouldShowRuntimeSyncErrorToast(lastRuntimeSyncErrorToastRef.current, errorMessage, now)) {
-                    showToast('Failed to apply runtime configuration', 'error');
-                    lastRuntimeSyncErrorToastRef.current = {
-                        message: errorMessage,
-                        at: now,
-                    };
-                }
-
-                if (isInitialSyncAttempt) {
-                    initialSyncResolvedRef.current = true;
-                    onInitialRuntimeSyncChange?.('error');
-                }
-            }
+        const refreshRuntimeState = async () => {
+            await syncRuntimeState({ initial: isInitialSyncAttempt });
         };
 
-        void syncRuntimeConfig();
+        void refreshRuntimeState();
+
+        const unlistenPromise = listenConfigStoreChanged(['settings', 'syncTasks', 'exclusionSets'], () => {
+            if (!cancelled) {
+                void syncRuntimeState();
+            }
+        });
 
         return () => {
             cancelled = true;
+            void unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((error) => {
+                    console.warn('Failed to unlisten config-store-changed for runtime bridge', error);
+                });
         };
-    }, [ready, payload, onInitialRuntimeSyncChange, showToast]);
+    }, [ready, onInitialRuntimeSyncChange, syncRuntimeState]);
 
     return null;
 }

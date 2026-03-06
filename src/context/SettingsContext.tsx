@@ -1,6 +1,8 @@
-import { createContext, useState, useCallback, useEffect, ReactNode, useContext } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { createContext, useState, useCallback, useEffect, ReactNode, useContext, useRef } from 'react';
 import i18n from '../i18n';
 import { DataUnitSystem } from '../utils/formatBytes';
+import { listenConfigStoreChanged, readConfigRecord } from '../utils/configStore';
 
 export interface Settings {
     language: string;
@@ -11,9 +13,10 @@ export interface Settings {
     maxLogLines: number;
     closeAction: 'quit' | 'background';
     isRegistered: boolean;
+    mcpEnabled: boolean;
 }
 
-const defaultSettings: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
     language: 'en',
     theme: 'system',
     dataUnitSystem: 'binary',
@@ -22,6 +25,7 @@ const defaultSettings: Settings = {
     maxLogLines: 10000,
     closeAction: 'quit',
     isRegistered: false,
+    mcpEnabled: false,
 };
 
 const STORAGE_KEY = 'syncwatcher_settings';
@@ -35,43 +39,128 @@ interface SettingsContextType {
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
 
-export function SettingsProvider({ children }: { children: ReactNode }) {
-    const [settings, setSettings] = useState<Settings>(defaultSettings);
-    const [loaded, setLoaded] = useState(false);
+function normalizeSettings(candidate: Partial<Settings> | null | undefined): Settings {
+    return {
+        ...DEFAULT_SETTINGS,
+        ...candidate,
+    };
+}
 
-    // Load settings from localStorage on mount
-    useEffect(() => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored) as Partial<Settings>;
-                setSettings({ ...defaultSettings, ...parsed });
-            }
-        } catch (err) {
-            console.error('Failed to load settings:', err);
+function readCachedSettings(): Settings | null {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (!stored) {
+            return null;
         }
-        setLoaded(true);
+
+        const parsed = JSON.parse(stored) as Partial<Settings>;
+        return normalizeSettings(parsed);
+    } catch (err) {
+        console.error('Failed to load settings cache:', err);
+        return null;
+    }
+}
+
+export function SettingsProvider({ children }: { children: ReactNode }) {
+    const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+    const [loaded, setLoaded] = useState(false);
+    const settingsRef = useRef(settings);
+
+    useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
+
+    useEffect(() => {
+        if (!loaded) {
+            return;
+        }
+
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+        } catch (err) {
+            console.error('Failed to save settings cache:', err);
+        }
+    }, [loaded, settings]);
+
+    const loadSettings = useCallback(async () => {
+        try {
+            const stored = await invoke<unknown>('get_settings');
+            const nextSettings = normalizeSettings(readConfigRecord<Settings>(stored, ['settings']));
+            setSettings(nextSettings);
+        } catch (err) {
+            console.error('Failed to load settings from backend:', err);
+            const cachedSettings = readCachedSettings();
+            setSettings(cachedSettings ?? DEFAULT_SETTINGS);
+        } finally {
+            setLoaded(true);
+        }
     }, []);
 
-    const updateSettings = useCallback((updates: Partial<Settings>) => {
-        setSettings((prev) => {
-            const newSettings = { ...prev, ...updates };
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(newSettings));
-            } catch (err) {
-                console.error('Failed to save settings:', err);
+    useEffect(() => {
+        void loadSettings();
+
+        let disposed = false;
+        const unlistenPromise = listenConfigStoreChanged(['settings'], () => {
+            if (!disposed) {
+                void loadSettings();
             }
-            return newSettings;
         });
+
+        return () => {
+            disposed = true;
+            void unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((error) => {
+                    console.warn('Failed to unlisten config-store-changed for settings', error);
+                });
+        };
+    }, [loadSettings]);
+
+    const updateSettings = useCallback((updates: Partial<Settings>) => {
+        const previousSettings = settingsRef.current;
+        const nextSettings = normalizeSettings({
+            ...previousSettings,
+            ...updates,
+        });
+
+        settingsRef.current = nextSettings;
+        setSettings(nextSettings);
+
+        void invoke('update_settings', { updates })
+            .then((response) => {
+                const persistedSettings = readConfigRecord<Settings>(response, ['settings']);
+                if (persistedSettings) {
+                    const normalized = normalizeSettings(persistedSettings);
+                    settingsRef.current = normalized;
+                    setSettings(normalized);
+                }
+            })
+            .catch((err) => {
+                console.error('Failed to update settings:', err);
+                settingsRef.current = previousSettings;
+                setSettings(previousSettings);
+            });
     }, []);
 
     const resetSettings = useCallback(() => {
-        setSettings(defaultSettings);
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultSettings));
-        } catch (err) {
-            console.error('Failed to reset settings:', err);
-        }
+        const previousSettings = settingsRef.current;
+        settingsRef.current = DEFAULT_SETTINGS;
+        setSettings(DEFAULT_SETTINGS);
+
+        void invoke('reset_settings')
+            .then((response) => {
+                const persistedSettings = readConfigRecord<Settings>(response, ['settings']);
+                if (persistedSettings) {
+                    const normalized = normalizeSettings(persistedSettings);
+                    settingsRef.current = normalized;
+                    setSettings(normalized);
+                }
+            })
+            .catch((err) => {
+                console.error('Failed to reset settings:', err);
+                settingsRef.current = previousSettings;
+                setSettings(previousSettings);
+            });
     }, []);
 
     const applyTheme = useCallback((theme: string) => {

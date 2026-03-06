@@ -1,5 +1,6 @@
 use anyhow::Result;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use schemars::JsonSchema;
 use std::path::{Path, PathBuf};
 
 pub struct FolderWatcher {
@@ -20,7 +21,7 @@ impl FolderWatcher {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct VolumeInfo {
     pub name: String,
     pub path: PathBuf,
@@ -141,10 +142,7 @@ impl DiskMonitor {
     /// Filters out Time Machine and system volumes
     pub fn get_removable_volumes(&self) -> Result<Vec<VolumeInfo>> {
         let all_volumes = self.list_volumes()?;
-        Ok(all_volumes
-            .into_iter()
-            .filter(|v| v.is_removable)
-            .collect())
+        Ok(all_volumes.into_iter().filter(|v| v.is_removable).collect())
     }
 
     /// Removable 디스크를 언마운트합니다.
@@ -156,16 +154,15 @@ impl DiskMonitor {
         use std::time::Duration;
 
         // 1. Convert to string, reject if invalid UTF-8 or contains null
-        let path_str = path.to_str()
+        let path_str = path
+            .to_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid path: contains non-UTF-8 characters"))?;
 
         // 2. Use existing validation module
-        validate_path(path_str)
-            .map_err(|e| anyhow::anyhow!("Path validation failed: {}", e))?;
+        validate_path(path_str).map_err(|e| anyhow::anyhow!("Path validation failed: {}", e))?;
 
         // 3. Verify path exists and is accessible
-        verify_path_exists(path)
-            .map_err(|e| anyhow::anyhow!("Path verification failed: {}", e))?;
+        verify_path_exists(path).map_err(|e| anyhow::anyhow!("Path verification failed: {}", e))?;
 
         // 4. Additional validation: must be under /Volumes
         if !path_str.starts_with("/Volumes/") {
@@ -176,8 +173,12 @@ impl DiskMonitor {
         }
 
         // 5. Validate no shell metacharacters
-        if path_str.contains('|') || path_str.contains('&') || path_str.contains(';')
-            || path_str.contains('$') || path_str.contains('`') || path_str.contains('\n')
+        if path_str.contains('|')
+            || path_str.contains('&')
+            || path_str.contains(';')
+            || path_str.contains('$')
+            || path_str.contains('`')
+            || path_str.contains('\n')
         {
             return Err(anyhow::anyhow!("Path contains shell metacharacters"));
         }
@@ -193,7 +194,7 @@ impl DiskMonitor {
             // 6. Pass PathBuf directly, not string (safer)
             let output = Command::new("diskutil")
                 .arg("unmount")
-                .arg(&removable_mount_root)  // Always unmount by resolved removable root
+                .arg(&removable_mount_root) // Always unmount by resolved removable root
                 .output()
                 .map_err(|e| anyhow::anyhow!("diskutil execution failed: {}", e))?;
 
@@ -215,7 +216,11 @@ impl DiskMonitor {
             }
         }
 
-        Err(anyhow::anyhow!("Unmount failed ({} attempts): {}", max_retries, last_error))
+        Err(anyhow::anyhow!(
+            "Unmount failed ({} attempts): {}",
+            max_retries,
+            last_error
+        ))
     }
 }
 
@@ -339,7 +344,10 @@ fn is_removable_mount(
         && (metadata.ejectable == Some(true) || metadata.removable_media == Some(true))
 }
 
-fn find_matching_removable_mount_root(path: &Path, removable_volumes: &[VolumeInfo]) -> Option<PathBuf> {
+fn find_matching_removable_mount_root(
+    path: &Path,
+    removable_volumes: &[VolumeInfo],
+) -> Option<PathBuf> {
     removable_volumes
         .iter()
         .filter_map(|volume| {
@@ -437,7 +445,9 @@ fn list_mount_entries() -> Result<Vec<MountEntry>> {
 
 #[cfg(not(target_os = "macos"))]
 fn list_mount_entries() -> Result<Vec<MountEntry>> {
-    Err(anyhow::anyhow!("list_mount_entries is only supported on macOS"))
+    Err(anyhow::anyhow!(
+        "list_mount_entries is only supported on macOS"
+    ))
 }
 
 #[cfg(test)]
@@ -526,9 +536,18 @@ mod tests {
         let browsable_flags = 0u32;
 
         assert!(is_user_visible_mount(Path::new("/"), browsable_flags));
-        assert!(is_user_visible_mount(Path::new("/Volumes/EVO990"), browsable_flags));
-        assert!(!is_user_visible_mount(Path::new("/System/Volumes/VM"), browsable_flags));
-        assert!(!is_user_visible_mount(Path::new("/Volumes/.timemachine"), browsable_flags));
+        assert!(is_user_visible_mount(
+            Path::new("/Volumes/EVO990"),
+            browsable_flags
+        ));
+        assert!(!is_user_visible_mount(
+            Path::new("/System/Volumes/VM"),
+            browsable_flags
+        ));
+        assert!(!is_user_visible_mount(
+            Path::new("/Volumes/.timemachine"),
+            browsable_flags
+        ));
         assert!(!is_user_visible_mount(
             Path::new("/Volumes/.timemachine/backup"),
             browsable_flags
@@ -605,7 +624,11 @@ mod tests {
         };
         assert!(!is_removable_mount(&entry, false, Some(&internal_volume)));
         assert!(!is_removable_mount(&entry, false, None));
-        assert!(!is_removable_mount(&entry, true, Some(&removable_by_ejectable)));
+        assert!(!is_removable_mount(
+            &entry,
+            true,
+            Some(&removable_by_ejectable)
+        ));
 
         let non_disk_entry = MountEntry {
             mount_from: "/dev/apfs".to_string(),

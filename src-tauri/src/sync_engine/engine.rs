@@ -1,20 +1,19 @@
 use crate::sync_engine::types::{
     ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunResult, FileDiff,
-    FileDiffKind, FileMetadata, OrphanFile, SyncOptions, SyncResult,
-    TargetNewerConflictCandidate,
+    FileDiffKind, FileMetadata, OrphanFile, SyncOptions, SyncResult, TargetNewerConflictCandidate,
 };
+use anyhow::Context;
 use anyhow::Result;
-use std::ffi::OsStr;
+use globset::{Glob, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::hash::Hasher;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
-use walkdir::WalkDir;
-use globset::{Glob, GlobSetBuilder};
-use anyhow::Context; // Import Context trait
+use walkdir::WalkDir; // Import Context trait
 
 pub struct SyncEngine {
     source: PathBuf,
@@ -138,11 +137,11 @@ impl SyncEngine {
 
                 // Helper to add glob with error handling
                 let mut add_glob = |p: &str| -> anyhow::Result<()> {
-                     match Glob::new(p) {
+                    match Glob::new(p) {
                         Ok(glob) => {
                             builder.add(glob);
                             Ok(())
-                        },
+                        }
                         Err(e) => anyhow::bail!("Invalid exclusion pattern '{}': {}", p, e),
                     }
                 };
@@ -157,7 +156,7 @@ impl SyncEngine {
                 if !trimmed.starts_with('/') && !trimmed.starts_with("**/") {
                     add_glob(&format!("**/{}", trimmed))?;
                 }
-                
+
                 // Also handle directory contents if the pattern matches a directory name?
                 // filter_entry takes care of directories, but if a pattern is "node_modules", we skip the dir.
                 // If we are already inside? No, filter_entry prevents entering.
@@ -168,7 +167,7 @@ impl SyncEngine {
             let walker = WalkDir::new(&dir_buf).into_iter().filter_entry(|e| {
                 // Skip if error accessing entry
                 let path = e.path();
-                
+
                 // Calculate relative path from root
                 // For root directory itself, relative path is empty or "."
                 let relative_path = match path.strip_prefix(&dir_buf) {
@@ -193,7 +192,7 @@ impl SyncEngine {
                 }
 
                 let path = entry.path();
-                
+
                 // Root directory itself is yielded, skip it
                 if path == dir_buf {
                     continue;
@@ -204,13 +203,14 @@ impl SyncEngine {
                     Ok(m) => m,
                     Err(_) => continue, // Skip files we can't read metadata for
                 };
-                
+
                 let relative_path = path.strip_prefix(&dir_buf)?.to_path_buf();
 
                 files.push(FileMetadata {
                     path: relative_path,
                     size: metadata.len(),
-                    modified: metadata.modified()
+                    modified: metadata
+                        .modified()
                         .unwrap_or(std::time::SystemTime::UNIX_EPOCH), // Fallback if modified time unavailable
                     created: metadata.created().ok(),
                     is_file: metadata.is_file(),
@@ -235,7 +235,12 @@ impl SyncEngine {
         // 2. Verify it's still a directory after canonicalization
         let source_meta = tokio::fs::metadata(&source_canonical)
             .await
-            .with_context(|| format!("Failed to access source after canonicalization: {:?}", source_canonical))?;
+            .with_context(|| {
+                format!(
+                    "Failed to access source after canonicalization: {:?}",
+                    source_canonical
+                )
+            })?;
 
         if !source_meta.is_dir() {
             anyhow::bail!("Source path is not a directory: {:?}", source_canonical);
@@ -243,7 +248,10 @@ impl SyncEngine {
 
         // 3. Warn if symlink (safe to continue since we canonicalized)
         if source_meta.file_type().is_symlink() {
-            eprintln!("Warning: Source path is a symlink: {:?} -> {:?}", self.source, source_canonical);
+            eprintln!(
+                "Warning: Source path is a symlink: {:?} -> {:?}",
+                self.source, source_canonical
+            );
         }
 
         // 4. Handle target path similarly
@@ -253,19 +261,28 @@ impl SyncEngine {
                 .with_context(|| format!("Failed to access target: {:?}", self.target))?;
 
             if !target_meta.is_dir() {
-                anyhow::bail!("Target path exists but is not a directory: {:?}", self.target);
+                anyhow::bail!(
+                    "Target path exists but is not a directory: {:?}",
+                    self.target
+                );
             }
 
-            Some(tokio::fs::canonicalize(&self.target)
-                .await
-                .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?)
+            Some(
+                tokio::fs::canonicalize(&self.target)
+                    .await
+                    .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?,
+            )
         } else {
             None
         };
 
         // 5. Use canonicalized paths for all operations
         let source_files = self
-            .read_directory(&source_canonical, &options.exclude_patterns, cancel_token.clone())
+            .read_directory(
+                &source_canonical,
+                &options.exclude_patterns,
+                cancel_token.clone(),
+            )
             .await
             .context("Failed to read source directory")?;
 
@@ -415,7 +432,9 @@ impl SyncEngine {
         options: &SyncOptions,
         cancel_token: CancellationToken,
     ) -> Result<DryRunResult> {
-        let (dry_run, _) = self.compare_dirs_internal(options, Some(cancel_token)).await?;
+        let (dry_run, _) = self
+            .compare_dirs_internal(options, Some(cancel_token))
+            .await?;
         Ok(dry_run)
     }
 
@@ -516,6 +535,15 @@ impl SyncEngine {
     }
 
     pub async fn find_orphan_files(&self, exclude_patterns: &[String]) -> Result<Vec<OrphanFile>> {
+        self.find_orphan_files_with_cancel(exclude_patterns, None)
+            .await
+    }
+
+    pub async fn find_orphan_files_with_cancel(
+        &self,
+        exclude_patterns: &[String],
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<Vec<OrphanFile>> {
         let source_canonical = tokio::fs::canonicalize(&self.source)
             .await
             .with_context(|| format!("Failed to canonicalize source: {:?}", self.source))?;
@@ -530,22 +558,28 @@ impl SyncEngine {
         let target_canonical = match tokio::fs::metadata(&self.target).await {
             Ok(target_meta) => {
                 if !target_meta.is_dir() {
-                    anyhow::bail!("Target path exists but is not a directory: {:?}", self.target);
+                    anyhow::bail!(
+                        "Target path exists but is not a directory: {:?}",
+                        self.target
+                    );
                 }
                 tokio::fs::canonicalize(&self.target)
                     .await
                     .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(err).with_context(|| format!("Failed to access target: {:?}", self.target)),
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("Failed to access target: {:?}", self.target))
+            }
         };
 
         let source_files = self
-            .read_directory(&source_canonical, exclude_patterns, None)
+            .read_directory(&source_canonical, exclude_patterns, cancel_token.clone())
             .await
             .context("Failed to read source directory")?;
         let target_files = self
-            .read_directory(&target_canonical, exclude_patterns, None)
+            .read_directory(&target_canonical, exclude_patterns, cancel_token)
             .await
             .context("Failed to read target directory")?;
 
@@ -575,7 +609,10 @@ impl SyncEngine {
             let mut files_count = 0usize;
             let mut dirs_count = 0usize;
 
-            for entry in WalkDir::new(&path).into_iter().filter_map(|entry| entry.ok()) {
+            for entry in WalkDir::new(&path)
+                .into_iter()
+                .filter_map(|entry| entry.ok())
+            {
                 if entry.path() == path.as_path() {
                     continue;
                 }
@@ -592,7 +629,10 @@ impl SyncEngine {
         .await?
     }
 
-    pub async fn delete_orphan_paths(&self, relative_paths: &[PathBuf]) -> Result<DeleteOrphanResult> {
+    pub async fn delete_orphan_paths(
+        &self,
+        relative_paths: &[PathBuf],
+    ) -> Result<DeleteOrphanResult> {
         let target_canonical = tokio::fs::canonicalize(&self.target)
             .await
             .with_context(|| format!("Failed to canonicalize target: {:?}", self.target))?;
@@ -605,7 +645,10 @@ impl SyncEngine {
                 skipped_count += 1;
                 continue;
             }
-            if relative.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if relative
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 skipped_count += 1;
                 continue;
             }
@@ -812,8 +855,14 @@ mod tests {
         let source_time =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let target_time = source_time + std::time::Duration::from_secs(60);
-        filetime::set_file_mtime(&source_file, filetime::FileTime::from_system_time(source_time))?;
-        filetime::set_file_mtime(&target_file, filetime::FileTime::from_system_time(target_time))?;
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_system_time(source_time),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_system_time(target_time),
+        )?;
 
         let engine = SyncEngine::new(
             source_dir.path().to_path_buf(),
@@ -853,8 +902,14 @@ mod tests {
         let source_time =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let target_time = source_time + std::time::Duration::from_secs(60);
-        filetime::set_file_mtime(&source_file, filetime::FileTime::from_system_time(source_time))?;
-        filetime::set_file_mtime(&target_file, filetime::FileTime::from_system_time(target_time))?;
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_system_time(source_time),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_system_time(target_time),
+        )?;
 
         let engine = SyncEngine::new(
             source_dir.path().to_path_buf(),
@@ -890,8 +945,14 @@ mod tests {
         let source_time =
             std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let target_time = source_time + std::time::Duration::from_secs(60);
-        filetime::set_file_mtime(&source_file, filetime::FileTime::from_system_time(source_time))?;
-        filetime::set_file_mtime(&target_file, filetime::FileTime::from_system_time(target_time))?;
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_system_time(source_time),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_system_time(target_time),
+        )?;
 
         let engine = SyncEngine::new(
             source_dir.path().to_path_buf(),
@@ -907,7 +968,6 @@ mod tests {
         assert_eq!(conflicts[0].path, relative);
         Ok(())
     }
-
 
     #[tokio::test]
     async fn test_exclusion() -> Result<()> {
@@ -930,12 +990,9 @@ mod tests {
             source_dir.path().to_path_buf(),
             target_dir.path().to_path_buf(),
         );
-        
+
         let mut options = SyncOptions::default();
-        options.exclude_patterns = vec![
-            "ignore_me.txt".to_string(), 
-            "node_modules/**".to_string()
-        ];
+        options.exclude_patterns = vec!["ignore_me.txt".to_string(), "node_modules/**".to_string()];
 
         let dry_run = engine.dry_run(&options).await?;
         // Should only copy file1.txt and file2.txt
@@ -964,7 +1021,12 @@ mod tests {
         }
 
         let nested_allowed = source_dir.path().join("photos/.Trashes/keep.txt");
-        fs::create_dir_all(nested_allowed.parent().expect("nested path should have parent")).await?;
+        fs::create_dir_all(
+            nested_allowed
+                .parent()
+                .expect("nested path should have parent"),
+        )
+        .await?;
         fs::write(&nested_allowed, b"nested").await?;
         fs::write(source_dir.path().join("keep.txt"), b"keep").await?;
 
@@ -998,7 +1060,10 @@ mod tests {
         let file1 = source_dir.path().join("file1.txt");
         fs::write(&file1, b"content").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let mut options = SyncOptions::default();
         options.exclude_patterns = vec![];
 
@@ -1011,24 +1076,24 @@ mod tests {
     async fn test_exclusion_special_characters() -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;
-        
+
         let file_normal = source_dir.path().join("normal.txt");
         let file_special = source_dir.path().join("special[1].txt");
         let file_space = source_dir.path().join("file with spaces.txt");
-        
+
         fs::write(&file_normal, b"content").await?;
         fs::write(&file_special, b"content").await?;
         fs::write(&file_space, b"content").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let mut options = SyncOptions::default();
-        options.exclude_patterns = vec![
-            "file with spaces.txt".to_string(),
-            "special*".to_string() 
-        ];
+        options.exclude_patterns = vec!["file with spaces.txt".to_string(), "special*".to_string()];
 
         let dry_run = engine.dry_run(&options).await?;
-        assert_eq!(dry_run.files_to_copy, 1); 
+        assert_eq!(dry_run.files_to_copy, 1);
         Ok(())
     }
 
@@ -1036,16 +1101,19 @@ mod tests {
     async fn test_exclusion_nested_wildcards() -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;
-        
+
         let dir1 = source_dir.path().join("dir1");
         fs::create_dir(&dir1).await?;
         let file1 = dir1.join("ignore.log");
         let file2 = dir1.join("keep.txt");
-        
+
         fs::write(&file1, b"log").await?;
         fs::write(&file2, b"txt").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let mut options = SyncOptions::default();
         options.exclude_patterns = vec!["**/*.log".to_string()];
 
@@ -1058,13 +1126,16 @@ mod tests {
     async fn test_exclusion_validation_limits() -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;
-        
+
         // 소스 디렉토리에 파일 생성 (read_directory가 호출되도록)
         let test_file = source_dir.path().join("test.txt");
         fs::write(&test_file, b"test content").await?;
-        
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
-        
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+
         // Test count boundary (300개 패턴 -> MAX_PATTERN_COUNT=300 허용)
         let mut options = SyncOptions::default();
         options.exclude_patterns = (0..300).map(|i| format!("pattern_{}", i)).collect();
@@ -1075,7 +1146,7 @@ mod tests {
         let mut options = SyncOptions::default();
         options.exclude_patterns = (0..301).map(|i| format!("pattern_{}", i)).collect();
         let result = engine.dry_run(&options).await;
-        
+
         // 에러 체인 전체를 확인 (anyhow는 context로 래핑되므로 :# 포맷 사용)
         match &result {
             Ok(_) => panic!("Expected error for too many patterns, but got Ok"),
@@ -1085,7 +1156,8 @@ mod tests {
                 println!("Full error chain for count limit: {}", full_err);
                 assert!(
                     full_err.contains("Too many") || full_err.contains("too many"),
-                    "Error chain should contain 'Too many', got: {}", full_err
+                    "Error chain should contain 'Too many', got: {}",
+                    full_err
                 );
             }
         }
@@ -1095,7 +1167,7 @@ mod tests {
         let long_pattern = "a".repeat(300);
         options2.exclude_patterns = vec![long_pattern];
         let result2 = engine.dry_run(&options2).await;
-        
+
         match &result2 {
             Ok(_) => panic!("Expected error for too long pattern, but got Ok"),
             Err(e) => {
@@ -1103,7 +1175,8 @@ mod tests {
                 println!("Full error chain for length limit: {}", full_err);
                 assert!(
                     full_err.contains("too long") || full_err.contains("Too long"),
-                    "Error chain should contain 'too long', got: {}", full_err
+                    "Error chain should contain 'too long', got: {}",
+                    full_err
                 );
             }
         }
@@ -1119,7 +1192,10 @@ mod tests {
         // Ensure traversal starts with at least one real file.
         fs::write(source_dir.path().join("test.txt"), b"test").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let options = SyncOptions::default();
         let cancel_token = CancellationToken::new();
         cancel_token.cancel();
@@ -1148,7 +1224,10 @@ mod tests {
         fs::write(&orphan_file, b"target-only").await?;
         fs::write(&orphan_nested, b"nested").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let orphans = engine.find_orphan_files(&[]).await?;
 
         let orphan_paths: Vec<String> = orphans
@@ -1179,14 +1258,21 @@ mod tests {
             fs::write(metadata_dir.join("stale.bin"), b"stale").await?;
         }
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let orphans = engine.find_orphan_files(&[]).await?;
 
-        assert!(orphans.iter().any(|orphan| orphan.path == PathBuf::from("orphan.txt")));
+        assert!(orphans
+            .iter()
+            .any(|orphan| orphan.path == PathBuf::from("orphan.txt")));
         for dir_name in HARD_IGNORED_ROOT_METADATA_DIRS {
             let dir_path = PathBuf::from(dir_name);
             assert!(
-                !orphans.iter().any(|orphan| orphan.path.starts_with(&dir_path)),
+                !orphans
+                    .iter()
+                    .any(|orphan| orphan.path.starts_with(&dir_path)),
                 "orphan list should not include hard-ignored metadata dir: {dir_name}"
             );
         }
@@ -1208,7 +1294,10 @@ mod tests {
         fs::write(&orphan_file, b"target-only").await?;
         fs::write(source_dir.path().join("keep.txt"), b"keep").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
         let paths = vec![
             PathBuf::from("stale/old.txt"),
             PathBuf::from("stale"),
@@ -1243,8 +1332,13 @@ mod tests {
         fs::write(&root_file, b"root").await?;
         fs::write(source_dir.path().join("keep.txt"), b"keep").await?;
 
-        let engine = SyncEngine::new(source_dir.path().to_path_buf(), target_dir.path().to_path_buf());
-        let result = engine.delete_orphan_paths(&[PathBuf::from("stale")]).await?;
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let result = engine
+            .delete_orphan_paths(&[PathBuf::from("stale")])
+            .await?;
 
         assert_eq!(result.deleted_files_count, 2);
         assert_eq!(result.deleted_dirs_count, 3);

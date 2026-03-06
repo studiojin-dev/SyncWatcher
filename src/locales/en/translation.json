@@ -183,6 +183,8 @@
       "stateLocation": "State Location",
       "stateLocationPlaceholder": "Default: Tauri AppData",
       "maxLogLines": "Max Log Lines",
+      "mcpEnabled": "Enable MCP Control",
+      "mcpEnabledDesc": "Allow local MCP clients to control this running app. SyncWatcher never launches itself for MCP.",
       "closeAction": "Close Action",
       "closeActionDesc": "Choose what happens when closing the app",
       "closeActionQuit": "Quit",

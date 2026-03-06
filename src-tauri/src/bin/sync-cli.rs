@@ -65,10 +65,7 @@ async fn main() -> anyhow::Result<()> {
 
                     println!(
                         "{:<20} {:<15} {:<15} {:<15}",
-                        vol.name,
-                        total_label,
-                        avail_label,
-                        type_str
+                        vol.name, total_label, avail_label, type_str
                     );
                 }
             }
@@ -107,9 +104,18 @@ async fn main() -> anyhow::Result<()> {
         match engine.dry_run(&options).await {
             Ok(dry_run) => {
                 println!("📊 Comparison Results:");
-                println!("   Total files in source: {}", format_number(dry_run.total_files as u64));
-                println!("   Files to copy: {}", format_number(dry_run.files_to_copy as u64));
-                println!("   Files modified: {}", format_number(dry_run.files_modified as u64));
+                println!(
+                    "   Total files in source: {}",
+                    format_number(dry_run.total_files as u64)
+                );
+                println!(
+                    "   Files to copy: {}",
+                    format_number(dry_run.files_to_copy as u64)
+                );
+                println!(
+                    "   Files modified: {}",
+                    format_number(dry_run.files_modified as u64)
+                );
                 println!("   Bytes to copy: {}", format_bytes(dry_run.bytes_to_copy));
                 println!();
 

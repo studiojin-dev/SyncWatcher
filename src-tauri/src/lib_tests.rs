@@ -1,33 +1,38 @@
 #[cfg(test)]
 mod integration_tests {
+    use crate::config_store::ConfigStore;
     use crate::logging::LogManager;
+    use crate::mcp_jobs::McpJobRegistry;
     use crate::watcher::WatcherManager;
     use crate::{
-        cancel_operation_internal, CancelOperationType,
-        compute_volume_mount_diff, format_bytes_with_unit, get_app_version,
-        decide_runtime_auto_unmount, RuntimeAutoUnmountDecision,
-        enqueue_runtime_sync_task_internal, dequeue_runtime_sync_task,
+        cancel_operation_internal, compute_volume_mount_diff, decide_runtime_auto_unmount,
+        dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
+        ensure_non_overlapping_paths, format_bytes_with_unit, get_app_version,
         handle_volume_watch_event, handle_volume_watch_tick,
-        is_runtime_watch_task_active, join_paths, progress_phase_to_log_category,
-        ensure_non_overlapping_paths, normalize_uuid_sub_path,
-        parse_uuid_source_path,
-        remove_runtime_sync_task_state, take_runtime_pending_sync_task,
-        resolve_runtime_exclude_patterns,
-        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        set_auto_unmount_session_disabled_internal, is_auto_unmount_session_disabled_internal,
-        prune_auto_unmount_session_disabled_tasks,
-        validate_runtime_tasks, AppState, DataUnitSystem, RuntimeExclusionSet,
-        RuntimeSyncEnqueueResult, RuntimeSyncTask,
-        volume_watch_next_tick_delay,
-        VolumeEmitDebounceState,
+        is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
+        normalize_uuid_sub_path, parse_uuid_source_path, progress_phase_to_log_category,
+        prune_auto_unmount_session_disabled_tasks, remove_runtime_sync_task_state,
+        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
+        runtime_get_state_internal, set_auto_unmount_session_disabled_internal,
+        take_runtime_pending_sync_task, validate_runtime_tasks, volume_watch_next_tick_delay,
+        AppState, CancelOperationType, DataUnitSystem, RuntimeAutoUnmountDecision,
+        RuntimeExclusionSet, RuntimeSyncEnqueueResult, RuntimeSyncTask, VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     use tokio::sync::{Mutex, Notify, RwLock};
     use tokio_util::sync::CancellationToken;
+
+    fn temp_config_dir() -> PathBuf {
+        let seq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("syncwatcher-lib-tests-{seq}"))
+    }
 
     fn build_runtime_task(id: &str, source: &str, watch_mode: bool) -> RuntimeSyncTask {
         RuntimeSyncTask {
@@ -64,6 +69,7 @@ mod integration_tests {
 
     fn build_app_state() -> AppState {
         AppState {
+            config_store: Arc::new(ConfigStore::from_config_dir(temp_config_dir())),
             log_manager: Arc::new(LogManager::new(100)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
@@ -81,6 +87,10 @@ mod integration_tests {
             auto_unmount_session_disabled_tasks: Arc::new(RwLock::new(HashSet::new())),
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
+            active_task_operations: Arc::new(RwLock::new(HashMap::new())),
+            control_plane_handle: Arc::new(Mutex::new(None)),
+            mcp_jobs: Arc::new(McpJobRegistry::new()),
+            mcp_job_seq: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -179,12 +189,20 @@ mod integration_tests {
             RuntimeExclusionSet {
                 id: "set-a".to_string(),
                 name: "Set A".to_string(),
-                patterns: vec!["dist".to_string(), "build".to_string(), "coverage".to_string()],
+                patterns: vec![
+                    "dist".to_string(),
+                    "build".to_string(),
+                    "coverage".to_string(),
+                ],
             },
             RuntimeExclusionSet {
                 id: "set-b".to_string(),
                 name: "Set B".to_string(),
-                patterns: vec!["build".to_string(), "coverage".to_string(), ".cache".to_string()],
+                patterns: vec![
+                    "build".to_string(),
+                    "coverage".to_string(),
+                    ".cache".to_string(),
+                ],
             },
         ];
 
@@ -335,7 +353,10 @@ mod integration_tests {
             drop(queued);
 
             let queue = state.runtime_sync_queue.read().await;
-            assert_eq!(queue.iter().cloned().collect::<Vec<_>>(), vec!["task-2".to_string()]);
+            assert_eq!(
+                queue.iter().cloned().collect::<Vec<_>>(),
+                vec!["task-2".to_string()]
+            );
         });
     }
 
@@ -365,7 +386,8 @@ mod integration_tests {
             tokens.insert("task-1".to_string(), token.clone());
         }
 
-        let cancelled = cancel_operation_internal("task-1", CancelOperationType::Sync, &state).await;
+        let cancelled =
+            cancel_operation_internal("task-1", CancelOperationType::Sync, &state).await;
         assert!(cancelled);
         assert!(token.is_cancelled());
     }
@@ -564,7 +586,12 @@ mod integration_tests {
         let test_uuid = "NOT_A_REAL_UUID_FOR_TEST_ONLY";
         let source = format!("[DISK_UUID:{test_uuid}]DCIM");
         let target = format!("[DISK_UUID:{test_uuid}]/DCIM");
-        let tasks = vec![build_runtime_task_with_paths("normalize", &source, &target, false)];
+        let tasks = vec![build_runtime_task_with_paths(
+            "normalize",
+            &source,
+            &target,
+            false,
+        )];
 
         let result = validate_runtime_tasks(&tasks);
         assert!(result.is_err());
@@ -582,10 +609,7 @@ mod integration_tests {
         );
 
         assert!(result.is_err());
-        assert!(result
-            .err()
-            .unwrap_or_default()
-            .contains("overlap"));
+        assert!(result.err().unwrap_or_default().contains("overlap"));
     }
 
     #[test]

@@ -126,6 +126,24 @@ describe('YamlEditorModal', () => {
     });
   });
 
+  it('should repair known config store files through backend commands', async () => {
+    mockInvoke.mockResolvedValueOnce('');
+
+    renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={mockError} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Valid YAML')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save & Reload' }));
+
+    expect(mockInvoke).toHaveBeenCalledWith('repair_config_store_file', {
+      scope: 'syncTasks',
+      content: mockError.rawContent,
+    });
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+  });
+
   it('should call onClose when cancel button clicked', async () => {
     renderWithMantine(<YamlEditorModal opened={true} onClose={mockOnClose} error={mockError} />);
 

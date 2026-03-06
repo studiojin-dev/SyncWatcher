@@ -1,8 +1,11 @@
+pub mod config_store;
+pub mod control_plane;
 pub mod error_codes;
 pub mod input_validation;
 pub mod license;
 pub mod license_validation;
 pub mod logging;
+pub mod mcp_jobs;
 pub mod path_validation;
 pub mod sync_engine;
 pub mod system_integration;
@@ -29,9 +32,19 @@ use sync_engine::{
 };
 use system_integration::DiskMonitor;
 
+use config_store::{
+    apply_sync_task_update, build_sync_task_record, default_config_dir,
+    default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
+    AppSettings, ConfigStore, ConfigStoreChangedEvent, DeleteResultEnvelope, ExclusionSetEnvelope,
+    ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NewSyncTaskRecord,
+    SettingsEnvelope, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope, UpdateSettingsPayload,
+    UpdateSyncTaskRequest,
+};
+use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use license::generate_licenses_report;
 use logging::LogManager;
 use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
+use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
 
 use watcher::{WatchEvent, WatcherManager};
 
@@ -135,6 +148,7 @@ impl SyncProgressState {
 
 #[derive(Clone)]
 pub struct AppState {
+    config_store: Arc<ConfigStore>,
     log_manager: Arc<LogManager>,
     /// 현재 실행 중인 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
@@ -168,6 +182,14 @@ pub struct AppState {
     conflict_review_sessions: Arc<RwLock<HashMap<String, ConflictReviewSession>>>,
     /// 충돌 세션/랜덤 토큰 생성 시퀀스
     conflict_review_seq: Arc<AtomicU64>,
+    /// task 단위의 상호배타 operation 락
+    active_task_operations: Arc<RwLock<HashMap<String, TaskOperationKind>>>,
+    /// 로컬 MCP control plane listener 상태
+    control_plane_handle: Arc<Mutex<Option<ControlPlaneHandle>>>,
+    /// MCP 장기 작업 상태 저장소
+    mcp_jobs: Arc<McpJobRegistry>,
+    /// MCP job id 시퀀스
+    mcp_job_seq: Arc<AtomicU64>,
 }
 
 #[derive(Default)]
@@ -221,7 +243,7 @@ struct RuntimeExclusionSet {
     patterns: Vec<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeState {
     watching_tasks: Vec<String>,
@@ -262,6 +284,54 @@ struct RuntimeAutoUnmountRequestEvent {
     files_copied: u64,
     bytes_copied: u64,
     reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskOperationKind {
+    Sync,
+    DryRun,
+    OrphanScan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigStoreScopeKind {
+    Settings,
+    SyncTasks,
+    ExclusionSets,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigStoreFileScope {
+    Settings,
+    SyncTasks,
+    ExclusionSets,
+}
+
+impl ConfigStoreFileScope {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "settings" => Ok(Self::Settings),
+            "syncTasks" => Ok(Self::SyncTasks),
+            "exclusionSets" => Ok(Self::ExclusionSets),
+            _ => Err(format!("Unsupported config store scope: {value}")),
+        }
+    }
+
+    fn event_scope(self) -> &'static str {
+        match self {
+            Self::Settings => "settings",
+            Self::SyncTasks => "syncTasks",
+            Self::ExclusionSets => "exclusionSets",
+        }
+    }
+
+    fn file_path(self, store: &ConfigStore) -> PathBuf {
+        match self {
+            Self::Settings => store.settings_file_path(),
+            Self::SyncTasks => store.tasks_file_path(),
+            Self::ExclusionSets => store.exclusion_sets_file_path(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -445,6 +515,180 @@ fn default_verify_after_copy() -> bool {
 
 fn default_data_unit_system() -> DataUnitSystem {
     DataUnitSystem::Binary
+}
+
+fn is_uuid_source(source: &str, source_type: Option<config_store::SyncTaskSourceType>) -> bool {
+    match source_type {
+        Some(config_store::SyncTaskSourceType::Uuid) => true,
+        Some(config_store::SyncTaskSourceType::Path) => false,
+        None => has_uuid_source_prefix(source),
+    }
+}
+
+fn normalize_sync_task_record(mut task: SyncTaskRecord) -> SyncTaskRecord {
+    if matches!(
+        task.source_type.clone(),
+        Some(config_store::SyncTaskSourceType::Path) | None
+    ) {
+        task.source_uuid = None;
+        task.source_uuid_type = None;
+        task.source_sub_path = None;
+    }
+
+    task.auto_unmount = task.auto_unmount
+        && task.watch_mode
+        && is_uuid_source(&task.source, task.source_type.clone());
+    task
+}
+
+fn to_runtime_task_record(task: &SyncTaskRecord) -> RuntimeSyncTask {
+    RuntimeSyncTask {
+        id: task.id.clone(),
+        name: task.name.clone(),
+        source: task.source.clone(),
+        target: task.target.clone(),
+        checksum_mode: task.checksum_mode,
+        watch_mode: task.watch_mode,
+        auto_unmount: task.auto_unmount && is_uuid_source(&task.source, task.source_type.clone()),
+        verify_after_copy: task.verify_after_copy,
+        exclusion_sets: task.exclusion_sets.clone(),
+    }
+}
+
+fn to_runtime_exclusion_set_record(set: &ExclusionSetRecord) -> RuntimeExclusionSet {
+    RuntimeExclusionSet {
+        id: set.id.clone(),
+        name: set.name.clone(),
+        patterns: set.patterns.clone(),
+    }
+}
+
+fn to_runtime_settings_record(settings: &AppSettings) -> RuntimeSettings {
+    RuntimeSettings {
+        data_unit_system: settings.data_unit_system,
+    }
+}
+
+fn validate_settings_record(settings: &AppSettings) -> Result<(), String> {
+    if settings.language.trim().is_empty() {
+        return Err("Settings.language cannot be empty".to_string());
+    }
+
+    if !(100..=100_000).contains(&settings.max_log_lines) {
+        return Err("Settings.maxLogLines must be between 100 and 100000".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_sync_task_records(tasks: &[SyncTaskRecord]) -> Result<(), String> {
+    for task in tasks {
+        if task.name.trim().is_empty() {
+            return Err("Task name cannot be empty".to_string());
+        }
+    }
+
+    let runtime_tasks: Vec<RuntimeSyncTask> = tasks.iter().map(to_runtime_task_record).collect();
+    validate_runtime_tasks(&runtime_tasks)
+}
+
+fn config_store_error_to_string(error: config_store::ConfigStoreError) -> String {
+    error.to_tauri_error_string()
+}
+
+async fn current_settings_snapshot(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<config_store::SettingsSnapshot, String> {
+    let settings = state
+        .config_store
+        .load_settings()
+        .map_err(config_store_error_to_string)?;
+    settings_snapshot_from_store(app, settings)
+        .await
+        .map_err(config_store_error_to_string)
+}
+
+fn emit_config_store_changed(app: &tauri::AppHandle, scopes: &[&str]) {
+    let _ = app.emit(
+        "config-store-changed",
+        &ConfigStoreChangedEvent {
+            scopes: scopes.iter().map(|scope| (*scope).to_string()).collect(),
+        },
+    );
+}
+
+fn config_store_scope_for_path(path: &Path, state: &AppState) -> Option<ConfigStoreScopeKind> {
+    let settings_path = state.config_store.settings_file_path();
+    if path == settings_path.as_path() {
+        return Some(ConfigStoreScopeKind::Settings);
+    }
+
+    let tasks_path = state.config_store.tasks_file_path();
+    if path == tasks_path.as_path() {
+        return Some(ConfigStoreScopeKind::SyncTasks);
+    }
+
+    let exclusion_sets_path = state.config_store.exclusion_sets_file_path();
+    if path == exclusion_sets_path.as_path() {
+        return Some(ConfigStoreScopeKind::ExclusionSets);
+    }
+
+    None
+}
+
+async fn apply_config_write_side_effects(
+    path: &Path,
+    app: tauri::AppHandle,
+    state: AppState,
+) -> Result<(), String> {
+    let Some(scope) = config_store_scope_for_path(path, &state) else {
+        return Ok(());
+    };
+
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
+
+    match scope {
+        ConfigStoreScopeKind::Settings => {
+            let settings = state
+                .config_store
+                .load_settings()
+                .map_err(config_store_error_to_string)?;
+            emit_config_store_changed(&app, &["settings"]);
+            sync_control_plane_listener(app, state, settings.mcp_enabled).await?;
+        }
+        ConfigStoreScopeKind::SyncTasks => {
+            emit_config_store_changed(&app, &["syncTasks"]);
+        }
+        ConfigStoreScopeKind::ExclusionSets => {
+            emit_config_store_changed(&app, &["exclusionSets"]);
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_repaired_config_store_file(
+    scope: ConfigStoreFileScope,
+    content: &str,
+) -> Result<(), String> {
+    match scope {
+        ConfigStoreFileScope::Settings => {
+            let settings = serde_yaml::from_str::<AppSettings>(content)
+                .map_err(|error| format!("Invalid settings.yaml content: {error}"))?;
+            validate_settings_record(&settings)
+        }
+        ConfigStoreFileScope::SyncTasks => {
+            let tasks = serde_yaml::from_str::<Vec<SyncTaskRecord>>(content)
+                .map_err(|error| format!("Invalid tasks.yaml content: {error}"))?;
+            validate_sync_task_records(&tasks)
+        }
+        ConfigStoreFileScope::ExclusionSets => {
+            let sets = serde_yaml::from_str::<Vec<ExclusionSetRecord>>(content)
+                .map_err(|error| format!("Invalid exclusion_sets.yaml content: {error}"))?;
+            validate_exclusion_sets(&sets).map_err(config_store_error_to_string)
+        }
+    }
 }
 
 pub(crate) fn progress_phase_to_log_category(
@@ -674,9 +918,7 @@ fn to_conflict_detail(session: &ConflictReviewSession) -> ConflictSessionDetail 
     }
 }
 
-async fn list_conflict_session_summaries_internal(
-    state: &AppState,
-) -> Vec<ConflictSessionSummary> {
+async fn list_conflict_session_summaries_internal(state: &AppState) -> Vec<ConflictSessionSummary> {
     let sessions = state.conflict_review_sessions.read().await;
     let mut summaries: Vec<ConflictSessionSummary> =
         sessions.values().map(to_conflict_summary).collect();
@@ -789,13 +1031,17 @@ fn preview_kind_for_path(path: &str) -> &'static str {
         return "other";
     };
 
-    let image_ext = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "heic"];
+    let image_ext = [
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "heic",
+    ];
     let video_ext = ["mp4", "mov", "m4v", "avi", "mkv", "webm"];
     let text_ext = [
-        "txt", "md", "json", "yaml", "yml", "toml", "xml", "log", "rs", "ts", "tsx", "js",
-        "jsx", "css", "html", "csv", "ini",
+        "txt", "md", "json", "yaml", "yml", "toml", "xml", "log", "rs", "ts", "tsx", "js", "jsx",
+        "css", "html", "csv", "ini",
     ];
-    let document_ext = ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "pages", "numbers", "key"];
+    let document_ext = [
+        "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "pages", "numbers", "key",
+    ];
 
     if image_ext.contains(&ext.as_str()) {
         "image"
@@ -905,7 +1151,9 @@ fn normalize_uuid_sub_path(sub_path: &str) -> Result<String, String> {
 
     for component in Path::new(&normalized).components() {
         if matches!(component, Component::ParentDir) {
-            return Err("UUID source path is invalid or escapes the mounted volume root".to_string());
+            return Err(
+                "UUID source path is invalid or escapes the mounted volume root".to_string(),
+            );
         }
     }
 
@@ -927,7 +1175,9 @@ enum ResolvePathWithUuidOutcome {
 
 fn resolve_path_with_uuid_outcome(path_str: &str) -> Result<ResolvePathWithUuidOutcome, String> {
     if !has_uuid_source_prefix(path_str) {
-        return Ok(ResolvePathWithUuidOutcome::Resolved(PathBuf::from(path_str)));
+        return Ok(ResolvePathWithUuidOutcome::Resolved(PathBuf::from(
+            path_str,
+        )));
     }
 
     let parsed = parse_uuid_source_path(path_str)
@@ -1442,6 +1692,151 @@ async fn prune_auto_unmount_session_disabled_tasks(
     disabled_tasks.retain(|task_id| valid_task_ids.contains(task_id));
 }
 
+async fn try_acquire_task_operation(
+    task_id: &str,
+    kind: TaskOperationKind,
+    state: &AppState,
+) -> Result<(), String> {
+    let mut active = state.active_task_operations.write().await;
+    if let Some(existing) = active.get(task_id) {
+        return Err(format!(
+            "Task '{task_id}' is busy with another operation ({existing:?})"
+        ));
+    }
+    active.insert(task_id.to_string(), kind);
+    Ok(())
+}
+
+async fn release_task_operation(task_id: &str, state: &AppState) {
+    let mut active = state.active_task_operations.write().await;
+    active.remove(task_id);
+}
+
+async fn load_canonical_config(
+    state: &AppState,
+) -> Result<(AppSettings, Vec<SyncTaskRecord>, Vec<ExclusionSetRecord>), String> {
+    let settings = state
+        .config_store
+        .load_settings()
+        .map_err(config_store_error_to_string)?;
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let exclusion_sets = state
+        .config_store
+        .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    Ok((settings, tasks, exclusion_sets))
+}
+
+async fn stop_control_plane_listener(state: AppState) -> Result<(), String> {
+    let handle = {
+        let mut control_plane = state.control_plane_handle.lock().await;
+        control_plane.take()
+    };
+
+    if let Some(handle) = handle {
+        handle.shutdown.cancel();
+    }
+
+    Ok(())
+}
+
+async fn start_control_plane_listener(
+    app: tauri::AppHandle,
+    state: AppState,
+) -> Result<(), String> {
+    let already_running = {
+        let control_plane = state.control_plane_handle.lock().await;
+        control_plane.is_some()
+    };
+    if already_running {
+        return Ok(());
+    }
+
+    let socket_path = control_plane::default_socket_path()?;
+    let app_for_handler = app.clone();
+    let state_for_handler = state.clone();
+    let handle = control_plane::start_listener(socket_path, move |request| {
+        let app = app_for_handler.clone();
+        let state = state_for_handler.clone();
+        async move { handle_control_plane_request(request, app, state).await }
+    })
+    .await?;
+
+    let mut control_plane = state.control_plane_handle.lock().await;
+    if control_plane.is_none() {
+        *control_plane = Some(handle);
+    } else {
+        handle.shutdown.cancel();
+    }
+    Ok(())
+}
+
+async fn sync_control_plane_listener(
+    app: tauri::AppHandle,
+    state: AppState,
+    enabled: bool,
+) -> Result<(), String> {
+    if enabled {
+        start_control_plane_listener(app, state).await
+    } else {
+        stop_control_plane_listener(state).await
+    }
+}
+
+async fn apply_canonical_config_to_runtime(
+    app: tauri::AppHandle,
+    state: AppState,
+) -> Result<RuntimeState, String> {
+    let _apply_guard = state.runtime_config_apply_lock.clone().lock_owned().await;
+    let (settings, tasks, exclusion_sets) = load_canonical_config(&state).await?;
+
+    validate_settings_record(&settings)?;
+    validate_sync_task_records(&tasks)?;
+    for set in &exclusion_sets {
+        input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
+    }
+
+    let valid_task_ids: HashSet<String> = tasks.iter().map(|task| task.id.clone()).collect();
+    let payload = RuntimeConfigPayload {
+        tasks: tasks.iter().map(to_runtime_task_record).collect(),
+        exclusion_sets: exclusion_sets
+            .iter()
+            .map(to_runtime_exclusion_set_record)
+            .collect(),
+        settings: to_runtime_settings_record(&settings),
+    };
+
+    {
+        let mut config = state.runtime_config.write().await;
+        *config = payload;
+    }
+    prune_auto_unmount_session_disabled_tasks(&valid_task_ids, &state).await;
+
+    reconcile_runtime_watchers(app.clone(), state.clone()).await?;
+
+    if state
+        .runtime_initial_watch_bootstrapped
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        enqueue_initial_runtime_watch_syncs(app.clone(), state.clone()).await;
+    }
+
+    Ok(runtime_get_state_internal(&state).await)
+}
+
+fn next_mcp_job_id(kind: McpJobKind, seq: u64) -> String {
+    let prefix = match kind {
+        McpJobKind::Sync => "sync",
+        McpJobKind::DryRun => "dry-run",
+        McpJobKind::OrphanScan => "orphan-scan",
+    };
+    format!("mcp-{prefix}-{}-{seq}", unix_now_ms())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncOrigin {
     Manual,
@@ -1570,9 +1965,15 @@ async fn execute_sync_internal(
     state: AppState,
     sync_slot_pre_acquired: bool,
     sync_origin: SyncOrigin,
+    external_cancel_token: Option<CancellationToken>,
+    mcp_job_id: Option<String>,
 ) -> Result<SyncExecutionResult, String> {
     if !sync_slot_pre_acquired && !acquire_sync_slot(&task_id, &state).await {
         return Err("Task is already syncing".to_string());
+    }
+    try_acquire_task_operation(&task_id, TaskOperationKind::Sync, &state).await?;
+    if sync_origin == SyncOrigin::Manual {
+        emit_runtime_sync_state(&app, &task_id, true, None);
     }
 
     let sync_result = async {
@@ -1588,6 +1989,13 @@ async fn execute_sync_internal(
 
         // 취소 토큰 생성 및 등록
         let cancel_token = CancellationToken::new();
+        if let Some(external_cancel_token) = external_cancel_token {
+            let forward_cancel = cancel_token.clone();
+            tauri::async_runtime::spawn(async move {
+                external_cancel_token.cancelled().await;
+                forward_cancel.cancel();
+            });
+        }
         {
             let mut tokens = state.cancel_tokens.write().await;
             tokens.insert(task_id.clone(), cancel_token.clone());
@@ -1636,6 +2044,8 @@ async fn execute_sync_internal(
         let log_manager = state.log_manager.clone();
         let task_id_for_log = task_id.clone();
         let app_for_log = app.clone(); // For log events
+        let mcp_jobs = state.mcp_jobs.clone();
+        let mcp_job_id_for_progress = mcp_job_id.clone();
 
         // Create clones for the closure
         let progress_state_closure = progress_state.clone();
@@ -1691,6 +2101,21 @@ async fn execute_sync_internal(
                         current_file_total_bytes: progress.current_file_total_bytes,
                     };
                     let _ = app_clone.emit("sync-progress", &event);
+                    if let Some(job_id) = mcp_job_id_for_progress.as_deref() {
+                        mcp_jobs.try_update_progress(
+                            job_id,
+                            McpJobProgress {
+                                message: Some(event.message.clone()),
+                                current: event.current,
+                                total: event.total,
+                                processed_bytes: event.processed_bytes,
+                                total_bytes: event.total_bytes,
+                                current_file_bytes_copied: event.current_file_bytes_copied,
+                                current_file_total_bytes: event.current_file_total_bytes,
+                            },
+                            unix_now_ms(),
+                        );
+                    }
                 }
             }) => {
                 // Flush remaining logs on completion
@@ -1753,20 +2178,36 @@ async fn execute_sync_internal(
                 })
             }
             Err(e) => {
-                let msg = format!("Sync failed: {:#}", e);
-                state.log_manager.log_with_category(
-                    "error",
-                    &msg,
-                    Some(task_id.clone()),
-                    LogCategory::SyncError,
-                );
-                Err(format!("{:#}", e))
+                let err_text = format!("{:#}", e);
+                if err_text.contains("cancelled by user") || err_text.contains("Operation cancelled by user") {
+                    state.log_manager.log_with_category(
+                        "warning",
+                        "Sync cancelled by user",
+                        Some(task_id.clone()),
+                        LogCategory::SyncError,
+                    );
+                    Err("Operation cancelled by user".to_string())
+                } else {
+                    let msg = format!("Sync failed: {err_text}");
+                    state.log_manager.log_with_category(
+                        "error",
+                        &msg,
+                        Some(task_id.clone()),
+                        LogCategory::SyncError,
+                    );
+                    Err(err_text)
+                }
             }
         }
     }
     .await;
 
+    let completion_reason = sync_result.as_ref().err().cloned();
+    release_task_operation(&task_id, &state).await;
     release_sync_slot(&task_id, &state).await;
+    if sync_origin == SyncOrigin::Manual {
+        emit_runtime_sync_state(&app, &task_id, false, completion_reason);
+    }
     sync_result
 }
 
@@ -1824,6 +2265,8 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         state.clone(),
         true,
         SyncOrigin::Watch,
+        None,
+        None,
     )
     .await;
 
@@ -2095,8 +2538,8 @@ async fn enqueue_initial_runtime_watch_syncs(app: tauri::AppHandle, state: AppSt
 
 #[tauri::command]
 async fn get_app_config_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let config_dir = app_data.join("config");
+    let _ = app;
+    let config_dir = default_config_dir().map_err(config_store_error_to_string)?;
     tokio::fs::create_dir_all(&config_dir)
         .await
         .map_err(|e| e.to_string())?;
@@ -2127,10 +2570,180 @@ fn get_app_version() -> String {
 #[tauri::command]
 #[allow(dead_code)]
 async fn get_app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
-    app.path()
-        .app_data_dir()
+    config_store::app_support_dir_for_app(&app)
         .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| e.to_string())
+        .map_err(config_store_error_to_string)
+}
+
+#[tauri::command]
+async fn get_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SettingsEnvelope, String> {
+    let settings = current_settings_snapshot(&app, state.inner()).await?;
+    Ok(SettingsEnvelope { settings })
+}
+
+#[tauri::command]
+async fn update_settings(
+    updates: UpdateSettingsPayload,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SettingsEnvelope, String> {
+    let mut settings = state
+        .config_store
+        .load_settings()
+        .map_err(config_store_error_to_string)?;
+    updates.apply_to(&mut settings);
+    validate_settings_record(&settings)?;
+    state
+        .config_store
+        .save_settings(&settings)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["settings"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    sync_control_plane_listener(app.clone(), state.inner().clone(), settings.mcp_enabled).await?;
+    let settings = current_settings_snapshot(&app, state.inner()).await?;
+    Ok(SettingsEnvelope { settings })
+}
+
+#[tauri::command]
+async fn reset_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SettingsEnvelope, String> {
+    state
+        .config_store
+        .reset_settings()
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["settings"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    sync_control_plane_listener(app.clone(), state.inner().clone(), false).await?;
+    let settings = current_settings_snapshot(&app, state.inner()).await?;
+    Ok(SettingsEnvelope { settings })
+}
+
+#[tauri::command]
+async fn list_exclusion_sets(
+    state: tauri::State<'_, AppState>,
+) -> Result<ExclusionSetsEnvelope, String> {
+    let sets = state
+        .config_store
+        .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    Ok(ExclusionSetsEnvelope { sets })
+}
+
+#[tauri::command]
+async fn create_exclusion_set(
+    set: ExclusionSetRecord,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ExclusionSetEnvelope, String> {
+    input_validation::validate_task_id(&set.id).map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
+
+    let mut sets = state
+        .config_store
+        .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    if sets.iter().any(|candidate| candidate.id == set.id) {
+        return Err(format!("Exclusion set already exists: {}", set.id));
+    }
+    sets.push(set.clone());
+    validate_exclusion_sets(&sets).map_err(config_store_error_to_string)?;
+    state
+        .config_store
+        .save_exclusion_sets(&sets)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["exclusionSets"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    Ok(ExclusionSetEnvelope { set })
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExclusionSetUpdatePayload {
+    name: Option<String>,
+    patterns: Option<Vec<String>>,
+}
+
+#[tauri::command]
+async fn update_exclusion_set(
+    id: String,
+    updates: ExclusionSetUpdatePayload,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ExclusionSetEnvelope, String> {
+    input_validation::validate_task_id(&id).map_err(|e| e.to_string())?;
+    if let Some(patterns) = &updates.patterns {
+        input_validation::validate_exclude_patterns(patterns).map_err(|e| e.to_string())?;
+    }
+
+    let mut sets = state
+        .config_store
+        .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    let Some(existing_index) = sets.iter().position(|set| set.id == id) else {
+        return Err(format!("Exclusion set not found: {id}"));
+    };
+    let mut set = sets[existing_index].clone();
+    if let Some(name) = updates.name {
+        set.name = name;
+    }
+    if let Some(patterns) = updates.patterns {
+        set.patterns = patterns;
+    }
+    sets[existing_index] = set.clone();
+    validate_exclusion_sets(&sets).map_err(config_store_error_to_string)?;
+    state
+        .config_store
+        .save_exclusion_sets(&sets)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["exclusionSets"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    Ok(ExclusionSetEnvelope { set })
+}
+
+#[tauri::command]
+async fn delete_exclusion_set(
+    id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeleteResultEnvelope, String> {
+    input_validation::validate_task_id(&id).map_err(|e| e.to_string())?;
+    let mut sets = state
+        .config_store
+        .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    let before_len = sets.len();
+    sets.retain(|set| set.id != id);
+    let deleted = sets.len() != before_len;
+    if deleted {
+        state
+            .config_store
+            .save_exclusion_sets(&sets)
+            .map_err(config_store_error_to_string)?;
+        emit_config_store_changed(&app, &["exclusionSets"]);
+        let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    }
+    Ok(DeleteResultEnvelope { deleted })
+}
+
+#[tauri::command]
+async fn reset_exclusion_sets(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<ExclusionSetsEnvelope, String> {
+    let sets = default_exclusion_set_records();
+    validate_exclusion_sets(&sets).map_err(config_store_error_to_string)?;
+    state
+        .config_store
+        .save_exclusion_sets(&sets)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["exclusionSets"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    Ok(ExclusionSetsEnvelope { sets })
 }
 
 #[tauri::command]
@@ -2141,10 +2754,189 @@ async fn read_yaml_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn write_yaml_file(path: String, content: String) -> Result<(), String> {
+async fn write_yaml_file(
+    path: String,
+    content: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     tokio::fs::write(&path, content)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    apply_config_write_side_effects(Path::new(&path), app, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn read_config_store_file(
+    scope: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let scope = ConfigStoreFileScope::parse(&scope)?;
+    let path = scope.file_path(&state.config_store);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) => Ok(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn repair_config_store_file(
+    scope: String,
+    content: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let scope = ConfigStoreFileScope::parse(&scope)?;
+    validate_repaired_config_store_file(scope, &content)?;
+
+    let path = scope.file_path(&state.config_store);
+    state
+        .config_store
+        .write_raw_file_at_path(&path, content.as_bytes())
+        .map_err(config_store_error_to_string)?;
+
+    emit_config_store_changed(&app, &[scope.event_scope()]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+
+    if scope == ConfigStoreFileScope::Settings {
+        let settings = state
+            .config_store
+            .load_settings()
+            .map_err(config_store_error_to_string)?;
+        sync_control_plane_listener(app.clone(), state.inner().clone(), settings.mcp_enabled)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn sync_dry_run_internal(
+    task_id: String,
+    source: PathBuf,
+    target: PathBuf,
+    checksum_mode: bool,
+    exclude_patterns: Vec<String>,
+    state: &AppState,
+    external_cancel_token: Option<CancellationToken>,
+) -> Result<DryRunResult, String> {
+    try_acquire_task_operation(&task_id, TaskOperationKind::DryRun, state).await?;
+
+    let source =
+        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let target =
+        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    ensure_non_overlapping_paths(&source, &target)?;
+
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
+    state
+        .log_manager
+        .log("info", "Dry run started", Some(task_id.clone()));
+
+    let engine = SyncEngine::new(source, target);
+    let options = SyncOptions {
+        checksum_mode,
+        preserve_permissions: true,
+        preserve_times: true,
+        verify_after_copy: false,
+        exclude_patterns,
+    };
+
+    let cancel_token = CancellationToken::new();
+    if let Some(external_cancel_token) = external_cancel_token {
+        let forward_cancel = cancel_token.clone();
+        tauri::async_runtime::spawn(async move {
+            external_cancel_token.cancelled().await;
+            forward_cancel.cancel();
+        });
+    }
+
+    {
+        let mut tokens = state.dry_run_cancel_tokens.write().await;
+        tokens.insert(task_id.clone(), cancel_token.clone());
+    }
+
+    let result = engine.dry_run_with_cancel(&options, cancel_token).await;
+
+    {
+        let mut tokens = state.dry_run_cancel_tokens.write().await;
+        tokens.remove(&task_id);
+    }
+    release_task_operation(&task_id, state).await;
+
+    match result {
+        Ok(result) => {
+            let unit_system = state.runtime_config.read().await.settings.data_unit_system;
+            let msg = format!(
+                "Dry run completed.\nTo copy: {} files\nTotal size: {}",
+                format_number(result.files_to_copy as u64),
+                format_bytes_with_unit(result.bytes_to_copy, unit_system)
+            );
+            state.log_manager.log("success", &msg, Some(task_id));
+            Ok(result)
+        }
+        Err(e) => {
+            let err_text = format!("{:#}", e);
+            if err_text.contains("cancelled by user") {
+                state
+                    .log_manager
+                    .log("warning", "Dry run cancelled by user", Some(task_id));
+                Err("Dry run cancelled by user".to_string())
+            } else {
+                let msg = format!("Dry run failed: {err_text}");
+                state.log_manager.log("error", &msg, Some(task_id));
+                Err(err_text)
+            }
+        }
+    }
+}
+
+async fn find_orphan_files_internal(
+    task_id: String,
+    source: PathBuf,
+    target: PathBuf,
+    exclude_patterns: Vec<String>,
+    state: &AppState,
+    external_cancel_token: Option<CancellationToken>,
+) -> Result<Vec<OrphanFile>, String> {
+    try_acquire_task_operation(&task_id, TaskOperationKind::OrphanScan, state).await?;
+
+    let source =
+        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let target =
+        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    ensure_non_overlapping_paths(&source, &target)?;
+
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
+    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
+        .map_err(|e| e.to_string())?;
+    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+
+    let engine = SyncEngine::new(source, target);
+    let orphans = engine
+        .find_orphan_files_with_cancel(&exclude_patterns, external_cancel_token)
+        .await
+        .map_err(|e| format!("{:#}", e));
+    release_task_operation(&task_id, state).await;
+
+    let orphans = orphans?;
+    state.log_manager.log_with_category(
+        "info",
+        &format!("Orphan scan completed: {} candidates", orphans.len()),
+        Some(task_id),
+        LogCategory::Other,
+    );
+
+    Ok(orphans)
 }
 
 #[tauri::command]
@@ -2177,11 +2969,8 @@ async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), Strin
         .map_err(|e| format!("Invalid path: {e}"))?;
 
     // Get the config directory for validation
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
-    let config_dir = app_data.join("config");
+    let _ = app;
+    let config_dir = default_config_dir().map_err(config_store_error_to_string)?;
 
     // Ensure config directory exists for comparison
     let config_canonical = config_dir.canonicalize().unwrap_or(config_dir);
@@ -2246,71 +3035,16 @@ async fn sync_dry_run(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
-    let source =
-        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    let target =
-        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    ensure_non_overlapping_paths(&source, &target)?;
-
-    // Validate all inputs
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
-
-    state
-        .log_manager
-        .log("info", "Dry run started", Some(task_id.clone()));
-
-    let engine = SyncEngine::new(source, target);
-    let options = SyncOptions {
+    sync_dry_run_internal(
+        task_id,
+        source,
+        target,
         checksum_mode,
-        preserve_permissions: true,
-        preserve_times: true,
-        verify_after_copy: false,
         exclude_patterns,
-    };
-
-    let cancel_token = CancellationToken::new();
-    {
-        let mut tokens = state.dry_run_cancel_tokens.write().await;
-        tokens.insert(task_id.clone(), cancel_token.clone());
-    }
-
-    let result = engine.dry_run_with_cancel(&options, cancel_token).await;
-
-    {
-        let mut tokens = state.dry_run_cancel_tokens.write().await;
-        tokens.remove(&task_id);
-    }
-
-    match result {
-        Ok(result) => {
-            let unit_system = state.runtime_config.read().await.settings.data_unit_system;
-            let msg = format!(
-                "Dry run completed.\nTo copy: {} files\nTotal size: {}",
-                format_number(result.files_to_copy as u64),
-                format_bytes_with_unit(result.bytes_to_copy, unit_system)
-            );
-            state.log_manager.log("success", &msg, Some(task_id));
-            Ok(result)
-        }
-        Err(e) => {
-            let err_text = format!("{:#}", e);
-            if err_text.contains("cancelled by user") {
-                state
-                    .log_manager
-                    .log("warning", "Dry run cancelled by user", Some(task_id));
-                Err("Dry run cancelled by user".to_string())
-            } else {
-                let msg = format!("Dry run failed: {err_text}");
-                state.log_manager.log("error", &msg, Some(task_id));
-                Err(err_text)
-            }
-        }
-    }
+        state.inner(),
+        None,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2321,33 +3055,15 @@ async fn find_orphan_files(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<OrphanFile>, String> {
-    let source =
-        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    let target =
-        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    ensure_non_overlapping_paths(&source, &target)?;
-
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
-
-    let engine = SyncEngine::new(source, target);
-    let orphans = engine
-        .find_orphan_files(&exclude_patterns)
-        .await
-        .map_err(|e| format!("{:#}", e))?;
-
-    state.log_manager.log_with_category(
-        "info",
-        &format!("Orphan scan completed: {} candidates", orphans.len()),
-        Some(task_id),
-        LogCategory::Other,
-    );
-
-    Ok(orphans)
+    find_orphan_files_internal(
+        task_id,
+        source,
+        target,
+        exclude_patterns,
+        state.inner(),
+        None,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2464,7 +3180,8 @@ async fn open_conflict_review_window(
         return Ok(());
     }
 
-    let url = WebviewUrl::App(format!("index.html?view=conflict-review&sessionId={session_id}").into());
+    let url =
+        WebviewUrl::App(format!("index.html?view=conflict-review&sessionId={session_id}").into());
     let window = WebviewWindowBuilder::new(&app, "conflict-review", url)
         .title("SyncWatcher - Conflict Review")
         .inner_size(1320.0, 900.0)
@@ -2544,8 +3261,10 @@ async fn resolve_conflict_items(
             read_current_conflict_file_info(&target_path).await,
         ) {
             (Ok(current_source), Ok(current_target)) => {
-                let source_changed = conflict_file_info_changed(&item_snapshot.source, &current_source);
-                let target_changed = conflict_file_info_changed(&item_snapshot.target, &current_target);
+                let source_changed =
+                    conflict_file_info_changed(&item_snapshot.source, &current_source);
+                let target_changed =
+                    conflict_file_info_changed(&item_snapshot.target, &current_target);
                 if source_changed || target_changed {
                     state.log_manager.log_with_category(
                         "warning",
@@ -2593,29 +3312,27 @@ async fn resolve_conflict_items(
             }
         }
 
-        let apply_result: Result<(ConflictItemStatus, Option<String>), String> = match request.action {
+        let apply_result: Result<(ConflictItemStatus, Option<String>), String> = match request
+            .action
+        {
             ConflictResolutionAction::Skip => Ok((
                 ConflictItemStatus::Skipped,
                 Some("User chose to skip this conflict item.".to_string()),
             )),
-            ConflictResolutionAction::ForceCopy => {
-                copy_file_preserve(&source_path, &target_path)
-                    .await
-                    .map(|_| {
-                        (
-                            ConflictItemStatus::ForceCopied,
-                            Some("Copied source file to target (force overwrite).".to_string()),
-                        )
-                    })
-            }
+            ConflictResolutionAction::ForceCopy => copy_file_preserve(&source_path, &target_path)
+                .await
+                .map(|_| {
+                    (
+                        ConflictItemStatus::ForceCopied,
+                        Some("Copied source file to target (force overwrite).".to_string()),
+                    )
+                }),
             ConflictResolutionAction::RenameThenCopy => {
                 let source_path = source_path.clone();
                 let target_path = target_path.clone();
                 let parent = match target_path.parent() {
                     Some(value) => value.to_path_buf(),
-                    None => {
-                        Err("Target file parent directory is invalid".to_string())?
-                    }
+                    None => Err("Target file parent directory is invalid".to_string())?,
                 };
                 tokio::fs::create_dir_all(&parent)
                     .await
@@ -2882,7 +3599,8 @@ fn resolve_path_by_uuid(disk_uuid: String) -> Result<std::path::PathBuf, String>
 /// Removable 디스크를 언마운트합니다.
 #[tauri::command]
 async fn unmount_volume(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let resolved_path = resolve_path_with_uuid(path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let resolved_path =
+        resolve_path_with_uuid(path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
     DiskMonitor::unmount_volume(&resolved_path).map_err(|e| e.to_string())?;
 
     state.log_manager.log_with_category(
@@ -2919,6 +3637,8 @@ async fn start_sync(
         state.inner().clone(),
         false,
         SyncOrigin::Manual,
+        None,
+        None,
     )
     .await?;
 
@@ -2926,8 +3646,96 @@ async fn start_sync(
 }
 
 #[tauri::command]
-async fn list_sync_tasks() -> Result<Vec<SyncTask>, String> {
-    Ok(vec![])
+async fn list_sync_tasks(state: tauri::State<'_, AppState>) -> Result<SyncTasksEnvelope, String> {
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    Ok(SyncTasksEnvelope { tasks })
+}
+
+#[tauri::command]
+async fn get_sync_task(
+    task_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncTaskEnvelope, String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let task = tasks
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| format!("Sync task not found: {task_id}"))?;
+    Ok(SyncTaskEnvelope { task })
+}
+
+#[tauri::command]
+async fn create_sync_task(
+    task: SyncTaskRecord,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncTaskEnvelope, String> {
+    let task = create_sync_task_internal(task, app, state.inner()).await?;
+    Ok(SyncTaskEnvelope { task })
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncTaskUpdatePayload {
+    name: Option<String>,
+    source: Option<String>,
+    target: Option<String>,
+    checksum_mode: Option<bool>,
+    verify_after_copy: Option<bool>,
+    exclusion_sets: Option<Vec<String>>,
+    watch_mode: Option<bool>,
+    auto_unmount: Option<bool>,
+    source_type: Option<config_store::SourceType>,
+    source_uuid: Option<String>,
+    source_uuid_type: Option<config_store::SourceUuidType>,
+    source_sub_path: Option<String>,
+}
+
+#[tauri::command]
+async fn update_sync_task(
+    id: String,
+    updates: SyncTaskUpdatePayload,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncTaskEnvelope, String> {
+    let task = patch_sync_task_internal(
+        config_store::UpdateSyncTaskRequest {
+            task_id: id,
+            name: updates.name,
+            source: updates.source,
+            target: updates.target,
+            checksum_mode: updates.checksum_mode,
+            verify_after_copy: updates.verify_after_copy,
+            exclusion_sets: updates.exclusion_sets,
+            watch_mode: updates.watch_mode,
+            auto_unmount: updates.auto_unmount,
+            source_type: updates.source_type,
+            source_uuid: updates.source_uuid,
+            source_uuid_type: updates.source_uuid_type,
+            source_sub_path: updates.source_sub_path,
+        },
+        app,
+        state.inner(),
+    )
+    .await?;
+    Ok(SyncTaskEnvelope { task })
+}
+
+#[tauri::command]
+async fn delete_sync_task(
+    id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeleteResultEnvelope, String> {
+    let deleted = delete_sync_task_internal(id, app, state.inner()).await?;
+    Ok(DeleteResultEnvelope { deleted })
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -3046,10 +3854,11 @@ async fn runtime_set_config(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<RuntimeState, String> {
-    let _apply_guard = state.runtime_config_apply_lock.lock().await;
+    let _apply_guard = state.runtime_config_apply_lock.clone().lock_owned().await;
 
     validate_runtime_tasks(&payload.tasks)?;
-    let valid_task_ids: HashSet<String> = payload.tasks.iter().map(|task| task.id.clone()).collect();
+    let valid_task_ids: HashSet<String> =
+        payload.tasks.iter().map(|task| task.id.clone()).collect();
 
     for set in &payload.exclusion_sets {
         input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
@@ -3104,16 +3913,600 @@ async fn is_auto_unmount_session_disabled(
     Ok(is_auto_unmount_session_disabled_internal(&task_id, state.inner()).await)
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SyncTask {
-    pub id: String,
-    pub name: String,
-    pub source: String,
-    pub target: String,
-    pub enabled: bool,
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskIdParams {
+    task_id: String,
 }
 
-#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, Default)]
+async fn load_task_context(
+    task_id: &str,
+    state: &AppState,
+) -> Result<(SyncTaskRecord, Vec<String>), String> {
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let exclusion_sets = state
+        .config_store
+        .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    let task = tasks
+        .into_iter()
+        .find(|candidate| candidate.id == task_id)
+        .ok_or_else(|| format!("Sync task not found: {task_id}"))?;
+    let runtime_task = to_runtime_task_record(&task);
+    let runtime_sets: Vec<RuntimeExclusionSet> = exclusion_sets
+        .iter()
+        .map(to_runtime_exclusion_set_record)
+        .collect();
+    let exclude_patterns = resolve_runtime_exclude_patterns(&runtime_task, &runtime_sets);
+    Ok((task, exclude_patterns))
+}
+
+async fn spawn_mcp_sync_job(
+    task_id: String,
+    app: tauri::AppHandle,
+    state: AppState,
+) -> Result<String, String> {
+    let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
+    let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let job_id = next_mcp_job_id(McpJobKind::Sync, seq);
+    let now = unix_now_ms();
+    let job = McpJobRecord::new(job_id.clone(), McpJobKind::Sync, Some(task.id.clone()), now);
+    state.mcp_jobs.insert_job(job).await;
+
+    let cancel_token = CancellationToken::new();
+    state
+        .mcp_jobs
+        .attach_cancel_token(&job_id, cancel_token.clone())
+        .await;
+
+    let app_for_job = app.clone();
+    let state_for_job = state.clone();
+    let job_id_for_job = job_id.clone();
+    tauri::async_runtime::spawn(async move {
+        state_for_job
+            .mcp_jobs
+            .set_status(&job_id_for_job, McpJobStatus::Running, unix_now_ms())
+            .await;
+        let result = execute_sync_internal(
+            task.id.clone(),
+            task.name.clone(),
+            PathBuf::from(task.source.clone()),
+            PathBuf::from(task.target.clone()),
+            task.checksum_mode,
+            task.verify_after_copy,
+            exclude_patterns,
+            app_for_job,
+            state_for_job.clone(),
+            false,
+            SyncOrigin::Manual,
+            Some(cancel_token.clone()),
+            Some(job_id_for_job.clone()),
+        )
+        .await;
+        state_for_job
+            .mcp_jobs
+            .detach_cancel_token(&job_id_for_job)
+            .await;
+
+        match result {
+            Ok(result) => {
+                if let Ok(json) = serde_json::to_value(result) {
+                    state_for_job
+                        .mcp_jobs
+                        .complete_job(&job_id_for_job, json, unix_now_ms())
+                        .await;
+                } else {
+                    state_for_job
+                        .mcp_jobs
+                        .fail_job(
+                            &job_id_for_job,
+                            "Failed to serialize sync result".to_string(),
+                            unix_now_ms(),
+                        )
+                        .await;
+                }
+            }
+            Err(error) => {
+                if cancel_token.is_cancelled() {
+                    state_for_job
+                        .mcp_jobs
+                        .set_status(&job_id_for_job, McpJobStatus::Cancelled, unix_now_ms())
+                        .await;
+                } else {
+                    state_for_job
+                        .mcp_jobs
+                        .fail_job(&job_id_for_job, error, unix_now_ms())
+                        .await;
+                }
+            }
+        }
+    });
+
+    Ok(job_id)
+}
+
+async fn spawn_mcp_dry_run_job(task_id: String, state: AppState) -> Result<String, String> {
+    let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
+    let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let job_id = next_mcp_job_id(McpJobKind::DryRun, seq);
+    state
+        .mcp_jobs
+        .insert_job(McpJobRecord::new(
+            job_id.clone(),
+            McpJobKind::DryRun,
+            Some(task.id.clone()),
+            unix_now_ms(),
+        ))
+        .await;
+
+    let cancel_token = CancellationToken::new();
+    state
+        .mcp_jobs
+        .attach_cancel_token(&job_id, cancel_token.clone())
+        .await;
+
+    let state_for_job = state.clone();
+    let job_id_for_job = job_id.clone();
+    tauri::async_runtime::spawn(async move {
+        state_for_job
+            .mcp_jobs
+            .set_status(&job_id_for_job, McpJobStatus::Running, unix_now_ms())
+            .await;
+        let result = sync_dry_run_internal(
+            task.id.clone(),
+            PathBuf::from(task.source.clone()),
+            PathBuf::from(task.target.clone()),
+            task.checksum_mode,
+            exclude_patterns,
+            &state_for_job,
+            Some(cancel_token.clone()),
+        )
+        .await;
+        state_for_job
+            .mcp_jobs
+            .detach_cancel_token(&job_id_for_job)
+            .await;
+
+        match result {
+            Ok(result) => {
+                if let Ok(json) = serde_json::to_value(result) {
+                    state_for_job
+                        .mcp_jobs
+                        .complete_job(&job_id_for_job, json, unix_now_ms())
+                        .await;
+                } else {
+                    state_for_job
+                        .mcp_jobs
+                        .fail_job(
+                            &job_id_for_job,
+                            "Failed to serialize dry-run result".to_string(),
+                            unix_now_ms(),
+                        )
+                        .await;
+                }
+            }
+            Err(error) => {
+                if cancel_token.is_cancelled() {
+                    state_for_job
+                        .mcp_jobs
+                        .set_status(&job_id_for_job, McpJobStatus::Cancelled, unix_now_ms())
+                        .await;
+                } else {
+                    state_for_job
+                        .mcp_jobs
+                        .fail_job(&job_id_for_job, error, unix_now_ms())
+                        .await;
+                }
+            }
+        }
+    });
+
+    Ok(job_id)
+}
+
+async fn spawn_mcp_orphan_scan_job(task_id: String, state: AppState) -> Result<String, String> {
+    let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
+    let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
+    let job_id = next_mcp_job_id(McpJobKind::OrphanScan, seq);
+    state
+        .mcp_jobs
+        .insert_job(McpJobRecord::new(
+            job_id.clone(),
+            McpJobKind::OrphanScan,
+            Some(task.id.clone()),
+            unix_now_ms(),
+        ))
+        .await;
+
+    let cancel_token = CancellationToken::new();
+    state
+        .mcp_jobs
+        .attach_cancel_token(&job_id, cancel_token.clone())
+        .await;
+
+    let state_for_job = state.clone();
+    let job_id_for_job = job_id.clone();
+    tauri::async_runtime::spawn(async move {
+        state_for_job
+            .mcp_jobs
+            .set_status(&job_id_for_job, McpJobStatus::Running, unix_now_ms())
+            .await;
+        let result = find_orphan_files_internal(
+            task.id.clone(),
+            PathBuf::from(task.source.clone()),
+            PathBuf::from(task.target.clone()),
+            exclude_patterns,
+            &state_for_job,
+            Some(cancel_token.clone()),
+        )
+        .await;
+        state_for_job
+            .mcp_jobs
+            .detach_cancel_token(&job_id_for_job)
+            .await;
+
+        match result {
+            Ok(result) => {
+                if let Ok(json) = serde_json::to_value(result) {
+                    state_for_job
+                        .mcp_jobs
+                        .complete_job(&job_id_for_job, json, unix_now_ms())
+                        .await;
+                } else {
+                    state_for_job
+                        .mcp_jobs
+                        .fail_job(
+                            &job_id_for_job,
+                            "Failed to serialize orphan scan result".to_string(),
+                            unix_now_ms(),
+                        )
+                        .await;
+                }
+            }
+            Err(error) => {
+                if cancel_token.is_cancelled() {
+                    state_for_job
+                        .mcp_jobs
+                        .set_status(&job_id_for_job, McpJobStatus::Cancelled, unix_now_ms())
+                        .await;
+                } else {
+                    state_for_job
+                        .mcp_jobs
+                        .fail_job(&job_id_for_job, error, unix_now_ms())
+                        .await;
+                }
+            }
+        }
+    });
+
+    Ok(job_id)
+}
+
+async fn handle_control_plane_request(
+    request: ControlPlaneRequest,
+    app: tauri::AppHandle,
+    state: AppState,
+) -> ControlPlaneResponse {
+    let request_id = request.request_id.clone();
+    let response = match request.method.as_str() {
+        "syncwatcher_get_settings" => current_settings_snapshot(&app, &state)
+            .await
+            .map(|settings| serde_json::json!({ "settings": settings })),
+        "syncwatcher_update_settings" => {
+            let updates = serde_json::from_value::<McpSettingsPatch>(request.params.clone())
+                .map_err(|error| format!("Invalid settings payload: {error}"));
+            match updates {
+                Ok(updates) => {
+                    let updates: UpdateSettingsPayload = updates.into();
+                    let mut settings = match state.config_store.load_settings() {
+                        Ok(settings) => settings,
+                        Err(error) => {
+                            return ControlPlaneResponse::error(
+                                request_id,
+                                "load_failed",
+                                config_store_error_to_string(error),
+                            )
+                        }
+                    };
+                    updates.apply_to(&mut settings);
+                    match validate_settings_record(&settings) {
+                        Ok(()) => match state.config_store.save_settings(&settings) {
+                            Ok(()) => {
+                                emit_config_store_changed(&app, &["settings"]);
+                                let apply_result =
+                                    apply_canonical_config_to_runtime(app.clone(), state.clone())
+                                        .await;
+                                if let Err(error) = apply_result {
+                                    Err(error)
+                                } else {
+                                    let snapshot = match current_settings_snapshot(&app, &state)
+                                        .await
+                                    {
+                                        Ok(settings) => serde_json::json!({ "settings": settings }),
+                                        Err(error) => {
+                                            return ControlPlaneResponse::error(
+                                                request_id,
+                                                "request_failed",
+                                                error,
+                                            );
+                                        }
+                                    };
+                                    if !settings.mcp_enabled {
+                                        if let Err(error) =
+                                            stop_control_plane_listener(state.clone()).await
+                                        {
+                                            return ControlPlaneResponse::error(
+                                                request_id,
+                                                "request_failed",
+                                                error,
+                                            );
+                                        }
+                                    }
+                                    Ok(snapshot)
+                                }
+                            }
+                            Err(error) => Err(config_store_error_to_string(error)),
+                        },
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_list_sync_tasks" => state
+            .config_store
+            .load_tasks()
+            .map_err(config_store_error_to_string)
+            .map(|tasks| serde_json::json!({ "tasks": tasks })),
+        "syncwatcher_get_sync_task" => {
+            let params = serde_json::from_value::<TaskIdParams>(request.params.clone())
+                .map_err(|error| format!("Invalid task id payload: {error}"));
+            match params {
+                Ok(params) => get_sync_task_internal_json(&params.task_id, &state).await,
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_create_sync_task" => {
+            let task = serde_json::from_value::<NewSyncTaskRecord>(request.params.clone())
+                .map_err(|error| format!("Invalid sync task payload: {error}"));
+            match task {
+                Ok(task) => {
+                    let generated_id = format!(
+                        "task-{}-{}",
+                        unix_now_ms(),
+                        state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1
+                    );
+                    let task = build_sync_task_record(generated_id, task)
+                        .map_err(config_store_error_to_string);
+                    match task {
+                        Ok(task) => {
+                            match create_sync_task_internal(task, app.clone(), &state).await {
+                                Ok(task) => Ok(serde_json::json!({ "task": task })),
+                                Err(error) => Err(error),
+                            }
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_update_sync_task" => {
+            let update = serde_json::from_value::<UpdateSyncTaskRequest>(request.params.clone())
+                .map_err(|error| format!("Invalid sync task payload: {error}"));
+            match update {
+                Ok(update) => match patch_sync_task_internal(update, app.clone(), &state).await {
+                    Ok(task) => Ok(serde_json::json!({ "task": task })),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_delete_sync_task" => {
+            let params = serde_json::from_value::<TaskIdParams>(request.params.clone())
+                .map_err(|error| format!("Invalid task id payload: {error}"));
+            match params {
+                Ok(params) => {
+                    match delete_sync_task_internal(params.task_id, app.clone(), &state).await {
+                        Ok(deleted) => Ok(serde_json::json!({ "deleted": deleted })),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_start_dry_run" => {
+            let params = serde_json::from_value::<TaskIdParams>(request.params.clone())
+                .map_err(|error| format!("Invalid task id payload: {error}"));
+            match params {
+                Ok(params) => spawn_mcp_dry_run_job(params.task_id, state.clone())
+                    .await
+                    .map(|job_id| serde_json::json!({ "jobId": job_id })),
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_start_sync" => {
+            let params = serde_json::from_value::<TaskIdParams>(request.params.clone())
+                .map_err(|error| format!("Invalid task id payload: {error}"));
+            match params {
+                Ok(params) => spawn_mcp_sync_job(params.task_id, app.clone(), state.clone())
+                    .await
+                    .map(|job_id| serde_json::json!({ "jobId": job_id })),
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_start_orphan_scan" => {
+            let params = serde_json::from_value::<TaskIdParams>(request.params.clone())
+                .map_err(|error| format!("Invalid task id payload: {error}"));
+            match params {
+                Ok(params) => spawn_mcp_orphan_scan_job(params.task_id, state.clone())
+                    .await
+                    .map(|job_id| serde_json::json!({ "jobId": job_id })),
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_get_job" => {
+            let params = serde_json::from_value::<serde_json::Value>(request.params.clone())
+                .map_err(|error| format!("Invalid job payload: {error}"));
+            match params {
+                Ok(params) => {
+                    let job_id = params
+                        .get("jobId")
+                        .and_then(|value| value.as_str())
+                        .ok_or_else(|| "jobId is required".to_string());
+                    match job_id {
+                        Ok(job_id) => state
+                            .mcp_jobs
+                            .get_job(job_id)
+                            .await
+                            .map(|job| serde_json::json!({ "job": job }))
+                            .ok_or_else(|| format!("Job not found: {job_id}")),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_cancel_job" => {
+            let params = serde_json::from_value::<serde_json::Value>(request.params.clone())
+                .map_err(|error| format!("Invalid job payload: {error}"));
+            match params {
+                Ok(params) => {
+                    let job_id = params
+                        .get("jobId")
+                        .and_then(|value| value.as_str())
+                        .ok_or_else(|| "jobId is required".to_string());
+                    match job_id {
+                        Ok(job_id) => state
+                            .mcp_jobs
+                            .cancel_job(job_id, unix_now_ms())
+                            .await
+                            .then_some(serde_json::json!({ "cancelled": true }))
+                            .ok_or_else(|| format!("Job not found or not cancellable: {job_id}")),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            }
+        }
+        "syncwatcher_get_runtime_state" => Ok(serde_json::json!({
+            "runtimeState": runtime_get_state_internal(&state).await
+        })),
+        "syncwatcher_list_removable_volumes" => {
+            get_removable_volumes().map(|volumes| serde_json::json!({ "volumes": volumes }))
+        }
+        _ => Err(format!(
+            "Unsupported control-plane method: {}",
+            request.method
+        )),
+    };
+
+    match response {
+        Ok(result) => ControlPlaneResponse::ok(request_id, result),
+        Err(error) => ControlPlaneResponse::error(request_id, "request_failed", error),
+    }
+}
+
+async fn get_sync_task_internal_json(
+    task_id: &str,
+    state: &AppState,
+) -> Result<serde_json::Value, String> {
+    input_validation::validate_task_id(task_id).map_err(|e| e.to_string())?;
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let task = tasks
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| format!("Sync task not found: {task_id}"))?;
+    Ok(serde_json::json!({ "task": task }))
+}
+
+async fn create_sync_task_internal(
+    task: SyncTaskRecord,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<SyncTaskRecord, String> {
+    let task = normalize_sync_task_record(task);
+    input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
+    let mut tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    if tasks.iter().any(|existing| existing.id == task.id) {
+        return Err(format!("Sync task already exists: {}", task.id));
+    }
+    tasks.push(task.clone());
+    validate_sync_task_records(&tasks)?;
+    state
+        .config_store
+        .save_tasks(&tasks)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["syncTasks"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
+    Ok(task)
+}
+
+async fn patch_sync_task_internal(
+    update: UpdateSyncTaskRequest,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<SyncTaskRecord, String> {
+    input_validation::validate_task_id(&update.task_id).map_err(|e| e.to_string())?;
+    let mut tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let Some(index) = tasks
+        .iter()
+        .position(|existing| existing.id == update.task_id)
+    else {
+        return Err(format!("Sync task not found: {}", update.task_id));
+    };
+    let task = apply_sync_task_update(tasks[index].clone(), &update)
+        .map_err(config_store_error_to_string)?;
+    tasks[index] = task.clone();
+    validate_sync_task_records(&tasks)?;
+    state
+        .config_store
+        .save_tasks(&tasks)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["syncTasks"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
+    Ok(task)
+}
+
+async fn delete_sync_task_internal(
+    task_id: String,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<bool, String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    let mut tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let before_len = tasks.len();
+    tasks.retain(|task| task.id != task_id);
+    let deleted = tasks.len() != before_len;
+    if deleted {
+        state
+            .config_store
+            .save_tasks(&tasks)
+            .map_err(config_store_error_to_string)?;
+        emit_config_store_changed(&app, &["syncTasks"]);
+        let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
+    }
+    Ok(deleted)
+}
+
+#[derive(
+    Debug, Copy, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum DataUnitSystem {
     #[default]
@@ -3295,6 +4688,9 @@ pub fn run() {
     let shared_log_manager = Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES));
     let setup_log_manager = shared_log_manager.clone();
     let managed_log_manager = shared_log_manager;
+    let managed_config_store = Arc::new(ConfigStore::from_config_dir(
+        default_config_dir().expect("failed to resolve SyncWatcher config directory"),
+    ));
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -3313,10 +4709,7 @@ pub fn run() {
                 || menu_id.ends_with(".quit")
                 || menu_id.ends_with(":quit");
 
-            if looks_like_quit
-                && !menu_id.starts_with("tray_")
-                && !menu_id.starts_with("tray-")
-            {
+            if looks_like_quit && !menu_id.starts_with("tray_") && !menu_id.starts_with("tray-") {
                 eprintln!("[App] Menu event mapped to cmd-quit");
                 emit_close_requested(app, CloseRequestSource::CmdQuit);
             }
@@ -3376,12 +4769,12 @@ pub fn run() {
             if let Some(main_window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
                 main_window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                eprintln!("[App] Window close requested");
-                api.prevent_close();
-                emit_close_requested(&app_handle, CloseRequestSource::WindowClose);
-            }
-        });
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        eprintln!("[App] Window close requested");
+                        api.prevent_close();
+                        emit_close_requested(&app_handle, CloseRequestSource::WindowClose);
+                    }
+                });
             }
 
             // /Volumes 디렉토리 감시 시작 (볼륨 마운트/언마운트 감지)
@@ -3470,15 +4863,13 @@ pub fn run() {
 
                     loop {
                         let now = Instant::now();
-                        let next_tick = volume_watch_next_tick_delay(&emit_state, now, debounce_duration);
+                        let next_tick =
+                            volume_watch_next_tick_delay(&emit_state, now, debounce_duration);
 
                         if let Some(delay) = next_tick {
                             if delay.is_zero() {
-                                if handle_volume_watch_tick(
-                                    &mut emit_state,
-                                    now,
-                                    debounce_duration,
-                                ) {
+                                if handle_volume_watch_tick(&mut emit_state, now, debounce_duration)
+                                {
                                     refresh_and_emit();
                                 }
                                 continue;
@@ -3535,9 +4926,46 @@ pub fn run() {
                 }
             });
 
+            let runtime_init_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = runtime_init_app.state::<AppState>();
+                if let Err(error) = apply_canonical_config_to_runtime(
+                    runtime_init_app.clone(),
+                    state.inner().clone(),
+                )
+                .await
+                {
+                    eprintln!("[ConfigStore] Failed to apply canonical runtime config: {error}");
+                    return;
+                }
+
+                match state.config_store.load_settings() {
+                    Ok(settings) => {
+                        if let Err(error) = sync_control_plane_listener(
+                            runtime_init_app.clone(),
+                            state.inner().clone(),
+                            settings.mcp_enabled,
+                        )
+                        .await
+                        {
+                            eprintln!(
+                                "[ConfigStore] Failed to sync control plane listener: {error}"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[ConfigStore] Failed to load settings for control plane sync: {}",
+                            config_store_error_to_string(error)
+                        );
+                    }
+                }
+            });
+
             Ok(())
         })
         .manage(AppState {
+            config_store: managed_config_store,
             log_manager: managed_log_manager,
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
@@ -3555,11 +4983,18 @@ pub fn run() {
             auto_unmount_session_disabled_tasks: Arc::new(RwLock::new(HashSet::new())),
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
+            active_task_operations: Arc::new(RwLock::new(HashMap::new())),
+            control_plane_handle: Arc::new(Mutex::new(None)),
+            mcp_jobs: Arc::new(McpJobRegistry::new()),
+            mcp_job_seq: Arc::new(AtomicU64::new(0)),
         })
         .manage(AppExitControl::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_app_version,
+            get_settings,
+            update_settings,
+            reset_settings,
             sync_dry_run,
             find_orphan_files,
             delete_orphan_files,
@@ -3575,6 +5010,15 @@ pub fn run() {
             unmount_volume,
             start_sync,
             list_sync_tasks,
+            get_sync_task,
+            create_sync_task,
+            update_sync_task,
+            delete_sync_task,
+            list_exclusion_sets,
+            create_exclusion_set,
+            update_exclusion_set,
+            delete_exclusion_set,
+            reset_exclusion_sets,
             cancel_operation,
             send_notification,
             hide_to_background,
@@ -3591,6 +5035,8 @@ pub fn run() {
             join_paths,
             read_yaml_file,
             write_yaml_file,
+            read_config_store_file,
+            repair_config_store_file,
             ensure_directory_exists,
             file_exists,
             open_in_editor,

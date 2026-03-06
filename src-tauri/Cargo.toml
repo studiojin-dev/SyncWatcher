@@ -43,6 +43,8 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 reqwest = { version = "0.12", features = ["json"] }
 hostname = "0.4"
+rmcp = { version = "1.1.0", features = ["transport-io", "schemars"] }
+schemars = "1.2.0"
 
 [dev-dependencies]
 tempfile = "3.10"
@@ -50,3 +52,7 @@ tempfile = "3.10"
 [[bin]]
 name = "sync-cli"
 path = "src/bin/sync-cli.rs"
+
+[[bin]]
+name = "syncwatcher-mcp"
+path = "src/bin/syncwatcher-mcp.rs"

@@ -2,12 +2,12 @@
 //!
 //! 여러 Sync Task의 watcher를 관리하고, 변경 감지 시 자동 동기화를 트리거합니다.
 
+use anyhow::Result;
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
-use anyhow::Result;
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher, EventKind};
 use tokio_util::sync::CancellationToken;
 
 /// 단일 Task의 Watcher 정보
@@ -59,23 +59,27 @@ impl WatcherManager {
         let (tx, rx) = std::sync::mpsc::sync_channel(100);
         let tx = std::sync::Arc::new(std::sync::Mutex::new(tx));
 
-        let mut watcher = notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
-            if let Ok(event) = res {
-                // 실제 파일 변경 이벤트만 처리
-                match event.kind {
-                    EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
-                        // Use try_send for backpressure handling
-                        if let Ok(tx) = tx.lock() {
-                            if let Err(_) = tx.try_send(event) {
-                                // Channel full - log and skip (backpressure)
-                                // In production, you might want to log this
+        let mut watcher =
+            notify::recommended_watcher(move |res: std::result::Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    // 실제 파일 변경 이벤트만 처리
+                    match event.kind {
+                        EventKind::Any
+                        | EventKind::Create(_)
+                        | EventKind::Modify(_)
+                        | EventKind::Remove(_) => {
+                            // Use try_send for backpressure handling
+                            if let Ok(tx) = tx.lock() {
+                                if let Err(_) = tx.try_send(event) {
+                                    // Channel full - log and skip (backpressure)
+                                    // In production, you might want to log this
+                                }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
-            }
-        })?;
+            })?;
 
         watcher.watch(&source_path, RecursiveMode::Recursive)?;
 
@@ -84,7 +88,7 @@ impl WatcherManager {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run_debounce_loop(rx, Duration::from_millis(500), token_clone, on_change);
             }));
-            
+
             if let Err(e) = result {
                 // Log panic details to stderr as we can't easily access LogManager here
                 let msg = if let Some(s) = e.downcast_ref::<&str>() {
@@ -98,13 +102,16 @@ impl WatcherManager {
             }
         });
 
-        self.watchers.insert(task_id.clone(), TaskWatcher {
-            task_id,
-            source_path,
-            _watcher: watcher,
-            cancellation_token,
-            _debounce_thread_handle: Some(thread_handle),
-        });
+        self.watchers.insert(
+            task_id.clone(),
+            TaskWatcher {
+                task_id,
+                source_path,
+                _watcher: watcher,
+                cancellation_token,
+                _debounce_thread_handle: Some(thread_handle),
+            },
+        );
 
         Ok(())
     }
@@ -278,16 +285,13 @@ mod tests {
     fn test_start_stop_watching() {
         let mut manager = WatcherManager::new();
         let temp = tempfile::tempdir().unwrap();
-        
-        let result = manager.start_watching(
-            "test-task".to_string(),
-            temp.path().to_path_buf(),
-            |_| {},
-        );
-        
+
+        let result =
+            manager.start_watching("test-task".to_string(), temp.path().to_path_buf(), |_| {});
+
         assert!(result.is_ok());
         assert!(manager.is_watching("test-task"));
-        
+
         let result = manager.stop_watching("test-task");
         assert!(result.is_ok());
         assert!(!manager.is_watching("test-task"));
@@ -314,7 +318,9 @@ impl WatchEvent {
         Self {
             task_id,
             event_type: event_type.to_string(),
-            paths: event.paths.iter()
+            paths: event
+                .paths
+                .iter()
                 .filter_map(|p| p.to_str().map(|s| s.to_string()))
                 .collect(),
         }

@@ -196,6 +196,21 @@ function SettingsView() {
                                 className="neo-input w-full"
                             />
                         </div>
+
+                        <div className="flex justify-between items-center py-2 border-t border-dashed border-[var(--border-main)]">
+                            <div className="pr-4">
+                                <div className="font-bold">{t('settings.mcpEnabled')}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">
+                                    {t('settings.mcpEnabledDesc')}
+                                </div>
+                            </div>
+                            <Switch
+                                size="md"
+                                checked={settings.mcpEnabled}
+                                onChange={(e) => updateSettings({ mcpEnabled: e.currentTarget.checked })}
+                                styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
+                            />
+                        </div>
                     </div>
                 </section>
 

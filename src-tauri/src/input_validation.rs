@@ -3,7 +3,7 @@
 //! Provides validation functions for user inputs to prevent security issues
 //! including command injection, path traversal, and resource exhaustion.
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 /// Validate and sanitize exclude patterns
 ///
@@ -46,9 +46,8 @@ pub fn validate_exclude_patterns(patterns: &[String]) -> Result<()> {
         }
 
         // Validate glob syntax
-        globset::Glob::new(trimmed).map_err(|e| {
-            anyhow::anyhow!("Invalid glob pattern '{}': {}", trimmed, e)
-        })?;
+        globset::Glob::new(trimmed)
+            .map_err(|e| anyhow::anyhow!("Invalid glob pattern '{}': {}", trimmed, e))?;
     }
 
     Ok(())
@@ -73,7 +72,10 @@ pub fn validate_task_id(task_id: &str) -> Result<()> {
     }
 
     // Only allow alphanumeric, hyphen, underscore
-    if !task_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+    if !task_id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
         bail!("Task ID contains invalid characters: '{}'", task_id);
     }
 
@@ -95,8 +97,12 @@ pub fn validate_path_argument(path: &str) -> Result<()> {
     }
 
     // Check for shell metacharacters that could be dangerous
-    if path.contains('|') || path.contains('&') || path.contains(';')
-        || path.contains('$') || path.contains('`') || path.contains('\n')
+    if path.contains('|')
+        || path.contains('&')
+        || path.contains(';')
+        || path.contains('$')
+        || path.contains('`')
+        || path.contains('\n')
     {
         bail!("Path contains shell metacharacters");
     }

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { useYamlStore } from './useYamlStore';
+import { invoke } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { YamlStoreError } from './useYamlStore';
+import { listenConfigStoreChanged, parseConfigError, readConfigCollection, readConfigRecord } from '../utils/configStore';
 
 export interface ExclusionSet {
     id: string;
@@ -169,10 +171,8 @@ const DEFAULT_SETS: ExclusionSet[] = [
     }
 ];
 
-const LEGACY_STORAGE_KEY = 'exclusion_sets';
 export const EXCLUSION_SETS_DEFAULTS_VERSION_KEY = 'exclusion_sets_defaults_version';
 export const EXCLUSION_SETS_DEFAULTS_VERSION = 2;
-const EXCLUSION_SETS_FILE_NAME = 'exclusion_sets.yaml';
 
 export function mergeMissingDefaultSets(
     sets: ExclusionSet[],
@@ -186,117 +186,59 @@ export function mergeMissingDefaultSets(
     return [...sets, ...missingDefaults];
 }
 
-function sanitizeSet(raw: unknown): ExclusionSet | null {
-    if (!raw || typeof raw !== 'object') {
-        return null;
-    }
-
-    const candidate = raw as Partial<ExclusionSet>;
-    if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string' || !Array.isArray(candidate.patterns)) {
-        return null;
-    }
-
-    const patterns = candidate.patterns.filter((pattern): pattern is string => typeof pattern === 'string');
-    return {
-        id: candidate.id,
-        name: candidate.name,
-        patterns,
-    };
-}
-
 export function useExclusionSets() {
-    const {
-        data: sets,
-        saveData: saveSets,
-        loaded,
-        error,
-        reload,
-    } = useYamlStore<ExclusionSet[]>({
-        fileName: EXCLUSION_SETS_FILE_NAME,
-        defaultData: DEFAULT_SETS,
-    });
-
-    const didRunStartupMigrations = useRef(false);
+    const [sets, setSets] = useState<ExclusionSet[]>(DEFAULT_SETS);
+    const [loaded, setLoaded] = useState(false);
+    const [error, setError] = useState<YamlStoreError | null>(null);
+    const setsRef = useRef<ExclusionSet[]>(DEFAULT_SETS);
 
     useEffect(() => {
-        if (!loaded || didRunStartupMigrations.current) {
-            return;
-        }
+        setsRef.current = sets;
+    }, [sets]);
 
-        didRunStartupMigrations.current = true;
-
+    const loadSets = useCallback(async () => {
         try {
-            let nextSets = sets;
-            let shouldSave = false;
-            let shouldRemoveLegacyStorage = false;
-
-            const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
-            if (legacyRaw) {
-                const parsed = JSON.parse(legacyRaw);
-                if (Array.isArray(parsed)) {
-                    const migratedSets = parsed
-                        .map(sanitizeSet)
-                        .filter((set): set is ExclusionSet => set !== null);
-
-                    // Only apply migration when current file still has defaults.
-                    const currentIsDefault = JSON.stringify(sets) === JSON.stringify(DEFAULT_SETS);
-                    if (currentIsDefault && migratedSets.length > 0) {
-                        nextSets = migratedSets;
-                        shouldSave = true;
-                        shouldRemoveLegacyStorage = true;
-                        console.info('Migrated legacy exclusion sets from localStorage to YAML');
-                    }
-                }
-            }
-
-            const storedDefaultsVersionRaw = localStorage.getItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY);
-            const storedDefaultsVersion = Number.parseInt(storedDefaultsVersionRaw ?? '0', 10);
-            const shouldMigrateDefaults =
-                Number.isNaN(storedDefaultsVersion) || storedDefaultsVersion < EXCLUSION_SETS_DEFAULTS_VERSION;
-
-            if (shouldMigrateDefaults) {
-                const mergedSets = mergeMissingDefaultSets(nextSets);
-                if (mergedSets.length !== nextSets.length) {
-                    nextSets = mergedSets;
-                    shouldSave = true;
-                    console.info('Merged missing default exclusion sets');
-                }
-
-                if (shouldSave) {
-                    void saveSets(nextSets)
-                        .then(() => {
-                            if (shouldRemoveLegacyStorage) {
-                                localStorage.removeItem(LEGACY_STORAGE_KEY);
-                            }
-                            localStorage.setItem(
-                                EXCLUSION_SETS_DEFAULTS_VERSION_KEY,
-                                String(EXCLUSION_SETS_DEFAULTS_VERSION)
-                            );
-                        })
-                        .catch((err) => {
-                            console.error('Failed to migrate exclusion set defaults:', err);
-                        });
-                } else {
-                    localStorage.setItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY, String(EXCLUSION_SETS_DEFAULTS_VERSION));
-                }
+            const response = await invoke<unknown>('list_exclusion_sets');
+            const responseError = readConfigRecord<YamlStoreError>(response, ['error']);
+            if (responseError && responseError.type === 'PARSE_ERROR') {
+                setSets(DEFAULT_SETS);
+                setError(responseError as YamlStoreError);
                 return;
             }
 
-            if (shouldSave && nextSets !== sets) {
-                void saveSets(nextSets)
-                    .then(() => {
-                        if (shouldRemoveLegacyStorage) {
-                            localStorage.removeItem(LEGACY_STORAGE_KEY);
-                        }
-                    })
-                    .catch((err) => {
-                        console.error('Failed to run exclusion set startup migrations:', err);
-                    });
-            }
+            const nextSets = readConfigCollection<ExclusionSet>(response, ['sets', 'exclusionSets']);
+            setSets(nextSets.length > 0 ? nextSets : DEFAULT_SETS);
+            setError(null);
         } catch (err) {
-            console.error('Failed to run exclusion set startup migrations:', err);
+            const parsedError = parseConfigError(err);
+            const nextError = readConfigRecord<YamlStoreError>(parsedError, ['error']);
+            setSets(DEFAULT_SETS);
+            setError(nextError && nextError.type === 'PARSE_ERROR' ? nextError as YamlStoreError : null);
+            console.error('Failed to load exclusion sets:', err);
+        } finally {
+            setLoaded(true);
         }
-    }, [loaded, sets, saveSets]);
+    }, []);
+
+    useEffect(() => {
+        void loadSets();
+
+        let disposed = false;
+        const unlistenPromise = listenConfigStoreChanged(['exclusionSets'], () => {
+            if (!disposed) {
+                void loadSets();
+            }
+        });
+
+        return () => {
+            disposed = true;
+            void unlistenPromise
+                .then((unlisten) => unlisten())
+                .catch((error) => {
+                    console.warn('Failed to unlisten config-store-changed for exclusion sets', error);
+                });
+        };
+    }, [loadSets]);
 
     const addSet = (name: string, patterns: string[]) => {
         const newSet: ExclusionSet = {
@@ -304,20 +246,89 @@ export function useExclusionSets() {
             name,
             patterns
         };
-        void saveSets([...sets, newSet]);
+        const nextSets = [...setsRef.current, newSet];
+        setsRef.current = nextSets;
+        setSets(nextSets);
+
+        void invoke<unknown>('create_exclusion_set', { set: newSet })
+            .then((response) => {
+                const persistedSet = readConfigRecord<ExclusionSet>(response, ['set', 'exclusionSet']);
+                if (persistedSet) {
+                    const persistedSets = nextSets.map((candidate) =>
+                        candidate.id === newSet.id ? persistedSet as ExclusionSet : candidate
+                    );
+                    setsRef.current = persistedSets;
+                    setSets(persistedSets);
+                }
+                setError(null);
+            })
+            .catch((err) => {
+                console.error('Failed to create exclusion set:', err);
+                const revertedSets = setsRef.current.filter((candidate) => candidate.id !== newSet.id);
+                setsRef.current = revertedSets;
+                setSets(revertedSets);
+            });
     };
 
     const updateSet = (id: string, updates: Partial<Omit<ExclusionSet, 'id'>>) => {
-        const nextSets = sets.map((set) => (set.id === id ? { ...set, ...updates } : set));
-        void saveSets(nextSets);
+        const previousSets = setsRef.current;
+        const nextSets = previousSets.map((set) => (set.id === id ? { ...set, ...updates } : set));
+        setsRef.current = nextSets;
+        setSets(nextSets);
+
+        void invoke<unknown>('update_exclusion_set', { id, updates })
+            .then((response) => {
+                const persistedSet = readConfigRecord<ExclusionSet>(response, ['set', 'exclusionSet']);
+                if (persistedSet) {
+                    const persistedSets = nextSets.map((candidate) =>
+                        candidate.id === id ? persistedSet as ExclusionSet : candidate
+                    );
+                    setsRef.current = persistedSets;
+                    setSets(persistedSets);
+                }
+                setError(null);
+            })
+            .catch((err) => {
+                console.error('Failed to update exclusion set:', err);
+                setsRef.current = previousSets;
+                setSets(previousSets);
+            });
     };
 
     const deleteSet = (id: string) => {
-        void saveSets(sets.filter((set) => set.id !== id));
+        const previousSets = setsRef.current;
+        const nextSets = previousSets.filter((set) => set.id !== id);
+        setsRef.current = nextSets;
+        setSets(nextSets);
+
+        void invoke('delete_exclusion_set', { id })
+            .then(() => {
+                setError(null);
+            })
+            .catch((err) => {
+                console.error('Failed to delete exclusion set:', err);
+                setsRef.current = previousSets;
+                setSets(previousSets);
+            });
     };
 
     const resetSets = () => {
-        void saveSets(DEFAULT_SETS);
+        setsRef.current = DEFAULT_SETS;
+        setSets(DEFAULT_SETS);
+
+        void invoke<unknown>('reset_exclusion_sets')
+            .then((response) => {
+                const nextSets = readConfigCollection<ExclusionSet>(response, ['sets', 'exclusionSets']);
+                if (nextSets.length > 0) {
+                    setsRef.current = nextSets;
+                    setSets(nextSets);
+                }
+                setError(null);
+            })
+            .catch((err) => {
+                console.error('Failed to reset exclusion sets:', err);
+                void loadSets();
+            });
     };
 
     const getPatternsForSets = useCallback((setIds: string[]): string[] => {
@@ -335,6 +346,6 @@ export function useExclusionSets() {
         resetSets,
         getPatternsForSets,
         error,
-        reload,
+        reload: loadSets,
     };
 }

@@ -20,23 +20,18 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 vi.mock('../../context/SyncTasksContext', () => ({
   useSyncTasksContext: () => ({
-    tasks: [],
     loaded: true,
   }),
 }));
 
 vi.mock('../../context/ExclusionSetsContext', () => ({
   useExclusionSetsContext: () => ({
-    sets: [],
     loaded: true,
   }),
 }));
 
 vi.mock('../../hooks/useSettings', () => ({
   useSettings: () => ({
-    settings: {
-      dataUnitSystem: 'binary',
-    },
     loaded: true,
   }),
 }));
@@ -105,11 +100,12 @@ describe('BackendRuntimeBridge', () => {
     delete (globalThis as typeof globalThis & { __TAURI_INTERNALS__?: TauriInternalsShape }).__TAURI_INTERNALS__;
   });
 
-  it('marks initial runtime sync as error when runtime_set_config never resolves', async () => {
+  it('marks initial runtime sync as error when runtime_get_state never resolves', async () => {
     vi.useFakeTimers();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mockInvoke.mockImplementation((command: string) => {
-      if (command === 'runtime_set_config') {
+      if (command === 'runtime_get_state') {
         return new Promise<never>(() => {});
       }
       return Promise.resolve(undefined);
@@ -130,11 +126,12 @@ describe('BackendRuntimeBridge', () => {
 
     expect(onStateChange).toHaveBeenCalledWith('error');
 
-    expect(showToastMock).toHaveBeenCalledWith('Failed to apply runtime configuration', 'error');
+    expect(showToastMock).toHaveBeenCalledWith('Failed to read runtime state', 'error');
+    consoleErrorSpy.mockRestore();
 
   });
 
-  it('marks initial runtime sync as success when runtime_set_config resolves', async () => {
+  it('marks initial runtime sync as success when runtime_get_state resolves', async () => {
     mockInvoke.mockResolvedValue({
       watchingTasks: [],
       syncingTasks: [],
@@ -148,15 +145,45 @@ describe('BackendRuntimeBridge', () => {
       expect(onStateChange).toHaveBeenCalledWith('success');
     });
 
-    expect(mockInvoke).toHaveBeenCalledWith('runtime_set_config', {
-      payload: {
-        tasks: [],
-        exclusionSets: [],
-        settings: {
-          dataUnitSystem: 'binary',
-        },
-      },
+    expect(mockInvoke).toHaveBeenCalledWith('runtime_get_state');
+  });
+
+  it('refreshes runtime state when config-store-changed is emitted', async () => {
+    mockInvoke
+      .mockResolvedValueOnce({
+        watchingTasks: [],
+        syncingTasks: [],
+        queuedTasks: [],
+      })
+      .mockResolvedValueOnce({
+        watchingTasks: ['task-1'],
+        syncingTasks: [],
+        queuedTasks: [],
+      });
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('config-store-changed')).toBe(true);
     });
+
+    const handler = eventHandlers.get('config-store-changed');
+    if (!handler) {
+      throw new Error('config-store-changed handler not found');
+    }
+
+    act(() => {
+      handler({
+        payload: {
+          scope: 'settings',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledTimes(2);
+    });
+    expect(storeState.setWatchingTasks).toHaveBeenLastCalledWith(['task-1']);
   });
 
   it('stores progress and avoids duplicate lastLog updates when message is unchanged', async () => {

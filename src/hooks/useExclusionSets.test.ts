@@ -1,164 +1,160 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
-import { useYamlStore } from './useYamlStore';
-import {
-  EXCLUSION_SETS_DEFAULTS_VERSION,
-  EXCLUSION_SETS_DEFAULTS_VERSION_KEY,
-  ExclusionSet,
-  useExclusionSets,
-} from './useExclusionSets';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { ExclusionSet, mergeMissingDefaultSets, useExclusionSets } from './useExclusionSets';
 
-vi.mock('./useYamlStore', () => ({
-  useYamlStore: vi.fn(),
+vi.mock('@tauri-apps/api/core', () => ({
+    invoke: vi.fn(),
 }));
 
-const mockUseYamlStore = vi.mocked(useYamlStore);
-const mockUseYamlStoreFn = mockUseYamlStore as unknown as ReturnType<typeof vi.fn>;
+vi.mock('@tauri-apps/api/event', () => ({
+    listen: vi.fn(),
+}));
+
+const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
+const mockListen = listen as unknown as ReturnType<typeof vi.fn>;
+const eventHandlers = new Map<string, (event: { payload?: unknown }) => void>();
 
 function makeSet(id: string, patterns: string[]): ExclusionSet {
-  return {
-    id,
-    name: id,
-    patterns,
-  };
+    return {
+        id,
+        name: id,
+        patterns,
+    };
 }
 
-function mockYamlStore({
-  sets,
-  saveData,
-  loaded = true,
-}: {
-  sets: ExclusionSet[];
-  saveData: (nextSets: ExclusionSet[]) => Promise<void>;
-  loaded?: boolean;
-}) {
-  mockUseYamlStoreFn.mockReturnValue({
-    data: sets,
-    saveData,
-    loaded,
-    setData: vi.fn(),
-    error: null,
-    reload: vi.fn(),
-  } as unknown as ReturnType<typeof useYamlStore<Record<string, unknown>>>);
-}
+describe('useExclusionSets', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        eventHandlers.clear();
+        mockListen.mockImplementation(async (eventName: string, handler: (event: { payload?: unknown }) => void) => {
+            eventHandlers.set(eventName, handler);
+            return () => {
+                eventHandlers.delete(eventName);
+            };
+        });
+        mockInvoke.mockImplementation(async (command: string) => {
+            if (command === 'list_exclusion_sets') {
+                return {
+                    exclusionSets: [
+                        makeSet('custom', ['*.tmp']),
+                    ],
+                };
+            }
 
-describe('useExclusionSets defaults migration', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.clear();
-  });
-
-  it('appends only missing default sets and preserves existing customized sets', async () => {
-    const saveData = vi.fn<(nextSets: ExclusionSet[]) => Promise<void>>().mockResolvedValue(undefined);
-    const existing = [
-      makeSet('system-defaults', ['.DS_Store']),
-      makeSet('nodejs', ['custom-node-cache']),
-      makeSet('python', ['custom-python-cache']),
-      makeSet('git', ['.git']),
-      makeSet('rust', ['target']),
-    ];
-    mockYamlStore({ sets: existing, saveData });
-
-    renderHook(() => useExclusionSets());
-
-    await waitFor(() => {
-      expect(saveData).toHaveBeenCalledTimes(1);
+            return undefined;
+        });
     });
 
-    const mergedSets = saveData.mock.calls[0][0];
-    const nodeSet = mergedSets.find((set) => set.id === 'nodejs');
-    expect(nodeSet?.patterns).toEqual(['custom-node-cache']);
+    it('appends only missing default sets and preserves existing customized sets', () => {
+        const existing = [
+            makeSet('system-defaults', ['.DS_Store']),
+            makeSet('nodejs', ['custom-node-cache']),
+            makeSet('python', ['custom-python-cache']),
+            makeSet('git', ['.git']),
+            makeSet('rust', ['target']),
+        ];
 
-    expect(mergedSets.some((set) => set.id === 'jvm-build')).toBe(true);
-    expect(mergedSets.some((set) => set.id === 'dotnet')).toBe(true);
-    expect(mergedSets.some((set) => set.id === 'ruby-rails')).toBe(true);
-    expect(mergedSets.some((set) => set.id === 'php-laravel')).toBe(true);
-    expect(mergedSets.some((set) => set.id === 'dart-flutter')).toBe(true);
-    expect(mergedSets.some((set) => set.id === 'swift-xcode')).toBe(true);
-    expect(mergedSets.some((set) => set.id === 'infra-terraform')).toBe(true);
+        const mergedSets = mergeMissingDefaultSets(existing);
+        const nodeSet = mergedSets.find((set) => set.id === 'nodejs');
 
-    await waitFor(() => {
-      expect(localStorage.getItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY)).toBe(
-        String(EXCLUSION_SETS_DEFAULTS_VERSION)
-      );
+        expect(nodeSet?.patterns).toEqual(['custom-node-cache']);
+        expect(mergedSets.some((set) => set.id === 'jvm-build')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'dotnet')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'ruby-rails')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'php-laravel')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'dart-flutter')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'swift-xcode')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'infra-terraform')).toBe(true);
     });
-  });
 
-  it('records defaults version without saving when no set is missing', async () => {
-    const saveData = vi.fn<(nextSets: ExclusionSet[]) => Promise<void>>().mockResolvedValue(undefined);
-    const allSets = [
-      makeSet('system-defaults', ['.DS_Store']),
-      makeSet('nodejs', ['node_modules']),
-      makeSet('python', ['__pycache__']),
-      makeSet('git', ['.git']),
-      makeSet('rust', ['target']),
-      makeSet('jvm-build', ['.gradle']),
-      makeSet('dotnet', ['bin']),
-      makeSet('ruby-rails', ['tmp']),
-      makeSet('php-laravel', ['vendor']),
-      makeSet('dart-flutter', ['.dart_tool']),
-      makeSet('swift-xcode', ['DerivedData']),
-      makeSet('infra-terraform', ['.terraform']),
-    ];
-    mockYamlStore({ sets: allSets, saveData });
+    it('loads exclusion sets from the backend store', async () => {
+        const { result } = renderHook(() => useExclusionSets());
 
-    renderHook(() => useExclusionSets());
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
 
-    await waitFor(() => {
-      expect(localStorage.getItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY)).toBe(
-        String(EXCLUSION_SETS_DEFAULTS_VERSION)
-      );
+        expect(mockInvoke).toHaveBeenCalledWith('list_exclusion_sets');
+        expect(result.current.sets).toEqual([makeSet('custom', ['*.tmp'])]);
     });
-    expect(saveData).not.toHaveBeenCalled();
-  });
 
-  it('does not run defaults merge again after version has already been recorded', async () => {
-    localStorage.setItem(
-      EXCLUSION_SETS_DEFAULTS_VERSION_KEY,
-      String(EXCLUSION_SETS_DEFAULTS_VERSION)
-    );
+    it('reloads exclusion sets when config-store-changed is emitted', async () => {
+        mockInvoke
+            .mockResolvedValueOnce({ exclusionSets: [makeSet('first', ['*.tmp'])] })
+            .mockResolvedValueOnce({ exclusionSets: [makeSet('second', ['dist'])] });
 
-    const saveData = vi.fn<(nextSets: ExclusionSet[]) => Promise<void>>().mockResolvedValue(undefined);
-    const existing = [
-      makeSet('system-defaults', ['.DS_Store']),
-      makeSet('nodejs', ['custom-node-cache']),
-      makeSet('python', ['custom-python-cache']),
-      makeSet('git', ['.git']),
-      makeSet('rust', ['target']),
-    ];
-    mockYamlStore({ sets: existing, saveData });
+        const { result } = renderHook(() => useExclusionSets());
 
-    renderHook(() => useExclusionSets());
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+        expect(result.current.sets).toEqual([makeSet('first', ['*.tmp'])]);
 
-    await waitFor(() => {
-      expect(localStorage.getItem(EXCLUSION_SETS_DEFAULTS_VERSION_KEY)).toBe(
-        String(EXCLUSION_SETS_DEFAULTS_VERSION)
-      );
+        const handler = eventHandlers.get('config-store-changed');
+        if (!handler) {
+            throw new Error('config-store-changed handler not found');
+        }
+
+        act(() => {
+            handler({ payload: { scope: 'exclusion_sets' } });
+        });
+
+        await waitFor(() => {
+            expect(result.current.sets).toEqual([makeSet('second', ['dist'])]);
+        });
     });
-    expect(saveData).not.toHaveBeenCalled();
-  });
 
-  it('keeps legacy storage when migration save fails', async () => {
-    const legacySets = [makeSet('legacy', ['legacy-pattern'])];
-    localStorage.setItem('exclusion_sets', JSON.stringify(legacySets));
+    it('uses backend commands for optimistic create and reset', async () => {
+        mockInvoke.mockImplementation(async (command: string) => {
+            if (command === 'list_exclusion_sets') {
+                return { exclusionSets: [] };
+            }
+            if (command === 'create_exclusion_set') {
+                return undefined;
+            }
+            if (command === 'reset_exclusion_sets') {
+                return {
+                    exclusionSets: [makeSet('reset', ['node_modules'])],
+                };
+            }
 
-    const saveData = vi
-      .fn<(nextSets: ExclusionSet[]) => Promise<void>>()
-      .mockRejectedValue(new Error('disk full'));
-    const defaultsOnly = [
-      makeSet('system-defaults', ['.DS_Store']),
-      makeSet('nodejs', ['node_modules']),
-      makeSet('python', ['__pycache__']),
-      makeSet('git', ['.git']),
-      makeSet('rust', ['target']),
-    ];
-    mockYamlStore({ sets: defaultsOnly, saveData });
+            return undefined;
+        });
 
-    renderHook(() => useExclusionSets());
+        const { result } = renderHook(() => useExclusionSets());
 
-    await waitFor(() => {
-      expect(saveData).toHaveBeenCalledTimes(1);
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+
+        act(() => {
+            result.current.addSet('Temp', ['*.tmp']);
+        });
+
+        await waitFor(() => {
+            expect(mockInvoke).toHaveBeenCalledWith(
+                'create_exclusion_set',
+                expect.objectContaining({
+                    set: expect.objectContaining({
+                        name: 'Temp',
+                        patterns: ['*.tmp'],
+                    }),
+                })
+            );
+        });
+        expect(result.current.sets.some((set) => set.name === 'Temp')).toBe(true);
+
+        act(() => {
+            result.current.resetSets();
+        });
+
+        await waitFor(() => {
+            expect(mockInvoke).toHaveBeenCalledWith('reset_exclusion_sets');
+        });
+        await waitFor(() => {
+            expect(result.current.sets).toEqual([makeSet('reset', ['node_modules'])]);
+        });
     });
-    expect(localStorage.getItem('exclusion_sets')).toBe(JSON.stringify(legacySets));
-  });
 });

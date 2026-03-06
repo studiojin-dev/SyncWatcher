@@ -12,12 +12,32 @@ interface YamlEditorModalProps {
   error: YamlParseError;
 }
 
+type RepairableConfigStoreScope = 'settings' | 'syncTasks' | 'exclusionSets';
+
+function inferConfigStoreScope(filePath: string): RepairableConfigStoreScope | null {
+  const normalized = filePath.toLowerCase();
+  if (normalized.endsWith('/settings.yaml') || normalized.endsWith('\\settings.yaml')) {
+    return 'settings';
+  }
+  if (normalized.endsWith('/tasks.yaml') || normalized.endsWith('\\tasks.yaml')) {
+    return 'syncTasks';
+  }
+  if (
+    normalized.endsWith('/exclusion_sets.yaml') ||
+    normalized.endsWith('\\exclusion_sets.yaml')
+  ) {
+    return 'exclusionSets';
+  }
+  return null;
+}
+
 function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
   const { t } = useTranslation();
   const [content, setContent] = useState(error.rawContent);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isValid, setIsValid] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const configStoreScope = useMemo(() => inferConfigStoreScope(error.filePath), [error.filePath]);
 
   // Update content when error changes
   useEffect(() => {
@@ -36,9 +56,13 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
 
     const interval = setInterval(async () => {
       try {
-        const updated = await invoke<string>('read_yaml_file', {
-          path: error.filePath
-        });
+        const updated = configStoreScope
+          ? await invoke<string>('read_config_store_file', {
+            scope: configStoreScope,
+          })
+          : await invoke<string>('read_yaml_file', {
+            path: error.filePath,
+          });
         if (updated !== content) {
           setContent(updated);
           // Don't show toast during rapid external edits
@@ -50,7 +74,7 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [opened, error.filePath, content]);
+  }, [opened, error.filePath, content, configStoreScope]);
 
   // Memoize line numbers calculation
   const lineNumbers = useMemo(() => {
@@ -90,10 +114,17 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
     }
 
     try {
-      await invoke('write_yaml_file', {
-        path: error.filePath,
-        content
-      });
+      if (configStoreScope) {
+        await invoke('repair_config_store_file', {
+          scope: configStoreScope,
+          content,
+        });
+      } else {
+        await invoke('write_yaml_file', {
+          path: error.filePath,
+          content,
+        });
+      }
       setHasUnsavedChanges(false);
       onClose();
     } catch (err) {
@@ -126,11 +157,12 @@ function YamlEditorModal({ opened, onClose, error }: YamlEditorModalProps) {
   // Jump to error line
   const jumpToError = () => {
     if (error.line) {
+      const errorLine = error.line;
       const textarea = document.querySelector('textarea[name="yaml-editor"]') as HTMLTextAreaElement;
       if (textarea) {
         const lines = content.split('\n');
         let position = 0;
-        for (let i = 0; i < error.line! - 1; i++) {
+        for (let i = 0; i < errorLine - 1; i++) {
           position += lines[i].length + 1; // +1 for newline
         }
         textarea.focus();

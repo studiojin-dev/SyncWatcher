@@ -33,12 +33,11 @@ All libraries are free to use, modify, and distribute.
 For detailed license information, please see the project repository.
 "#;
 
-    let app_data = app.path().app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let report_path = app_data.join("licenses.md");
     tokio::fs::write(&report_path, report)
         .await
         .map_err(|e| e.to_string())?;
-    
+
     Ok(report_path.to_string_lossy().to_string())
 }

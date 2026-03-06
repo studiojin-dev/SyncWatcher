@@ -190,10 +190,7 @@ pub async fn activate_license_key(
             }
         }
 
-        let instance_id = body
-            .instance
-            .map(|i| i.id)
-            .unwrap_or_default();
+        let instance_id = body.instance.map(|i| i.id).unwrap_or_default();
 
         let state = LicenseState {
             license_key: license_key.clone(),
@@ -225,9 +222,7 @@ pub async fn activate_license_key(
 /// # Returns
 /// 검증 결과 (valid, error)
 #[tauri::command]
-pub async fn validate_license_key(
-    app: tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+pub async fn validate_license_key(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let state = match load_license_state(&app) {
         Some(s) => s,
         None => {

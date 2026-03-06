@@ -42,17 +42,19 @@ pub fn sanitize_path(base: &Path, user_path: &Path) -> Result<PathBuf, String> {
     let joined = base.join(user_path);
 
     // Canonicalize both paths (resolves all .., ., symlinks)
-    let canonical = joined.canonicalize().map_err(|e| {
-        format!("Invalid path: {e}")
-    })?;
+    let canonical = joined
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {e}"))?;
 
-    let base_canonical = base.canonicalize().map_err(|e| {
-        format!("Invalid base path: {e}")
-    })?;
+    let base_canonical = base
+        .canonicalize()
+        .map_err(|e| format!("Invalid base path: {e}"))?;
 
     // Verify the joined path starts with base path (prevents traversal)
     if !canonical.starts_with(&base_canonical) {
-        return Err("Path traversal detected: attempted to access outside base directory".to_string());
+        return Err(
+            "Path traversal detected: attempted to access outside base directory".to_string(),
+        );
     }
 
     Ok(canonical)
