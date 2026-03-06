@@ -135,7 +135,7 @@ High contrast, black text on colored background, thick borders.
 
 ## Implementation Checklist
 
-- [ ] Update `src/index.css` with Neo-Brutalist variables & Tailwind config.
-- [ ] Refactor `App.tsx` shell to use thick borders.
-- [ ] Update `DashboardView` cards to "Hard Card" style.
-- [ ] Update Buttons to "Block Button" style.
+- [x] Update `src/index.css` with Neo-Brutalist variables & Taiwind config.
+- [x] Refactor `App.tsx` shell to use thick borders.
+- [x] Update `DashboardView` cards to "Hard Card" style.
+- [x] Update Buttons to "Block Button" style.
