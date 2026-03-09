@@ -15,6 +15,7 @@ pub mod watcher;
 mod lib_tests;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -195,6 +197,29 @@ pub struct AppState {
 #[derive(Default)]
 struct AppExitControl {
     allow_force_exit: AtomicBool,
+}
+
+const AUTOSTART_ARG: &str = "--autostart";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AutostartLaunchDecision {
+    pub argv_present: bool,
+    pub autolaunch_enabled: Option<bool>,
+    pub hidden_start_accepted: bool,
+    pub reject_reason: Option<&'static str>,
+    pub status_error: Option<String>,
+}
+
+impl AutostartLaunchDecision {
+    fn hidden_start_status(&self) -> &'static str {
+        if self.hidden_start_accepted {
+            "accepted"
+        } else if self.argv_present {
+            "rejected"
+        } else {
+            "not_requested"
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -2585,6 +2610,26 @@ async fn get_settings(
 }
 
 #[tauri::command]
+async fn set_launch_at_login(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SettingsEnvelope, String> {
+    if enabled {
+        app.autolaunch()
+            .enable()
+            .map_err(|error| format!("Failed to enable launch at login: {error}"))?;
+    } else {
+        app.autolaunch()
+            .disable()
+            .map_err(|error| format!("Failed to disable launch at login: {error}"))?;
+    }
+
+    let settings = current_settings_snapshot(&app, state.inner()).await?;
+    Ok(SettingsEnvelope { settings })
+}
+
+#[tauri::command]
 async fn update_settings(
     updates: UpdateSettingsPayload,
     app: tauri::AppHandle,
@@ -2612,6 +2657,9 @@ async fn reset_settings(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SettingsEnvelope, String> {
+    app.autolaunch()
+        .disable()
+        .map_err(|error| format!("Failed to disable launch at login: {error}"))?;
     state
         .config_store
         .reset_settings()
@@ -4592,6 +4640,85 @@ async fn quit_app(
     Ok(())
 }
 
+pub(crate) fn has_autostart_arg<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    args.into_iter()
+        .any(|arg| arg.as_ref() == OsStr::new(AUTOSTART_ARG))
+}
+
+fn is_autostart_launch() -> bool {
+    has_autostart_arg(std::env::args_os())
+}
+
+pub(crate) fn decide_autostart_launch(
+    argv_present: bool,
+    autolaunch_enabled: Result<bool, String>,
+) -> AutostartLaunchDecision {
+    if !argv_present {
+        return AutostartLaunchDecision {
+            argv_present,
+            autolaunch_enabled: None,
+            hidden_start_accepted: false,
+            reject_reason: None,
+            status_error: None,
+        };
+    }
+
+    match autolaunch_enabled {
+        Ok(true) => AutostartLaunchDecision {
+            argv_present,
+            autolaunch_enabled: Some(true),
+            hidden_start_accepted: true,
+            reject_reason: None,
+            status_error: None,
+        },
+        Ok(false) => AutostartLaunchDecision {
+            argv_present,
+            autolaunch_enabled: Some(false),
+            hidden_start_accepted: false,
+            reject_reason: Some("launch_at_login_disabled"),
+            status_error: None,
+        },
+        Err(error) => AutostartLaunchDecision {
+            argv_present,
+            autolaunch_enabled: None,
+            hidden_start_accepted: false,
+            reject_reason: Some("launch_at_login_status_unavailable"),
+            status_error: Some(error),
+        },
+    }
+}
+
+fn log_autostart_launch_provenance(decision: &AutostartLaunchDecision) {
+    let autolaunch_enabled = decision
+        .autolaunch_enabled
+        .map(|enabled| enabled.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let reject_reason = decision.reject_reason.unwrap_or("none");
+
+    if let Some(error) = &decision.status_error {
+        eprintln!(
+            "[Autostart] argv_present={} autolaunch_enabled={} hidden_start={} reject_reason={} status_error={}",
+            decision.argv_present,
+            autolaunch_enabled,
+            decision.hidden_start_status(),
+            reject_reason,
+            error
+        );
+    } else {
+        eprintln!(
+            "[Autostart] argv_present={} autolaunch_enabled={} hidden_start={} reject_reason={}",
+            decision.argv_present,
+            autolaunch_enabled,
+            decision.hidden_start_status(),
+            reject_reason
+        );
+    }
+}
+
 fn restore_main_window_from_tray(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         eprintln!("[Tray] Main window not found");
@@ -4691,12 +4818,17 @@ pub fn run() {
     let managed_config_store = Arc::new(ConfigStore::from_config_dir(
         default_config_dir().expect("failed to resolve SyncWatcher config directory"),
     ));
+    let autostart_args = vec![AUTOSTART_ARG];
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(autostart_args),
+        ))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -4715,11 +4847,42 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            let autostart_arg_present = is_autostart_launch();
+            let autostart_enabled = if autostart_arg_present {
+                app.autolaunch()
+                    .is_enabled()
+                    .map_err(|error| error.to_string())
+            } else {
+                Ok(false)
+            };
+            let autostart_decision =
+                decide_autostart_launch(autostart_arg_present, autostart_enabled);
+            let should_hide_on_startup = autostart_decision.hidden_start_accepted;
+            log_autostart_launch_provenance(&autostart_decision);
+
+            if should_hide_on_startup {
+                if let Some(main_window) = app.get_webview_window("main") {
+                    let _ = main_window.hide();
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
+            }
+
             // 윈도우 위치 조정
             if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     let _ = adjust_window_if_mostly_offscreen(&main_window);
+                    if !should_hide_on_startup {
+                        match main_window.is_visible() {
+                            Ok(true) => {}
+                            Ok(false) | Err(_) => restore_main_window_from_tray(&app_handle),
+                        }
+                    }
                 });
             }
 
@@ -4993,6 +5156,7 @@ pub fn run() {
             greet,
             get_app_version,
             get_settings,
+            set_launch_at_login,
             update_settings,
             reset_settings,
             sync_dry_run,

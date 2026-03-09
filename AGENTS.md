@@ -1,7 +1,7 @@
 # AGENTS.md - SyncWatcher
 
 This document defines agent workflow rules (HOW) only.
-Requirements (WHAT) live in `doc/`, and architecture decisions (WHY) live in `doc/adr/`.
+Requirements (WHAT) live in `docs/`, and architecture decisions (WHY) live in `docs/adr/`.
 
 ## 1) Scope and Principles
 
@@ -78,17 +78,17 @@ npm run tauri <command>
 
 ## 7) Document Locations
 
-- Place documents under `doc/`
-- Place ADRs under `doc/adr/`
+- Place documents under `docs/`
+- Place ADRs under `docs/adr/`
 
 ## Documentation Workflow
 
 The following terms are to be interpreted as described in RFC 2119:
 “MUST”, “MUST NOT”, “SHOULD”, and “MAY”.
 
-1. ADRs MUST be written in `doc/adr/*.md`.
+1. ADRs MUST be written in `docs/adr/*.md`.
 
-2. When an ADR is added or modified, `doc/adr/index.json` MUST be updated accordingly.
+2. When an ADR is added or modified, `docs/adr/index.json` MUST be updated accordingly.
 
 3. The ADR index MUST be generated using the `adr-index` skill.
 

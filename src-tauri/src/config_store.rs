@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
+use tauri_plugin_autostart::ManagerExt as _;
 use tempfile::NamedTempFile;
 
 use crate::input_validation;
@@ -84,6 +85,7 @@ pub struct SettingsSnapshot {
     pub max_log_lines: u32,
     pub close_action: CloseAction,
     pub is_registered: bool,
+    pub launch_at_login: bool,
     pub mcp_enabled: bool,
 }
 
@@ -588,8 +590,23 @@ pub async fn settings_snapshot_from_store(
         max_log_lines: settings.max_log_lines,
         close_action: settings.close_action,
         is_registered: license.is_registered,
+        launch_at_login: launch_at_login_status_or_default(
+            app.autolaunch()
+                .is_enabled()
+                .map_err(|error| error.to_string()),
+        ),
         mcp_enabled: settings.mcp_enabled,
     })
+}
+
+pub(crate) fn launch_at_login_status_or_default(result: Result<bool, String>) -> bool {
+    match result {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            eprintln!("[Autostart] Failed to read launch-at-login status: {error}");
+            false
+        }
+    }
 }
 
 pub fn apply_settings_patch(mut settings: StoredSettings, patch: SettingsPatch) -> StoredSettings {

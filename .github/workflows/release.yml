@@ -108,10 +108,18 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
       TAG_NAME: ${{ github.ref_name }}
+      RELEASE_CHANNEL: ${{ needs.tag_gate.outputs.release_channel }}
       ENABLE_COSIGN_ATTESTATION: ${{ vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Enforce stable release attestation policy
+        run: |
+          if [[ "$RELEASE_CHANNEL" == "stable" && "$ENABLE_COSIGN_ATTESTATION" != "true" ]]; then
+            echo "Stable releases require ENABLE_COSIGN_ATTESTATION=true."
+            exit 1
+          fi
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0
@@ -129,27 +137,39 @@ jobs:
             "sbom-${TAG_NAME}.spdx.json" \
             --clobber
 
-      - name: Download release artifacts for attestation
-        if: env.ENABLE_COSIGN_ATTESTATION == 'true'
-        id: prepare_attestation
+      - name: Download release artifacts
+        id: prepare_release_assets
         run: |
           mkdir -p release-assets
           gh release download "$TAG_NAME" --dir release-assets
           mapfile -t artifacts < <(find release-assets -maxdepth 1 -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) | sort)
           if [[ "${#artifacts[@]}" -eq 0 ]]; then
-            echo "has_artifacts=false" >> "$GITHUB_OUTPUT"
-            echo "No DMG or app tarball artifacts found; skipping attestation."
-            exit 0
+            echo "No DMG or app tarball artifacts found."
+            exit 1
           fi
-          printf '%s\n' "${artifacts[@]}" > attestation-targets.txt
-          echo "has_artifacts=true" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${artifacts[@]}" > release-artifacts.txt
+          echo "artifact_count=${#artifacts[@]}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release checksums
+        run: |
+          checksum_file="checksums-${TAG_NAME}.txt"
+          : > "$checksum_file"
+          while IFS= read -r artifact; do
+            file_name="$(basename "$artifact")"
+            file_sha256="$(sha256sum "$artifact" | awk '{print $1}')"
+            printf '%s  %s\n' "$file_sha256" "$file_name" >> "$checksum_file"
+          done < release-artifacts.txt
+
+      - name: Upload checksum asset
+        run: |
+          gh release upload "$TAG_NAME" "checksums-${TAG_NAME}.txt" --clobber
 
       - name: Install Cosign
-        if: env.ENABLE_COSIGN_ATTESTATION == 'true' && steps.prepare_attestation.outputs.has_artifacts == 'true'
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true'
         uses: sigstore/cosign-installer@v3
 
       - name: Generate keyless cosign attestations
-        if: env.ENABLE_COSIGN_ATTESTATION == 'true' && steps.prepare_attestation.outputs.has_artifacts == 'true'
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true'
         run: |
           while IFS= read -r artifact; do
             file_name="$(basename "$artifact")"
@@ -187,10 +207,10 @@ jobs:
               --type https://syncwatcher.dev/attestation/release-asset/v1 \
               --bundle "$bundle_file" \
               "$artifact"
-          done < attestation-targets.txt
+          done < release-artifacts.txt
 
       - name: Upload attestation bundles to release
-        if: env.ENABLE_COSIGN_ATTESTATION == 'true' && steps.prepare_attestation.outputs.has_artifacts == 'true'
+        if: env.ENABLE_COSIGN_ATTESTATION == 'true'
         run: |
           gh release upload "$TAG_NAME" attestation-*.bundle.json --clobber
 

@@ -106,21 +106,44 @@ The script will:
 
 1. Read the latest release tag from GitHub
 2. Pick the matching architecture (`aarch64` / `x86_64`) DMG
-3. Download it with `curl` (so it does not get browser quarantine)
-4. Install `Sync Watcher.app` into `/Applications`
+3. Download the DMG and same-tag checksum manifest
+4. Verify the DMG SHA-256 against the release checksum manifest
+5. Install `Sync Watcher.app` into `/Applications`
 
 If you want, use tar format in your release assets and the same flow still works with a small script change.
 
+### Verify With Cosign Before Opening The DMG
+
+For cryptographic provenance verification, install Cosign first by following the official instructions:
+
+- https://docs.sigstore.dev/cosign/system_config/installation/
+
+Then verify the downloaded DMG against the same-tag checksum and attestation bundle before mounting it:
+
+```bash
+scripts/release/verify-release-asset.sh v1.1.0 ~/Downloads/Sync.Watcher_1.1.0_aarch64.dmg
+```
+
+Only after the helper succeeds should you open the DMG or clear quarantine metadata for local testing.
+
+Stable tags are published only when an attestation bundle is present for the shipped artifacts. The latest installer remains checksum-only; local cryptographic verification is provided by `scripts/release/verify-release-asset.sh`.
+
 ### macOS 설치 안내 (한국어)
 
-1. GitHub Releases에서 `.dmg` 파일을 다운로드합니다.
-2. `.dmg`를 열어 `SyncWatcher.app`을 `Applications` 폴더로 이동합니다.
-3. 실행이 차단되면 아래 중 하나로 진행하세요.
+1. 먼저 Cosign을 설치합니다.
+   - 공식 안내: https://docs.sigstore.dev/cosign/system_config/installation/
+2. GitHub Releases에서 `.dmg` 파일을 다운로드합니다.
+3. 아래 helper로 같은 태그의 checksum과 attestation을 함께 검증합니다.
+   ```bash
+   scripts/release/verify-release-asset.sh v1.1.0 ~/Downloads/Sync.Watcher_1.1.0_aarch64.dmg
+   ```
+4. 검증이 끝난 뒤 `.dmg`를 열어 `SyncWatcher.app`을 `Applications` 폴더로 이동합니다.
+5. 실행이 차단되면 아래 중 하나로 진행하세요.
    - 앱 우클릭(또는 Control 클릭) → **열기** → **열기**
    - 또는 아래 `Security & Permissions` 절차에서 보안 허용 처리
-4. `손상됨` 경고가 보이면, 테스트 목적으로만 아래 명령으로 격리 속성을 제거할 수 있습니다:
+6. `손상됨` 경고가 보이면, 테스트 목적으로만 아래 명령으로 격리 속성을 제거할 수 있습니다:
    ```bash
-   xattr -dr com.apple.quarantine ~/Downloads/Sync.Watcher_1.0.0-rc2_aarch64.dmg
+   xattr -dr com.apple.quarantine ~/Downloads/Sync.Watcher_1.1.0_aarch64.dmg
    ```
    파일 경로는 다운로드한 파일명에 맞게 변경하세요.
 
@@ -150,6 +173,8 @@ Once we join the Apple Developer Program (paid), we will distribute a signed and
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/studiojin-dev/SyncWatcher/main/scripts/install-macos-latest.sh)"
 ```
+
+이 스크립트는 최신 stable 태그를 대상으로 checksum manifest만 확인한 뒤 설치를 진행합니다. cryptographic provenance 검증은 별도 helper(`scripts/release/verify-release-asset.sh`)로 수행합니다.
 
 #### 2) Homebrew (개인 Tap) 배포
 

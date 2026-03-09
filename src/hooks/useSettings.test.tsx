@@ -162,6 +162,53 @@ describe('useSettings', () => {
         });
     });
 
+    it('updates launch-at-login through the dedicated backend command', async () => {
+        const { result } = renderHook(() => useSettings(), { wrapper });
+
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+
+        let success = false;
+        await act(async () => {
+            success = await result.current.setLaunchAtLogin(true);
+        });
+
+        expect(success).toBe(true);
+        expect(result.current.settings.launchAtLogin).toBe(true);
+        await waitFor(() => {
+            expect(mockInvoke).toHaveBeenCalledWith('set_launch_at_login', { enabled: true });
+        });
+    });
+
+    it('rolls back launch-at-login when the dedicated backend command fails', async () => {
+        mockInvoke.mockImplementation(async (command: string) => {
+            if (command === 'get_settings') {
+                return {};
+            }
+            if (command === 'set_launch_at_login') {
+                throw new Error('autostart unavailable');
+            }
+            return undefined;
+        });
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const { result } = renderHook(() => useSettings(), { wrapper });
+
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+
+        let success = true;
+        await act(async () => {
+            success = await result.current.setLaunchAtLogin(true);
+        });
+
+        expect(success).toBe(false);
+        expect(result.current.settings.launchAtLogin).toBe(false);
+        consoleErrorSpy.mockRestore();
+    });
+
     it('reloads settings when config-store-changed is emitted', async () => {
         mockInvoke
             .mockResolvedValueOnce({})

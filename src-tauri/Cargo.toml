@@ -1,6 +1,6 @@
 [package]
 name = "syncwatcher"
-version = "1.0.0-rc3"
+version = "1.1.0"
 description = "SyncWatcher is a high-performance, native-feeling macOS file synchronization application that detects SD cards and USB drives automatically when inserted and performs real-time directory watching for instant backup."
 authors = ["Kim Jeongjin"]
 edition = "2021"
@@ -38,6 +38,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tokio-util = "0.7"
 tauri-plugin-notification = "2"
 tauri-plugin-window-state = "2"
+tauri-plugin-autostart = "2"
 plist = "1.8.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

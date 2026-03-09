@@ -83,8 +83,8 @@ describe('AboutView', () => {
       expect(consoleWarn).toHaveBeenCalledWith(
         'Failed to get app version from Cargo.toml'
       );
-      expect(screen.getByText('Version 1.0.0-rc3')).toBeInTheDocument();
-    });
+        expect(screen.getByText('Version 1.1.0')).toBeInTheDocument();
+      });
 
     consoleWarn.mockRestore();
   });

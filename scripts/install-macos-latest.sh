@@ -32,12 +32,32 @@ fi
 
 version="${tag#v}"
 dmg_name="Sync.Watcher_${version}_${SUFFIX}.dmg"
+checksums_name="checksums-${tag}.txt"
 download_url="https://github.com/${REPO}/releases/download/${tag}/${dmg_name}"
+checksums_url="https://github.com/${REPO}/releases/download/${tag}/${checksums_name}"
 dmg_path="${tmp_dir}/${dmg_name}"
+checksums_path="${tmp_dir}/${checksums_name}"
 
 echo "아키텍처: ${SUFFIX}"
 echo "다운로드: ${dmg_name}"
 curl -fL "$download_url" -o "$dmg_path"
+curl -fL "$checksums_url" -o "$checksums_path"
+
+expected_sha="$(awk -v file="$dmg_name" '$2 == file { print $1 }' "$checksums_path" | head -n 1)"
+if [ -z "$expected_sha" ]; then
+  echo "체크섬 파일에서 ${dmg_name} 항목을 찾지 못했습니다."
+  exit 1
+fi
+
+actual_sha="$(shasum -a 256 "$dmg_path" | awk '{print $1}')"
+if [ "$actual_sha" != "$expected_sha" ]; then
+  echo "SHA-256 검증 실패: ${dmg_name}"
+  echo "expected: ${expected_sha}"
+  echo "actual:   ${actual_sha}"
+  exit 1
+fi
+
+echo "검증 완료: SHA-256 checksum 확인"
 
 mkdir -p "$mount_point"
 hdiutil attach "$dmg_path" -nobrowse -mountpoint "$mount_point" -quiet

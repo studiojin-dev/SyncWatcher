@@ -26,9 +26,10 @@ const runtimeState: MockRuntimeState = {
 };
 
 const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
-const { setLastLogMock, setQueuedMock } = vi.hoisted(() => ({
+const { setLastLogMock, setQueuedMock, setLaunchAtLoginMock } = vi.hoisted(() => ({
   setLastLogMock: vi.fn(),
   setQueuedMock: vi.fn(),
+  setLaunchAtLoginMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -68,9 +69,11 @@ vi.mock('./hooks/useSettings', () => ({
       stateLocation: '',
       maxLogLines: 10000,
       closeAction: runtimeState.closeAction,
+      launchAtLogin: false,
     },
     loaded: runtimeState.settingsLoaded,
     updateSettings: vi.fn(),
+    setLaunchAtLogin: setLaunchAtLoginMock,
     resetSettings: vi.fn(),
   }),
 }));
@@ -207,12 +210,16 @@ describe('App close lifecycle', () => {
     vi.useRealTimers();
     setLastLogMock.mockReset();
     setQueuedMock.mockReset();
+    setLaunchAtLoginMock.mockReset();
+    setLaunchAtLoginMock.mockResolvedValue(true);
     runtimeState.settingsLoaded = true;
     runtimeState.tasksLoaded = true;
     runtimeState.setsLoaded = true;
     runtimeState.closeAction = 'quit';
     runtimeState.notifications = true;
     runtimeState.tasks = [];
+    localStorage.clear();
+    localStorage.setItem('syncwatcher_bg_intro_shown', '1');
 
     eventHandlers.clear();
 
@@ -239,6 +246,52 @@ describe('App close lifecycle', () => {
 
     askMock.mockResolvedValue(true);
     messageMock.mockResolvedValue('Cancel');
+  });
+
+  it('shows the first-run intro modal only when no intro keys exist', async () => {
+    localStorage.clear();
+
+    render(<App />);
+
+    expect(screen.getByText('app.firstRunIntroTitle')).toBeInTheDocument();
+    expect(screen.queryByText('app.backgroundIntroMessage')).not.toBeInTheDocument();
+  });
+
+  it('does not show the first-run intro modal when the legacy intro key exists', async () => {
+    render(<App />);
+
+    expect(screen.queryByText('app.firstRunIntroTitle')).not.toBeInTheDocument();
+  });
+
+  it('persists intro dismissal when the user chooses maybe later', async () => {
+    localStorage.clear();
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'app.firstRunIntroLater' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('app.firstRunIntroTitle')).not.toBeInTheDocument();
+    });
+    expect(localStorage.getItem('syncwatcher_first_run_intro_seen')).toBe('1');
+    expect(localStorage.getItem('syncwatcher_bg_intro_shown')).toBe('1');
+  });
+
+  it('enables launch at login from the first-run intro before dismissing', async () => {
+    localStorage.clear();
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'app.firstRunIntroEnable' }));
+
+    await waitFor(() => {
+      expect(setLaunchAtLoginMock).toHaveBeenCalledWith(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('app.firstRunIntroTitle')).not.toBeInTheDocument();
+    });
+    expect(localStorage.getItem('syncwatcher_first_run_intro_seen')).toBe('1');
+    expect(localStorage.getItem('syncwatcher_bg_intro_shown')).toBe('1');
   });
 
   it('keeps window-close background behavior without cmd+q prompt', async () => {

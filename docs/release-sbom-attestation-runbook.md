@@ -16,6 +16,7 @@ This runbook is for pre-release rehearsal (for example `v1.2.3-rc1`) after enabl
 - `gh`
 - `jq`
 - `cosign` (for attestation verification)
+  - Cosign install guide: https://docs.sigstore.dev/cosign/system_config/installation/
 4. Confirm target tag format:
 - Stable: `vX.Y.Z`
 - Pre-release: `vX.Y.Z-beta.N` or `vX.Y.Z-rcN`
@@ -56,10 +57,16 @@ jq -e '.spdxVersion | startswith("SPDX-")' ".tmp/release-verify/sbom-${TAG}.spdx
 
 ## 4) Attestation verification command set
 
-Use the helper script:
+Use the maintainer helper script to verify every release artifact:
 
 ```bash
 scripts/release/verify-release-attestations.sh vX.Y.Z-rc1
+```
+
+For a single downloaded DMG or tarball, use the end-user/local helper:
+
+```bash
+scripts/release/verify-release-asset.sh vX.Y.Z-rc1 .tmp/release-verify/Sync.Watcher_1.2.3_rc1_aarch64.dmg
 ```
 
 Or run manually for one artifact:
@@ -76,7 +83,7 @@ gh release download "$TAG" --repo "$REPO" --dir .tmp/release-verify
 cosign verify-blob-attestation \
   --bundle ".tmp/release-verify/${BUNDLE}" \
   --type "https://syncwatcher.dev/attestation/release-asset/v1" \
-  --certificate-identity-regexp "^https://github.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/${TAG}$" \
+  --certificate-identity "https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/${TAG}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ".tmp/release-verify/${ARTIFACT}"
 ```
@@ -91,5 +98,5 @@ cosign verify-blob-attestation \
 - confirm release has `.dmg` or `.app.tar.gz` artifacts
 3. Verification failed:
 - check bundle/artifact filename pairing (`attestation-<artifact>.bundle.json`)
-- check identity regexp points to exact workflow/tag
+- check certificate identity points to exact workflow/tag
 - confirm issuer is `https://token.actions.githubusercontent.com`

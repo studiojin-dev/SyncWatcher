@@ -13,6 +13,13 @@
       "autoUnmountConfirmNotification": "[{{taskName}}] No files were copied. Confirmation is required before unmount.",
       "backgroundNotification": "SyncWatcher is running in the background.",
       "backgroundIntroMessage": "SyncWatcher can keep running in the background when you close the window. You can change this in Settings > Behavior.",
+      "firstRunIntroTitle": "Set Up Background Start",
+      "firstRunIntroDescription": "SyncWatcher can keep running after you close the window, and it can also start automatically when you sign in to macOS.",
+      "firstRunIntroBehavior": "In Settings > Behavior, Close Action controls whether closing the window quits the app or keeps it running in the background.",
+      "firstRunIntroAutostart": "Enable Launch at Login if you want SyncWatcher to start automatically after macOS sign-in.",
+      "firstRunIntroSettingsHint": "You can change this later in Settings > Behavior.",
+      "firstRunIntroLater": "Maybe Later",
+      "firstRunIntroEnable": "Enable Launch at Login",
       "loadingView": "Loading view..."
     },
     "nav": {
@@ -189,6 +196,8 @@
       "closeActionDesc": "Choose what happens when closing the app",
       "closeActionQuit": "Quit",
       "closeActionBackground": "Run in Background",
+      "launchAtLogin": "Launch at Login",
+      "launchAtLoginDesc": "Start SyncWatcher automatically after macOS sign-in and keep it in the background.",
       "notifications": "Notifications",
       "deleteConfirmation": "Delete Confirmation",
       "verifyAfterCopy": "Verify After Copy",

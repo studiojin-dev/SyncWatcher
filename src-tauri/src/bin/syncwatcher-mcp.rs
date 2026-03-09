@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use syncwatcher_lib::config_store::{
-    default_config_dir, DeleteResultEnvelope, SettingsEnvelope, StoredSettings,
-    SyncTaskEnvelope, SyncTasksEnvelope, SETTINGS_FILE_NAME,
+    default_config_dir, DeleteResultEnvelope, SettingsEnvelope, StoredSettings, SyncTaskEnvelope,
+    SyncTasksEnvelope, SETTINGS_FILE_NAME,
 };
 use syncwatcher_lib::control_plane::{
     default_socket_path, send_request, ControlPlaneRequest, ControlPlaneResponse,
@@ -252,10 +252,7 @@ async fn relay_request(method: &'static str, params: Value) -> Result<Json<Value
     Ok(Json(result))
 }
 
-async fn relay_request_typed<T>(
-    method: &'static str,
-    params: Value,
-) -> Result<Json<T>, ErrorData>
+async fn relay_request_typed<T>(method: &'static str, params: Value) -> Result<Json<T>, ErrorData>
 where
     T: DeserializeOwned + JsonSchema,
 {

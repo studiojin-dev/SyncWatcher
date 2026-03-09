@@ -1,6 +1,22 @@
 [
   {
-    "id": "ADR-20260306-0010",
+    "id": "ADR-20260309-0011-AUT",
+    "title": "Launch-at-login autostart with hidden startup",
+    "tags": [
+      "lifecycle",
+      "autostart",
+      "macos",
+      "tauri",
+      "settings",
+      "ux"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-09",
+    "tldr": "Use Tauri's autostart plugin on macOS, keep login-item state as the OS-owned source of truth, and start hidden only when both the autostart argument and OS login-item state confirm a real login launch.",
+    "path": "docs/adr/ADR-20260309-0011-AUT-launch-at-login-hidden-startup.md"
+  },
+  {
+    "id": "ADR-20260306-0010-MCP",
     "title": "Enabled-only MCP relay for a running-app control plane",
     "tags": [
       "mcp",
@@ -13,11 +29,11 @@
     "status": "Accepted",
     "date": "2026-03-06",
     "tldr": "Expose a local stdio MCP relay only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.",
-    "path": "doc/adr/ADR-20260306-0010-MCP-enabled-running-app-control-plane.md"
+    "path": "docs/adr/ADR-20260306-0010-MCP-enabled-running-app-control-plane.md"
   },
   {
     "id": "ADR-20260305-0009",
-    "title": "Release SBOM generation and optional cosign attestation",
+    "title": "Release SBOMs, checksum manifests, stable cosign attestation, and separate local verification",
     "tags": [
       "release",
       "security",
@@ -28,8 +44,8 @@
     ],
     "status": "Accepted",
     "date": "2026-03-05",
-    "tldr": "Generate CycloneDX/SPDX SBOMs on tagged releases, attach them as release assets, and optionally produce keyless cosign attestations for shipped binaries.",
-    "path": "doc/adr/ADR-20260305-0009-release-sbom-and-optional-cosign-attestation.md"
+    "tldr": "Generate SBOMs and checksum manifests for every tagged release, require keyless cosign attestations for stable tags before publication, and keep local cosign verification separate from the latest installer.",
+    "path": "docs/adr/ADR-20260305-0009-release-sbom-and-optional-cosign-attestation.md"
   },
   {
     "id": "ADR-20260301-0008",
@@ -45,7 +61,7 @@
     "status": "Accepted",
     "date": "2026-03-01",
     "tldr": "When watch sync copies zero files, replace immediate auto-unmount with notification + deferred in-app confirmation, and unmount only after explicit approval.",
-    "path": "doc/adr/ADR-20260301-0008-watchmode-zero-copy-auto-unmount-deferred-confirm.md"
+    "path": "docs/adr/ADR-20260301-0008-watchmode-zero-copy-auto-unmount-deferred-confirm.md"
   },
   {
     "id": "ADR-20260228-0007",
@@ -62,7 +78,7 @@
     "status": "Accepted",
     "date": "2026-02-28",
     "tldr": "Expand default exclusion templates across major ecosystems, merge missing defaults for existing users once, and raise exclusion-pattern limit from 100 to 300 with runtime deduplication.",
-    "path": "doc/adr/ADR-20260228-0007-exclusion-template-expansion-and-pattern-limit.md"
+    "path": "docs/adr/ADR-20260228-0007-exclusion-template-expansion-and-pattern-limit.md"
   },
   {
     "id": "ADR-20260227-0006",
@@ -78,7 +94,7 @@
     "status": "Accepted",
     "date": "2026-02-27",
     "tldr": "When target mtime is newer, classify as conflict only if content differs; if source and target are hash-identical, treat as no-op.",
-    "path": "doc/adr/ADR-20260227-0006-target-newer-conflict-hash-equivalence-exception.md"
+    "path": "docs/adr/ADR-20260227-0006-target-newer-conflict-hash-equivalence-exception.md"
   },
   {
     "id": "ADR-20260219-0005",
@@ -95,7 +111,7 @@
     "status": "Accepted",
     "date": "2026-02-19",
     "tldr": "When target files are newer than source, skip auto-copy and defer handling to an explicit review session in a separate conflict-review window.",
-    "path": "doc/adr/ADR-20260219-0005-target-newer-conflict-review-window.md"
+    "path": "docs/adr/ADR-20260219-0005-target-newer-conflict-review-window.md"
   },
   {
     "id": "ADR-20260215-0004",
@@ -110,8 +126,8 @@
     ],
     "status": "Accepted",
     "date": "2026-02-15",
-    "tldr": "Runtime watch sync uses a bounded queue (max concurrency 2), coalesces watch events during active sync into one replay, and serializes overlapping runtime config applies.",
-    "path": "doc/adr/ADR-20260215-0004-runtime-watch-sync-queue-and-concurrency.md"
+    "tldr": "Runtime watch sync uses a bounded queue (max parallelism 2), coalesces watch events during active sync into one replay, and serializes overlapping runtime config applies.",
+    "path": "docs/adr/ADR-20260215-0004-runtime-watch-sync-queue-and-concurrency.md"
   },
   {
     "id": "ADR-20260211-0003",
@@ -126,11 +142,11 @@
     "status": "Accepted",
     "date": "2026-02-11",
     "tldr": "Remove automatic target-side deletion, enforce source/target overlap constraints at runtime (including UUID sources), and replace deletion with explicit orphan scan and confirmed manual cleanup.",
-    "path": "doc/adr/ADR-20260211-0003-sync-task-target-conflict-and-orphan-cleanup.md"
+    "path": "docs/adr/ADR-20260211-0003-sync-task-target-conflict-and-orphan-cleanup.md"
   },
   {
     "id": "ADR-20260210-0002",
-    "title": "App lifecycle – background mode and system tray",
+    "title": "App lifecycle (quit vs background)",
     "tags": [
       "lifecycle",
       "tray",
@@ -140,12 +156,12 @@
     ],
     "status": "Accepted",
     "date": "2026-02-10",
-    "tldr": "Keep window-close behavior stable under closeAction, add source-aware close events, and apply Cmd+Q-only confirmation policies.",
-    "path": "doc/adr/ADR-20260210-0002-app-lifecycle-background-tray.md"
+    "tldr": "Keep window-close behavior stable under `closeAction`, add source-aware close events, and apply Cmd+Q-only confirmation policies.",
+    "path": "docs/adr/ADR-20260210-0002-app-lifecycle-background-tray.md"
   },
   {
-    "id": "ADR-20260209-0001-VFS",
-    "title": "Dashboard volume enumeration uses macOS mount table",
+    "id": "ADR-20260209-0001",
+    "title": "Dashboard volume source of truth",
     "tags": [
       "dashboard",
       "storage",
@@ -155,7 +171,7 @@
     ],
     "status": "Accepted",
     "date": "2026-02-09",
-    "tldr": "Replace /Volumes scanning with getmntinfo_r_np mount-table enumeration, keep network mounts capacity-unavailable, and standardize app-wide data-unit formatting.",
-    "path": "doc/adr/ADR-20260209-0001-VFS-mount-table-volume-enumeration.md"
+    "tldr": "Stop scanning `/Volumes`; use `getmntinfo_r_np` as source of truth, and apply a single app-wide capacity unit policy (default binary/IEC).",
+    "path": "docs/adr/ADR-20260209-0001-VFS-mount-table-volume-enumeration.md"
   }
 ]

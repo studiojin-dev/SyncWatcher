@@ -1,14 +1,14 @@
 #[cfg(test)]
 mod integration_tests {
-    use crate::config_store::ConfigStore;
+    use crate::config_store::{launch_at_login_status_or_default, ConfigStore};
     use crate::logging::LogManager;
     use crate::mcp_jobs::McpJobRegistry;
     use crate::watcher::WatcherManager;
     use crate::{
-        cancel_operation_internal, compute_volume_mount_diff, decide_runtime_auto_unmount,
-        dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
+        cancel_operation_internal, compute_volume_mount_diff, decide_autostart_launch,
+        decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
         ensure_non_overlapping_paths, format_bytes_with_unit, get_app_version,
-        handle_volume_watch_event, handle_volume_watch_tick,
+        handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         normalize_uuid_sub_path, parse_uuid_source_path, progress_phase_to_log_category,
         prune_auto_unmount_session_disabled_tasks, remove_runtime_sync_task_state,
@@ -154,6 +154,67 @@ mod integration_tests {
         // Verify log_manager is accessible by checking logs count
         let logs = state.log_manager.get_logs(None);
         assert_eq!(logs.len(), 0);
+    }
+
+    #[test]
+    fn test_has_autostart_arg_detects_flag() {
+        assert!(has_autostart_arg(["syncwatcher", "--autostart"]));
+        assert!(!has_autostart_arg(["syncwatcher", "--verbose"]));
+    }
+
+    #[test]
+    fn test_decide_autostart_launch_without_arg_keeps_normal_launch() {
+        let decision = decide_autostart_launch(false, Ok(true));
+
+        assert!(!decision.argv_present);
+        assert_eq!(decision.autolaunch_enabled, None);
+        assert!(!decision.hidden_start_accepted);
+        assert_eq!(decision.reject_reason, None);
+        assert_eq!(decision.status_error, None);
+    }
+
+    #[test]
+    fn test_decide_autostart_launch_accepts_only_when_enabled() {
+        let decision = decide_autostart_launch(true, Ok(true));
+
+        assert!(decision.argv_present);
+        assert_eq!(decision.autolaunch_enabled, Some(true));
+        assert!(decision.hidden_start_accepted);
+        assert_eq!(decision.reject_reason, None);
+        assert_eq!(decision.status_error, None);
+    }
+
+    #[test]
+    fn test_decide_autostart_launch_rejects_disabled_login_item() {
+        let decision = decide_autostart_launch(true, Ok(false));
+
+        assert!(decision.argv_present);
+        assert_eq!(decision.autolaunch_enabled, Some(false));
+        assert!(!decision.hidden_start_accepted);
+        assert_eq!(decision.reject_reason, Some("launch_at_login_disabled"));
+        assert_eq!(decision.status_error, None);
+    }
+
+    #[test]
+    fn test_decide_autostart_launch_rejects_status_errors() {
+        let decision = decide_autostart_launch(true, Err("failed".to_string()));
+
+        assert!(decision.argv_present);
+        assert_eq!(decision.autolaunch_enabled, None);
+        assert!(!decision.hidden_start_accepted);
+        assert_eq!(
+            decision.reject_reason,
+            Some("launch_at_login_status_unavailable")
+        );
+        assert_eq!(decision.status_error.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn test_launch_at_login_status_or_default_falls_back_to_false() {
+        assert!(launch_at_login_status_or_default(Ok(true)));
+        assert!(!launch_at_login_status_or_default(
+            Err("failed".to_string())
+        ));
     }
 
     #[test]

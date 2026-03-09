@@ -13,6 +13,13 @@
             "autoUnmountConfirmNotification": "[{{taskName}}] No files were copied. Confirmation is required before unmount.",
             "backgroundNotification": "SyncWatcher 正在背景運行。",
             "backgroundIntroMessage": "關閉視窗後，SyncWatcher 仍可在背景運行。可在 設定 > 行為 中變更關閉動作。",
+            "firstRunIntroTitle": "設定背景啟動",
+            "firstRunIntroDescription": "關閉視窗後，SyncWatcher 仍可持續執行；如果需要，也可以在登入 macOS 後自動啟動。",
+            "firstRunIntroBehavior": "在 設定 > 行為 中，關閉動作會決定關閉視窗時是退出應用程式，還是繼續在背景運行。",
+            "firstRunIntroAutostart": "開啟 登入時自動執行 後，SyncWatcher 會在 macOS 登入後自動啟動。",
+            "firstRunIntroSettingsHint": "之後也可以在 設定 > 行為 中變更。",
+            "firstRunIntroLater": "稍後",
+            "firstRunIntroEnable": "開啟登入時自動執行",
             "loadingView": "正在載入視圖..."
         },
         "nav": {
@@ -192,6 +199,8 @@
             "closeActionDesc": "選擇關閉應用程式時的行為",
             "closeActionQuit": "退出應用程式",
             "closeActionBackground": "在背景運行",
+            "launchAtLogin": "登入時自動執行",
+            "launchAtLoginDesc": "在 macOS 登入後自動啟動 SyncWatcher，並讓它在背景持續運行。",
             "notifications": "通知",
             "deleteConfirmation": "刪除「確認」",
             "verifyAfterCopy": "複製後驗證",

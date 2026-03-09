@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [ "${1:-}" = "" ]; then
   echo "Usage: $0 <tag> [repo]"
-  echo "Example: $0 v1.0.0-rc1 studiojin-dev/SyncWatcher"
+  echo "Example: $0 v1.1.0 studiojin-dev/SyncWatcher"
   exit 1
 fi
 
@@ -59,7 +59,7 @@ for artifact in "${artifacts[@]}"; do
   cosign verify-blob-attestation \
     --bundle "$bundle" \
     --type "https://syncwatcher.dev/attestation/release-asset/v1" \
-    --certificate-identity-regexp "^https://github.com/${REPO}/\\.github/workflows/release\\.yml@refs/tags/${TAG}$" \
+    --certificate-identity "https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/${TAG}" \
     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
     "$artifact" >/dev/null
 done

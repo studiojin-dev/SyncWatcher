@@ -16,6 +16,7 @@ import { ToastProvider } from './components/ui/Toast';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import UpdateChecker from './components/features/UpdateChecker';
 import AutoUnmountConfirmModal from './components/ui/AutoUnmountConfirmModal';
+import FirstRunIntroModal from './components/ui/FirstRunIntroModal';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
 import ConflictReviewWindow from './components/features/ConflictReviewWindow';
 // SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
@@ -31,7 +32,8 @@ const SettingsView = lazy(() => import('./views/SettingsView'));
 const HelpView = lazy(() => import('./views/HelpView'));
 const AboutView = lazy(() => import('./views/AboutView'));
 
-const BACKGROUND_INTRO_STORAGE_KEY = 'syncwatcher_bg_intro_shown';
+const LEGACY_BACKGROUND_INTRO_STORAGE_KEY = 'syncwatcher_bg_intro_shown';
+const FIRST_RUN_INTRO_STORAGE_KEY = 'syncwatcher_first_run_intro_seen';
 type CloseIntent = 'window-close' | 'cmd-quit' | 'tray-quit';
 
 function getCurrentWindowLabel(): string {
@@ -49,11 +51,17 @@ function getCurrentWindowLabel(): string {
 function AppContent() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('sync-tasks');
-  const { settings, loaded: settingsLoaded } = useSettings();
+  const {
+    settings,
+    loaded: settingsLoaded,
+    updateSettings,
+    setLaunchAtLogin,
+  } = useSettings();
   const { tasks, loaded: tasksLoaded } = useSyncTasksContext();
   const { loaded: setsLoaded } = useExclusionSetsContext();
   const [initialRuntimeSync, setInitialRuntimeSync] = useState<InitialRuntimeSyncState>('idle');
-  const [showBackgroundIntro, setShowBackgroundIntro] = useState(false);
+  const [showFirstRunIntro, setShowFirstRunIntro] = useState(false);
+  const [isEnablingLaunchAtLogin, setIsEnablingLaunchAtLogin] = useState(false);
   const [pendingAutoUnmountRequests, setPendingAutoUnmountRequests] = useState<RuntimeAutoUnmountRequestEvent[]>([]);
   const [activeAutoUnmountRequest, setActiveAutoUnmountRequest] = useState<RuntimeAutoUnmountRequestEvent | null>(null);
   const isHandlingCloseRef = useRef(false);
@@ -61,7 +69,6 @@ function AppContent() {
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
   const recentCmdQAtRef = useRef(0);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
-  const { updateSettings } = useSettings();
   const setTaskLastLog = useCallback((
     taskId: string,
     message: string,
@@ -91,14 +98,36 @@ function AppContent() {
     void validateLicense();
   }, [settingsLoaded, updateSettings]);
 
-  const dismissBackgroundIntro = useCallback(() => {
-    setShowBackgroundIntro(false);
+  const markFirstRunIntroSeen = useCallback(() => {
     try {
-      localStorage.setItem(BACKGROUND_INTRO_STORAGE_KEY, '1');
+      localStorage.setItem(FIRST_RUN_INTRO_STORAGE_KEY, '1');
+      localStorage.setItem(LEGACY_BACKGROUND_INTRO_STORAGE_KEY, '1');
     } catch (err) {
-      console.error('Failed to persist background intro state:', err);
+      console.error('Failed to persist first-run intro state:', err);
     }
   }, []);
+
+  const dismissFirstRunIntro = useCallback(() => {
+    setShowFirstRunIntro(false);
+    markFirstRunIntroSeen();
+  }, [markFirstRunIntroSeen]);
+
+  const enableLaunchAtLoginFromIntro = useCallback(async () => {
+    if (isEnablingLaunchAtLogin) {
+      return;
+    }
+
+    setIsEnablingLaunchAtLogin(true);
+    const updated = await setLaunchAtLogin(true);
+    setIsEnablingLaunchAtLogin(false);
+
+    if (!updated) {
+      return;
+    }
+
+    setShowFirstRunIntro(false);
+    markFirstRunIntroSeen();
+  }, [isEnablingLaunchAtLogin, markFirstRunIntroSeen, setLaunchAtLogin]);
 
   const runExclusiveCloseAction = useCallback(async (action: () => Promise<void>) => {
     if (isHandlingCloseRef.current) {
@@ -299,12 +328,13 @@ function AppContent() {
     }
 
     try {
-      const alreadyShown = localStorage.getItem(BACKGROUND_INTRO_STORAGE_KEY);
-      if (!alreadyShown) {
-        setShowBackgroundIntro(true);
+      const alreadyShown = localStorage.getItem(FIRST_RUN_INTRO_STORAGE_KEY);
+      const legacyShown = localStorage.getItem(LEGACY_BACKGROUND_INTRO_STORAGE_KEY);
+      if (!alreadyShown && !legacyShown) {
+        setShowFirstRunIntro(true);
       }
     } catch (err) {
-      console.error('Failed to read background intro state:', err);
+      console.error('Failed to read first-run intro state:', err);
     }
   }, [settingsLoaded]);
 
@@ -560,19 +590,6 @@ function AppContent() {
       <BackendRuntimeBridge onInitialRuntimeSyncChange={setInitialRuntimeSync} />
       {canRenderAppShell ? (
         <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
-          {showBackgroundIntro ? (
-            <div className="mb-4 border-3 border-[var(--border-main)] bg-[var(--bg-secondary)] p-4 shadow-[4px_4px_0_0_var(--shadow-color)]">
-              <p className="mb-3 font-mono text-sm text-[var(--text-primary)]">
-                {t('app.backgroundIntroMessage')}
-              </p>
-              <button
-                onClick={dismissBackgroundIntro}
-                className="border-2 border-[var(--border-main)] px-3 py-1 text-xs font-bold uppercase hover:bg-[var(--bg-tertiary)]"
-              >
-                {t('common.ok')}
-              </button>
-            </div>
-          ) : null}
           <Suspense
             fallback={(
               <div className="neo-box p-6 bg-[var(--bg-secondary)]">
@@ -596,6 +613,14 @@ function AppContent() {
         bytesCopied={activeAutoUnmountRequest?.bytesCopied || 0}
         onConfirm={confirmAutoUnmount}
         onCancel={cancelAutoUnmount}
+      />
+      <FirstRunIntroModal
+        opened={showFirstRunIntro}
+        busy={isEnablingLaunchAtLogin}
+        onDismiss={dismissFirstRunIntro}
+        onEnable={() => {
+          void enableLaunchAtLoginFromIntro();
+        }}
       />
       <StartupProgressOverlay
         settingsLoaded={settingsLoaded}

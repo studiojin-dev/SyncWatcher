@@ -13,6 +13,13 @@
       "autoUnmountConfirmNotification": "[{{taskName}}] 복사된 파일이 없어 unmount 전 확인이 필요합니다.",
       "backgroundNotification": "SyncWatcher가 백그라운드에서 실행 중입니다.",
       "backgroundIntroMessage": "SyncWatcher는 창을 닫아도 백그라운드에서 계속 실행될 수 있습니다. 설정 > 동작에서 종료 방식을 변경할 수 있습니다.",
+      "firstRunIntroTitle": "백그라운드 시작 설정",
+      "firstRunIntroDescription": "SyncWatcher는 창을 닫아도 계속 실행될 수 있고, 원하면 macOS 로그인 직후 자동으로 시작되게 할 수 있습니다.",
+      "firstRunIntroBehavior": "설정 > 동작의 종료 동작에서 창을 닫을 때 완전 종료할지, 백그라운드에서 계속 실행할지 정할 수 있습니다.",
+      "firstRunIntroAutostart": "로그인 시 자동 실행을 켜면 macOS 로그인 후 SyncWatcher가 자동으로 시작됩니다.",
+      "firstRunIntroSettingsHint": "이 설정은 나중에 설정 > 동작에서 다시 바꿀 수 있습니다.",
+      "firstRunIntroLater": "나중에",
+      "firstRunIntroEnable": "로그인 시 자동 실행 켜기",
       "loadingView": "화면을 불러오는 중..."
     },
     "nav": {
@@ -192,6 +199,8 @@
       "closeActionDesc": "앱을 닫을 때의 동작을 선택합니다",
       "closeActionQuit": "완전 종료",
       "closeActionBackground": "백그라운드 실행",
+      "launchAtLogin": "로그인 시 자동 실행",
+      "launchAtLoginDesc": "macOS 로그인 직후 SyncWatcher를 자동으로 시작하고 백그라운드에서 유지합니다.",
       "notifications": "알림",
       "deleteConfirmation": "삭제 확인",
       "verifyAfterCopy": "복사 후 검증",

@@ -13,6 +13,7 @@ export interface Settings {
     maxLogLines: number;
     closeAction: 'quit' | 'background';
     isRegistered: boolean;
+    launchAtLogin: boolean;
     mcpEnabled: boolean;
 }
 
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
     maxLogLines: 10000,
     closeAction: 'quit',
     isRegistered: false,
+    launchAtLogin: false,
     mcpEnabled: false,
 };
 
@@ -34,6 +36,7 @@ interface SettingsContextType {
     settings: Settings;
     loaded: boolean;
     updateSettings: (updates: Partial<Settings>) => void;
+    setLaunchAtLogin: (enabled: boolean) => Promise<boolean>;
     resetSettings: () => void;
 }
 
@@ -126,7 +129,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         settingsRef.current = nextSettings;
         setSettings(nextSettings);
 
-        void invoke('update_settings', { updates })
+        const {
+            isRegistered: _ignoredIsRegistered,
+            launchAtLogin: _ignoredLaunchAtLogin,
+            ...persistedUpdates
+        } = updates;
+
+        if (Object.keys(persistedUpdates).length === 0) {
+            return;
+        }
+
+        void invoke('update_settings', { updates: persistedUpdates })
             .then((response) => {
                 const persistedSettings = readConfigRecord<Settings>(response, ['settings']);
                 if (persistedSettings) {
@@ -140,6 +153,33 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 settingsRef.current = previousSettings;
                 setSettings(previousSettings);
             });
+    }, []);
+
+    const setLaunchAtLogin = useCallback(async (enabled: boolean) => {
+        const previousSettings = settingsRef.current;
+        const nextSettings = normalizeSettings({
+            ...previousSettings,
+            launchAtLogin: enabled,
+        });
+
+        settingsRef.current = nextSettings;
+        setSettings(nextSettings);
+
+        try {
+            const response = await invoke<unknown>('set_launch_at_login', { enabled });
+            const persistedSettings = readConfigRecord<Settings>(response, ['settings']);
+            if (persistedSettings) {
+                const normalized = normalizeSettings(persistedSettings);
+                settingsRef.current = normalized;
+                setSettings(normalized);
+            }
+            return true;
+        } catch (err) {
+            console.error('Failed to update launch-at-login setting:', err);
+            settingsRef.current = previousSettings;
+            setSettings(previousSettings);
+            return false;
+        }
     }, []);
 
     const resetSettings = useCallback(() => {
@@ -185,7 +225,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }, [settings.theme, settings.language, loaded, applyTheme]);
 
     return (
-        <SettingsContext.Provider value={{ settings, loaded, updateSettings, resetSettings }}>
+        <SettingsContext.Provider value={{ settings, loaded, updateSettings, setLaunchAtLogin, resetSettings }}>
             {children}
         </SettingsContext.Provider>
     );

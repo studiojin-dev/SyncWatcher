@@ -13,6 +13,13 @@
       "autoUnmountConfirmNotification": "[{{taskName}}] No files were copied. Confirmation is required before unmount.",
       "backgroundNotification": "SyncWatcher se está ejecutando en segundo plano.",
       "backgroundIntroMessage": "SyncWatcher puede seguir ejecutándose en segundo plano al cerrar la ventana. Puedes cambiarlo en Configuración > Comportamiento.",
+      "firstRunIntroTitle": "Configurar inicio en segundo plano",
+      "firstRunIntroDescription": "SyncWatcher puede seguir ejecutándose al cerrar la ventana y también puede iniciarse automáticamente cuando entras en macOS.",
+      "firstRunIntroBehavior": "En Configuración > Comportamiento, Acción al cerrar define si cerrar la ventana sale de la app o la deja funcionando en segundo plano.",
+      "firstRunIntroAutostart": "Activa Iniciar al iniciar sesión si quieres que SyncWatcher se abra automáticamente después de iniciar sesión en macOS.",
+      "firstRunIntroSettingsHint": "Puedes cambiar esto más tarde en Configuración > Comportamiento.",
+      "firstRunIntroLater": "Más tarde",
+      "firstRunIntroEnable": "Activar inicio al iniciar sesión",
       "loadingView": "Cargando vista..."
     },
     "nav": {
@@ -192,6 +199,8 @@
       "closeActionDesc": "Elige qué pasa al cerrar la aplicación",
       "closeActionQuit": "Salir",
       "closeActionBackground": "Ejecutar en segundo plano",
+      "launchAtLogin": "Iniciar al iniciar sesión",
+      "launchAtLoginDesc": "Inicia SyncWatcher automáticamente después de entrar en macOS y mantenlo en segundo plano.",
       "notifications": "Notificaciones",
       "deleteConfirmation": "Confirmación de Eliminación",
       "verifyAfterCopy": "Verificar después de copiar",

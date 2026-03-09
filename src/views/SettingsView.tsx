@@ -20,7 +20,7 @@ const languages = [
  */
 function SettingsView() {
     const { t } = useTranslation();
-    const { settings, updateSettings, resetSettings, loaded } = useSettings();
+    const { settings, updateSettings, setLaunchAtLogin, resetSettings, loaded } = useSettings();
     const themes = [
         { value: 'system', label: t('settings.themeSystem') },
         { value: 'light', label: t('settings.themeLight') },
@@ -222,6 +222,23 @@ function SettingsView() {
                         {t('settings.sectionBehavior')}
                     </h2>
                     <div className="neo-box p-6 space-y-4">
+                        <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
+                            <div className="pr-4">
+                                <div className="font-bold">{t('settings.launchAtLogin')}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">
+                                    {t('settings.launchAtLoginDesc')}
+                                </div>
+                            </div>
+                            <Switch
+                                size="md"
+                                checked={settings.launchAtLogin}
+                                onChange={(e) => {
+                                    void setLaunchAtLogin(e.currentTarget.checked);
+                                }}
+                                styles={{ track: { border: '2px solid black', cursor: 'pointer' }, thumb: { border: '2px solid black' } }}
+                            />
+                        </div>
+
                         <div className="flex justify-between items-center py-2 border-b border-dashed border-[var(--border-main)] last:border-0">
                             <div>
                                 <div className="font-bold">{t('settings.closeAction')}</div>
