@@ -70,3 +70,4 @@ temp/
 out/
 build/
 .pnpm-store/
+.codex/
