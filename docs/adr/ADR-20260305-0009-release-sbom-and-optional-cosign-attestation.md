@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-03-05
 - Tags: release, security, sbom, attestation, ci, supply-chain
-- TL;DR: Generate SBOMs and checksum manifests for every tagged release, require keyless cosign attestations for stable tags before publication, and keep local cosign verification separate from the latest installer.
+- TL;DR: Generate SBOMs and checksum manifests for every tagged release, force keyless cosign attestations for stable tags, keep prerelease attestation opt-in via a repo variable, and keep local cosign verification separate from the latest installer.
 
 ## Context
 
@@ -20,9 +20,9 @@
    - `sbom-<tag>.spdx.json` (SPDX JSON)
 3. Upload SBOM files to the GitHub Release as assets.
 4. Generate and upload `checksums-<tag>.txt` for shipped release binaries (`.dmg`, `.app.tar.gz`).
-5. Require keyless cosign attestation for stable release tags and keep prerelease tags optional:
-   - Stable tags fail the release job unless `ENABLE_COSIGN_ATTESTATION=true`
-   - Beta/RC tags may still skip attestation during rollout or emergency prerelease work
+5. Force keyless cosign attestation for stable release tags and keep prerelease tags opt-in:
+   - Stable tags automatically force `ENABLE_COSIGN_ATTESTATION=true` inside the workflow
+   - Beta/RC tags read repo variable `ENABLE_COSIGN_ATTESTATION` (`false` by default) and may still skip attestation during rollout or emergency prerelease work
    - Uses GitHub OIDC (`id-token: write`) and `cosign attest-blob --bundle`
    - Upload attestation bundle JSON files to the same release
 6. Block final release publishing when the SBOM/checksum/attestation stage fails by making `publish_release` depend on `sbom_and_attest`.
@@ -36,17 +36,17 @@
 ## Consequences
 
 - Every tagged release now carries standardized SBOM metadata plus a deterministic checksum manifest for downstream verification.
-- Stable release publishing becomes stricter: missing attestation now blocks publication instead of being silently skipped.
+- Stable release publishing becomes stricter and less error-prone: stable tags always run attestation instead of relying on a manually toggled repo variable.
 - User-facing verification guidance becomes clearer: checksum validation may happen inside lightweight install flows, while cosign verification is a separate explicit step for downloaded artifacts.
-- Prerelease tags preserve some rollout flexibility because attestation remains optional outside the stable channel.
+- Prerelease tags preserve rollout flexibility because attestation remains opt-in outside the stable channel.
 - Current SBOM scope is repository source-level, not per-binary image-level; deeper artifact-level SBOM can be added later.
 
 ## Alternatives Considered
 
 1. Generate only one SBOM format
    - Rejected: some consumers require CycloneDX while others require SPDX.
-2. Keep attestation optional for stable tags
-   - Rejected: stable releases need a fail-closed provenance policy rather than a best-effort one.
+2. Keep stable attestation behind a manual repo variable toggle
+   - Rejected: stable releases need a fail-closed provenance policy and should not depend on operator configuration drift.
 3. Use deprecated wrapper actions for SBOM end-to-end automation
    - Rejected: direct Syft CLI execution is clearer and easier to maintain.
 4. Publish release first, then run SBOM/attestation asynchronously

@@ -109,15 +109,19 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG_NAME: ${{ github.ref_name }}
       RELEASE_CHANNEL: ${{ needs.tag_gate.outputs.release_channel }}
-      ENABLE_COSIGN_ATTESTATION: ${{ vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
+      REQUESTED_COSIGN_ATTESTATION: ${{ vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
+      ENABLE_COSIGN_ATTESTATION: ${{ needs.tag_gate.outputs.release_channel == 'stable' && 'true' || vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Enforce stable release attestation policy
+      - name: Resolve release attestation policy
         run: |
+          echo "release_channel=${RELEASE_CHANNEL}"
+          echo "requested_attestation=${REQUESTED_COSIGN_ATTESTATION}"
+          echo "effective_attestation=${ENABLE_COSIGN_ATTESTATION}"
           if [[ "$RELEASE_CHANNEL" == "stable" && "$ENABLE_COSIGN_ATTESTATION" != "true" ]]; then
-            echo "Stable releases require ENABLE_COSIGN_ATTESTATION=true."
+            echo "Internal error: stable releases must force ENABLE_COSIGN_ATTESTATION=true."
             exit 1
           fi
 

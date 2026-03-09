@@ -1,6 +1,6 @@
 # Release SBOM + Attestation Rehearsal Runbook
 
-This runbook is for pre-release rehearsal (for example `v1.2.3-rc1`) after enabling SBOM generation and optional cosign attestation in `.github/workflows/release.yml`.
+This runbook is for release rehearsal (for example `v1.2.3-rc1`) after enabling SBOM generation and stable-required / prerelease-opt-in cosign attestation in `.github/workflows/release.yml`.
 
 ## 1) Pre-flight checklist
 
@@ -9,8 +9,9 @@ This runbook is for pre-release rehearsal (for example `v1.2.3-rc1`) after enabl
 - SBOM upload files:
   - `sbom-<tag>.cdx.json`
   - `sbom-<tag>.spdx.json`
-- Optional attestation toggle:
-  - repo variable `ENABLE_COSIGN_ATTESTATION` (`false` by default)
+- Attestation policy:
+  - stable tags force attestation automatically
+  - pre-release tags may opt in with repo variable `ENABLE_COSIGN_ATTESTATION` (`false` by default)
 2. Confirm repository Actions permissions allow OIDC token for workflows (needed when attestation is enabled).
 3. Confirm local verifier tools are installed:
 - `gh`
@@ -40,7 +41,7 @@ git push origin vX.Y.Z-rc1
 - app bundles (`.dmg` and/or `.app.tar.gz`)
 - `sbom-vX.Y.Z-rc1.cdx.json`
 - `sbom-vX.Y.Z-rc1.spdx.json`
-- optional `attestation-*.bundle.json` (only when `ENABLE_COSIGN_ATTESTATION=true`)
+- `attestation-*.bundle.json` (required for stable tags, optional for prerelease tags when `ENABLE_COSIGN_ATTESTATION=true`)
 
 ## 3) SBOM integrity quick checks
 
@@ -94,7 +95,8 @@ cosign verify-blob-attestation \
 - check Syft install and output file names
 - check tag/env interpolation (`TAG_NAME`)
 2. Attestation upload missing:
-- confirm `ENABLE_COSIGN_ATTESTATION=true`
+- for stable tags, confirm the workflow reached `Install Cosign` and `Generate keyless cosign attestations`; no repo variable is required
+- for prerelease tags, confirm `ENABLE_COSIGN_ATTESTATION=true`
 - confirm release has `.dmg` or `.app.tar.gz` artifacts
 3. Verification failed:
 - check bundle/artifact filename pairing (`attestation-<artifact>.bundle.json`)

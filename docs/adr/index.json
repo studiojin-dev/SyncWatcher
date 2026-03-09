@@ -44,7 +44,7 @@
     ],
     "status": "Accepted",
     "date": "2026-03-05",
-    "tldr": "Generate SBOMs and checksum manifests for every tagged release, require keyless cosign attestations for stable tags before publication, and keep local cosign verification separate from the latest installer.",
+    "tldr": "Generate SBOMs and checksum manifests for every tagged release, force keyless cosign attestations for stable tags, keep prerelease attestation opt-in via a repo variable, and keep local cosign verification separate from the latest installer.",
     "path": "docs/adr/ADR-20260305-0009-release-sbom-and-optional-cosign-attestation.md"
   },
   {

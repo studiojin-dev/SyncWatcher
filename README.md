@@ -126,7 +126,7 @@ scripts/release/verify-release-asset.sh v1.1.0 ~/Downloads/Sync.Watcher_1.1.0_aa
 
 Only after the helper succeeds should you open the DMG or clear quarantine metadata for local testing.
 
-Stable tags are published only when an attestation bundle is present for the shipped artifacts. The latest installer remains checksum-only; local cryptographic verification is provided by `scripts/release/verify-release-asset.sh`.
+Stable tags always publish with attestation bundles for the shipped artifacts. Prerelease tags may omit attestation unless `ENABLE_COSIGN_ATTESTATION=true`. The latest installer remains checksum-only; local cryptographic verification is provided by `scripts/release/verify-release-asset.sh`.
 
 ### macOS 설치 안내 (한국어)
 
