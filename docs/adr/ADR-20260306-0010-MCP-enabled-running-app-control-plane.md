@@ -1,8 +1,8 @@
 # ADR-20260306-0010-MCP: Enabled-only MCP relay for a running-app control plane
-Status: Accepted
-Date: 2026-03-06
-Tags: mcp, control-plane, config-store, runtime, tauri, macos
-TL;DR: Expose a local stdio MCP relay only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.
+- Status: Accepted
+- Date: 2026-03-06
+- Tags: mcp, control-plane, config-store, runtime, tauri, macos
+- TL;DR: Expose a local stdio MCP relay only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.
 
 ## Context
 
