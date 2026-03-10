@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # SyncWatcher macOS latest installer (GitHub Releases, no browser download)
-# - Supports Apple Silicon (aarch64) and Intel (x86_64) Mac
+# - Supports Apple Silicon (aarch64) and Intel (x64) Mac
 
 REPO="studiojin-dev/SyncWatcher"
 APP_NAME="Sync Watcher.app"
@@ -10,8 +10,10 @@ APP_NAME="Sync Watcher.app"
 ARCH="$(uname -m)"
 if [ "$ARCH" = "arm64" ]; then
   SUFFIX="aarch64"
+  NAME_FILTER='Sync\.Watcher_.*aarch64.*\.dmg'
 elif [ "$ARCH" = "x86_64" ]; then
-  SUFFIX="x86_64"
+  SUFFIX="x64"
+  NAME_FILTER='Sync\.Watcher_.*x64.*\.dmg'
 else
   echo "Unsupported architecture: ${ARCH}"
   exit 1
@@ -30,13 +32,28 @@ if [ -z "$tag" ]; then
   exit 1
 fi
 
-version="${tag#v}"
-dmg_name="Sync.Watcher_${version}_${SUFFIX}.dmg"
 checksums_name="checksums-${tag}.txt"
-download_url="https://github.com/${REPO}/releases/download/${tag}/${dmg_name}"
 checksums_url="https://github.com/${REPO}/releases/download/${tag}/${checksums_name}"
-dmg_path="${tmp_dir}/${dmg_name}"
 checksums_path="${tmp_dir}/${checksums_name}"
+
+dmg_name="$(printf '%s' "$release_json" | \
+  grep -oE '\"name\"[[:space:]]*:[[:space:]]*\"[^\"]+\.dmg\"' | \
+  sed -E 's/.*\"name\"[[:space:]]*:[[:space:]]*\"([^\"]+\.dmg)\"/\1/' | \
+  grep -E "$NAME_FILTER" | \
+  head -n 1 || true)"
+
+if [ -z "$dmg_name" ]; then
+  echo "릴리스에 적합한 macOS DMG가 없습니다: ${ARCH}"
+  echo "검출된 DMG 목록:"
+  printf '%s\n' \
+    "$(printf '%s' "$release_json" | \
+      grep -oE '\"name\"[[:space:]]*:[[:space:]]*\"[^\"]+\.dmg\"' | \
+      sed -E 's/.*\"name\"[[:space:]]*:[[:space:]]*\"([^\"]+\.dmg)\"/\1/' | sort)"
+  exit 1
+fi
+
+download_url="https://github.com/${REPO}/releases/download/${tag}/${dmg_name}"
+dmg_path="${tmp_dir}/${dmg_name}"
 
 echo "아키텍처: ${SUFFIX}"
 echo "다운로드: ${dmg_name}"

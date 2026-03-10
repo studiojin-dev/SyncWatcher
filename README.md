@@ -1,8 +1,8 @@
 # SyncWatcher (Source-Available)
 
 macOS-native file synchronization utility with automatic SD card/USB detection and real-time backup capabilities.
-
-**v1.0 is in active development.**
+[![GitHub release](https://img.shields.io/github/v/release/studiojin-dev/SyncWatcher)](https://github.com/studiojin-dev/SyncWatcher/releases)
+[![GitHub downloads](https://img.shields.io/github/downloads/studiojin-dev/SyncWatcher/latest/total)](https://github.com/studiojin-dev/SyncWatcher/releases/latest)
 
 ## Overview
 
@@ -102,6 +102,10 @@ Use this one-liner to install the latest build directly from GitHub Releases:
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/studiojin-dev/SyncWatcher/main/scripts/install-macos-latest.sh)"
 ```
 
+This is the currently recommended installation method while the app is usable and before paid Apple Developer Program membership is enabled, because signed/notarized installer distribution is not yet available.
+
+If you still see `curl: (56)` or `404` during download, it usually means the downloaded script is not matching the latest release asset names (common when release asset naming changed across versions). Re-run the same command again; the latest script always resolves the `.dmg` filename from release metadata before download.
+
 The script will:
 
 1. Read the latest release tag from GitHub
@@ -129,6 +133,10 @@ Only after the helper succeeds should you open the DMG or clear quarantine metad
 Stable tags always publish with attestation bundles for the shipped artifacts. Prerelease tags may omit attestation unless `ENABLE_COSIGN_ATTESTATION=true`. The latest installer remains checksum-only; local cryptographic verification is provided by `scripts/release/verify-release-asset.sh`.
 
 ### macOS 설치 안내 (한국어)
+
+현재는 앱 사용이 가능하지만 Apple 유료 개발자 계정(Apple Developer Program) 가입이 아직 활성화되지 않아 코드사인/공증 배포가 완료되지 않았습니다. 따라서 설치는 우선 **macOS Latest Installer (curl script)** 를 이용하는 것을 권장합니다.
+
+`curl: (56)` 또는 `404`가 계속 발생한다면, 예전 버전의 스크립트가 캐시되었거나 릴리스 에셋의 파일명이 바뀌는 경우일 수 있습니다. 현재 스크립트는 GitHub 최신 릴리스 메타데이터에서 `.dmg` 파일명을 먼저 찾아 자동으로 내려받도록 동작합니다. 동일한 설치 명령을 한 번 더 실행해 최신 스크립트를 다시 불러오세요.
 
 1. 먼저 Cosign을 설치합니다.
    - 공식 안내: https://docs.sigstore.dev/cosign/system_config/installation/
