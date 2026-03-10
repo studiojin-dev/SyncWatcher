@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260307-0011",
+    "title": "Exclusion defaults consolidation into a program set",
+    "tags": [
+      "sync-task",
+      "exclusion",
+      "migration",
+      "config-store",
+      "ux",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-07",
+    "tldr": "Replace per-ecosystem built-in exclusion defaults with one `program` built-in set, automatically migrate legacy built-in IDs in stored exclusion sets and tasks, and remove `.gitignore` from the `git` built-in set.",
+    "path": "doc/adr/ADR-20260307-0011-PRG-exclusion-defaults-consolidation-into-program.md"
+  },
+  {
     "id": "ADR-20260306-0010",
     "title": "Enabled-only MCP relay for a running-app control plane",
     "tags": [

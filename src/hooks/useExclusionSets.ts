@@ -9,21 +9,42 @@ export interface ExclusionSet {
     patterns: string[];
 }
 
-const DEFAULT_SETS: ExclusionSet[] = [
-    {
-        id: 'system-defaults',
-        name: 'System Junk',
-        patterns: [
-            '.DS_Store',
-            'Thumbs.db',
-            '.Trash',
-            'Desktop.ini',
-            '.fseventsd',
-            '.Spotlight-V100',
-            '.Trashes',
-            '.TemporaryItems'
-        ]
-    },
+function dedupePatterns(patterns: readonly string[]): string[] {
+    const seen = new Set<string>();
+    const deduped: string[] = [];
+
+    for (const pattern of patterns) {
+        if (!seen.has(pattern)) {
+            seen.add(pattern);
+            deduped.push(pattern);
+        }
+    }
+
+    return deduped;
+}
+
+const SYSTEM_DEFAULT_SET: ExclusionSet = {
+    id: 'system-defaults',
+    name: 'System Junk',
+    patterns: [
+        '.DS_Store',
+        'Thumbs.db',
+        '.Trash',
+        'Desktop.ini',
+        '.fseventsd',
+        '.Spotlight-V100',
+        '.Trashes',
+        '.TemporaryItems'
+    ]
+};
+
+const GIT_DEFAULT_SET: ExclusionSet = {
+    id: 'git',
+    name: 'Git',
+    patterns: ['.git']
+};
+
+const LEGACY_PROGRAM_DEFAULT_SETS: ExclusionSet[] = [
     {
         id: 'nodejs',
         name: 'Node.js',
@@ -93,11 +114,6 @@ const DEFAULT_SETS: ExclusionSet[] = [
             'instance',
             '.scrapy'
         ]
-    },
-    {
-        id: 'git',
-        name: 'Git',
-        patterns: ['.git', '.gitignore']
     },
     {
         id: 'rust',
@@ -171,8 +187,16 @@ const DEFAULT_SETS: ExclusionSet[] = [
     }
 ];
 
+const PROGRAM_DEFAULT_SET: ExclusionSet = {
+    id: 'program',
+    name: 'Program',
+    patterns: dedupePatterns(LEGACY_PROGRAM_DEFAULT_SETS.flatMap((set) => set.patterns))
+};
+
+const DEFAULT_SETS: ExclusionSet[] = [SYSTEM_DEFAULT_SET, GIT_DEFAULT_SET, PROGRAM_DEFAULT_SET];
+
 export const EXCLUSION_SETS_DEFAULTS_VERSION_KEY = 'exclusion_sets_defaults_version';
-export const EXCLUSION_SETS_DEFAULTS_VERSION = 2;
+export const EXCLUSION_SETS_DEFAULTS_VERSION = 3;
 
 export function mergeMissingDefaultSets(
     sets: ExclusionSet[],
