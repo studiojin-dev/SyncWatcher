@@ -9,16 +9,31 @@ export interface FileDiff {
   checksum_target: string | null;
 }
 
+export type TargetPreflightKind =
+  | 'ready'
+  | 'willCreateDirectory'
+  | 'createdDirectory';
+
+export interface TargetPreflightInfo {
+  kind: TargetPreflightKind;
+  path: string;
+}
+
 export interface DryRunResult {
   diffs: FileDiff[];
   total_files: number;
   files_to_copy: number;
   files_modified: number;
   bytes_to_copy: number;
+  targetPreflight: TargetPreflightInfo | null;
 }
 
 export type ConflictSessionOrigin = 'manual' | 'watch';
-export type ConflictItemStatus = 'pending' | 'forceCopied' | 'safeCopied' | 'skipped';
+export type ConflictItemStatus =
+  | 'pending'
+  | 'forceCopied'
+  | 'safeCopied'
+  | 'skipped';
 export type ConflictResolutionAction = 'forceCopy' | 'renameThenCopy' | 'skip';
 
 export interface ConflictFileInfo {
@@ -105,4 +120,5 @@ export interface SyncExecutionResult {
   conflictSessionId: string | null;
   conflictCount: number;
   hasPendingConflicts: boolean;
+  targetPreflight: TargetPreflightInfo | null;
 }

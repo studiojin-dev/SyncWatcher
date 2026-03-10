@@ -1,4 +1,5 @@
 # ADR-20260310-0012-PRG: Exclusion defaults consolidation into a program set
+
 Status: Accepted
 Date: 2026-03-10
 Tags: sync-task, exclusion, migration, config-store, ux, macos, tauri
@@ -11,7 +12,7 @@ TL;DR: Replace per-ecosystem built-in exclusion defaults with one `program` buil
 - The separate built-in IDs make the settings UI noisier and create more migration surface for stored tasks that reference those IDs.
 - The existing `git` built-in set excludes both `.git` and `.gitignore`, but `.gitignore` is a project-authored file that users may want to keep in sync.
 - pnpm's official store directory spelling is `.pnpm-store`; we should keep that spelling in defaults and not introduce an underscore alias as another built-in pattern.
-- ADR-20260228 required keeping the older built-in set IDs for compatibility. This consolidation changes that rule, so an ADR update is required.
+- ADR-20260228-0007 required keeping the older built-in set IDs for compatibility. This consolidation changes that rule, so an ADR update is required.
 
 ## Decision
 
@@ -39,7 +40,7 @@ TL;DR: Replace per-ecosystem built-in exclusion defaults with one `program` buil
    - Keep custom exclusion-set IDs untouched.
    - Persist rewritten config only when the normalized content changed.
 6. Treat `system-defaults`, `git`, and `program` as the canonical built-in order in stored exclusion-set data and UI reloads.
-7. This ADR supersedes the "keep existing built-in set IDs (`system-defaults`, `nodejs`, `python`, `git`, `rust`) for compatibility" part of ADR-20260228. The rest of ADR-20260228 remains in force.
+7. This ADR supersedes the "keep existing built-in set IDs (`system-defaults`, `nodejs`, `python`, `git`, `rust`) for compatibility" part of ADR-20260228-0007. The rest of ADR-20260228-0007 remains in force.
 
 ## Consequences
 

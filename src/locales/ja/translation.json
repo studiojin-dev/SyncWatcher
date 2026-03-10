@@ -93,6 +93,8 @@
       "subPath": "サブパス",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "ボリュームがマウントされていません",
+      "targetDirectoryWillBeCreated": "同期時に作成される対象ディレクトリがまだ存在しません: {{path}}",
+      "targetDirectoryCreated": "同期前に対象ディレクトリを作成しました: {{path}}",
       "uuidCopied": "UUIDをクリップボードにコピーしました",
       "errors": {
         "sourceEqualsTarget": "ソースとターゲットのパスは重複できません。",
@@ -117,6 +119,7 @@
       "newFile": "新規",
       "modifiedFile": "更新",
       "noChanges": "変更はありません。",
+      "targetWillBeCreatedBanner": "対象ディレクトリがまだ存在しないため、Dry Run では空としてプレビューしています。そのため項目が新規として表示され、Target Size は同期が {{path}} を作成するまで空欄になります。",
       "colPath": "パス",
       "colType": "種類",
       "colSourceSize": "ソースサイズ",

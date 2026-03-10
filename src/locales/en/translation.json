@@ -90,6 +90,8 @@
       "subPath": "Sub Path",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "Volume not mounted",
+      "targetDirectoryWillBeCreated": "Target directory does not exist yet and will be created during sync: {{path}}",
+      "targetDirectoryCreated": "Created the target directory before sync: {{path}}",
       "uuidCopied": "UUID copied to clipboard",
       "errors": {
         "sourceEqualsTarget": "Source and target cannot overlap.",
@@ -114,6 +116,7 @@
       "newFile": "New",
       "modifiedFile": "Modified",
       "noChanges": "No changes detected.",
+      "targetWillBeCreatedBanner": "Target directory doesn't exist yet. Dry Run is previewing it as empty, so items can appear as New and Target Size stays blank until sync creates {{path}}.",
       "colPath": "Path",
       "colType": "Type",
       "colSourceSize": "Source Size",

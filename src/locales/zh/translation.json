@@ -93,6 +93,8 @@
       "subPath": "子路径",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "卷未挂载",
+      "targetDirectoryWillBeCreated": "目标目录尚不存在，将在同步时创建：{{path}}",
+      "targetDirectoryCreated": "已先创建目标目录再执行同步：{{path}}",
       "uuidCopied": "UUID 已复制到剪贴板",
       "errors": {
         "sourceEqualsTarget": "源路径与目标路径不能重叠。",
@@ -117,6 +119,7 @@
       "newFile": "新增",
       "modifiedFile": "已修改",
       "noChanges": "未检测到变更。",
+      "targetWillBeCreatedBanner": "目标目录尚不存在，因此 Dry Run 会将其视为空目录进行预览。这样项目会显示为 New，Target Size 会保持空白，直到同步创建 {{path}}。",
       "colPath": "路径",
       "colType": "类型",
       "colSourceSize": "源文件大小",

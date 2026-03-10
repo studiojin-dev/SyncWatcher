@@ -29,7 +29,10 @@ use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use sync_engine::{
-    types::{DeleteOrphanResult, OrphanFile, SyncResult, TargetNewerConflictCandidate},
+    types::{
+        DeleteOrphanResult, OrphanFile, SyncResult, TargetNewerConflictCandidate,
+        TargetPreflightInfo, TargetPreflightKind,
+    },
     DryRunResult, SyncEngine, SyncOptions,
 };
 use system_integration::DiskMonitor;
@@ -520,6 +523,7 @@ struct SyncExecutionResult {
     conflict_session_id: Option<String>,
     conflict_count: usize,
     has_pending_conflicts: bool,
+    target_preflight: Option<TargetPreflightInfo>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1350,6 +1354,112 @@ fn ensure_non_overlapping_paths(source: &Path, target: &Path) -> Result<(), Stri
     Ok(())
 }
 
+fn mounted_volume_root(path: &Path) -> Option<PathBuf> {
+    let mut components = path.components();
+
+    match components.next()? {
+        Component::RootDir => {}
+        _ => return None,
+    }
+
+    match components.next()? {
+        Component::Normal(segment) if segment.to_string_lossy().eq_ignore_ascii_case("Volumes") => {
+        }
+        _ => return None,
+    }
+
+    match components.next()? {
+        Component::Normal(volume_name) => {
+            let mut root = PathBuf::from("/Volumes");
+            root.push(volume_name);
+            Some(root)
+        }
+        _ => None,
+    }
+}
+
+fn mounted_volume_roots() -> Result<HashSet<String>, String> {
+    DiskMonitor::new()
+        .list_volumes()
+        .map(|volumes| {
+            volumes
+                .into_iter()
+                .map(|volume| path_key_for_compare(&volume.mount_point))
+                .collect()
+        })
+        .map_err(|error| format!("Failed to list mounted volumes: {error}"))
+}
+
+pub(crate) fn classify_missing_target_path(
+    target: &Path,
+    mounted_roots: &HashSet<String>,
+) -> Result<TargetPreflightKind, String> {
+    if let Some(volume_root) = mounted_volume_root(target) {
+        let volume_key = path_key_for_compare(&volume_root);
+        if !mounted_roots.contains(&volume_key) {
+            return Err(format!(
+                "Target volume is not mounted: {}",
+                volume_root.display()
+            ));
+        }
+    }
+
+    Ok(TargetPreflightKind::WillCreateDirectory)
+}
+
+pub(crate) async fn preflight_target_path(
+    target: &Path,
+    create_missing: bool,
+) -> Result<TargetPreflightInfo, String> {
+    match tokio::fs::metadata(target).await {
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                return Err(format!(
+                    "Target path exists but is not a directory: {}",
+                    target.display()
+                ));
+            }
+
+            return Ok(TargetPreflightInfo {
+                kind: TargetPreflightKind::Ready,
+                path: target.display().to_string(),
+            });
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "Failed to access target path '{}': {}",
+                target.display(),
+                error
+            ));
+        }
+    }
+
+    if mounted_volume_root(target).is_some() {
+        let mounted_roots = mounted_volume_roots()?;
+        classify_missing_target_path(target, &mounted_roots)?;
+    }
+
+    if create_missing {
+        tokio::fs::create_dir_all(target).await.map_err(|error| {
+            format!(
+                "Failed to create target directory '{}': {error}",
+                target.display()
+            )
+        })?;
+
+        Ok(TargetPreflightInfo {
+            kind: TargetPreflightKind::CreatedDirectory,
+            path: target.display().to_string(),
+        })
+    } else {
+        Ok(TargetPreflightInfo {
+            kind: TargetPreflightKind::WillCreateDirectory,
+            path: target.display().to_string(),
+        })
+    }
+}
+
 fn resolved_path_key(path: &str) -> Result<String, String> {
     match resolve_path_with_uuid_outcome(path)? {
         ResolvePathWithUuidOutcome::Resolved(path) => Ok(path_key_for_compare(&path)),
@@ -2011,6 +2121,7 @@ async fn execute_sync_internal(
         input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
         input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
         input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+        let target_preflight = preflight_target_path(&target, true).await?;
 
         // 취소 토큰 생성 및 등록
         let cancel_token = CancellationToken::new();
@@ -2032,6 +2143,14 @@ async fn execute_sync_internal(
             Some(task_id.clone()),
             LogCategory::SyncStarted,
         );
+        if target_preflight.kind == TargetPreflightKind::CreatedDirectory {
+            state.log_manager.log_with_category(
+                "info",
+                &format!("Target directory created: {}", target_preflight.path),
+                Some(task_id.clone()),
+                LogCategory::Other,
+            );
+        }
 
         let engine = SyncEngine::new(source.clone(), target.clone());
         let options = SyncOptions {
@@ -2200,6 +2319,7 @@ async fn execute_sync_internal(
                     conflict_session_id,
                     conflict_count: target_newer_conflicts.len(),
                     has_pending_conflicts: !target_newer_conflicts.is_empty(),
+                    target_preflight: Some(target_preflight.clone()),
                 })
             }
             Err(e) => {
@@ -2871,52 +2991,78 @@ async fn sync_dry_run_internal(
 ) -> Result<DryRunResult, String> {
     try_acquire_task_operation(&task_id, TaskOperationKind::DryRun, state).await?;
 
-    let source =
-        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    let target =
-        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    ensure_non_overlapping_paths(&source, &target)?;
+    let result: Result<DryRunResult, String> = async {
+        let source =
+            resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        let target =
+            resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        ensure_non_overlapping_paths(&source, &target)?;
 
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+        input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(source.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(target.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())?;
+        input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+        let target_preflight = preflight_target_path(&target, false).await?;
 
-    state
-        .log_manager
-        .log("info", "Dry run started", Some(task_id.clone()));
+        state
+            .log_manager
+            .log("info", "Dry run started", Some(task_id.clone()));
+        if target_preflight.kind == TargetPreflightKind::WillCreateDirectory {
+            state.log_manager.log(
+                "warning",
+                &format!(
+                    "Target directory does not exist yet; dry run is previewing an empty target: {}",
+                    target_preflight.path
+                ),
+                Some(task_id.clone()),
+            );
+        }
 
-    let engine = SyncEngine::new(source, target);
-    let options = SyncOptions {
-        checksum_mode,
-        preserve_permissions: true,
-        preserve_times: true,
-        verify_after_copy: false,
-        exclude_patterns,
-    };
+        let engine = SyncEngine::new(source, target);
+        let options = SyncOptions {
+            checksum_mode,
+            preserve_permissions: true,
+            preserve_times: true,
+            verify_after_copy: false,
+            exclude_patterns,
+        };
 
-    let cancel_token = CancellationToken::new();
-    if let Some(external_cancel_token) = external_cancel_token {
-        let forward_cancel = cancel_token.clone();
-        tauri::async_runtime::spawn(async move {
-            external_cancel_token.cancelled().await;
-            forward_cancel.cancel();
-        });
+        let cancel_token = CancellationToken::new();
+        if let Some(external_cancel_token) = external_cancel_token {
+            let forward_cancel = cancel_token.clone();
+            tauri::async_runtime::spawn(async move {
+                external_cancel_token.cancelled().await;
+                forward_cancel.cancel();
+            });
+        }
+
+        {
+            let mut tokens = state.dry_run_cancel_tokens.write().await;
+            tokens.insert(task_id.clone(), cancel_token.clone());
+        }
+
+        let result = engine
+            .dry_run_with_cancel(&options, cancel_token)
+            .await
+            .map_err(|e| format!("{:#}", e));
+
+        {
+            let mut tokens = state.dry_run_cancel_tokens.write().await;
+            tokens.remove(&task_id);
+        }
+
+        let result = result?;
+
+        Ok({
+            let mut result = result;
+            result.target_preflight = Some(target_preflight.clone());
+            result
+        })
     }
+    .await;
 
-    {
-        let mut tokens = state.dry_run_cancel_tokens.write().await;
-        tokens.insert(task_id.clone(), cancel_token.clone());
-    }
-
-    let result = engine.dry_run_with_cancel(&options, cancel_token).await;
-
-    {
-        let mut tokens = state.dry_run_cancel_tokens.write().await;
-        tokens.remove(&task_id);
-    }
     release_task_operation(&task_id, state).await;
 
     match result {

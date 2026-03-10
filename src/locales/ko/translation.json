@@ -93,6 +93,8 @@
       "subPath": "하위 경로",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "볼륨이 마운트되지 않음",
+      "targetDirectoryWillBeCreated": "대상 디렉터리가 아직 없어 실제 동기화 시 생성됩니다: {{path}}",
+      "targetDirectoryCreated": "대상 디렉터리를 생성한 뒤 동기화를 진행했습니다: {{path}}",
       "uuidCopied": "UUID가 클립보드에 복사되었습니다",
       "errors": {
         "sourceEqualsTarget": "원본과 대상 경로는 겹칠 수 없습니다.",
@@ -117,6 +119,7 @@
       "newFile": "신규",
       "modifiedFile": "수정됨",
       "noChanges": "변경 사항이 없습니다.",
+      "targetWillBeCreatedBanner": "대상 디렉터리가 아직 없어 Dry Run에서 비어 있는 대상으로 미리보기합니다. 그래서 항목이 신규로 보이고 타겟 크기는 실제 동기화가 {{path}} 를 만들기 전까지 비어 있습니다.",
       "colPath": "경로",
       "colType": "유형",
       "colSourceSize": "소스 크기",

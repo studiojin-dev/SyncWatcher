@@ -82,6 +82,23 @@ pub struct DryRunResult {
     pub files_to_copy: usize,
     pub files_modified: usize,
     pub bytes_to_copy: u64,
+    #[serde(rename = "targetPreflight")]
+    pub target_preflight: Option<TargetPreflightInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TargetPreflightKind {
+    Ready,
+    WillCreateDirectory,
+    CreatedDirectory,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetPreflightInfo {
+    pub kind: TargetPreflightKind,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

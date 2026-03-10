@@ -93,6 +93,8 @@
       "subPath": "Subruta",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "Volumen no montado",
+      "targetDirectoryWillBeCreated": "El directorio de destino aún no existe y se creará durante la sincronización: {{path}}",
+      "targetDirectoryCreated": "Se creó el directorio de destino antes de sincronizar: {{path}}",
       "uuidCopied": "UUID copiado al portapapeles",
       "errors": {
         "sourceEqualsTarget": "La ruta de origen y destino no pueden superponerse.",
@@ -117,6 +119,7 @@
       "newFile": "Nuevo",
       "modifiedFile": "Modificado",
       "noChanges": "No se detectaron cambios.",
+      "targetWillBeCreatedBanner": "El directorio de destino aún no existe. Dry Run lo previsualiza como vacío, por eso los elementos pueden aparecer como New y Target Size queda en blanco hasta que la sincronización cree {{path}}.",
       "colPath": "Ruta",
       "colType": "Tipo",
       "colSourceSize": "Tamaño de origen",

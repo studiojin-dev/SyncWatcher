@@ -3,17 +3,19 @@ mod integration_tests {
     use crate::config_store::{launch_at_login_status_or_default, ConfigStore};
     use crate::logging::LogManager;
     use crate::mcp_jobs::McpJobRegistry;
+    use crate::sync_engine::TargetPreflightKind;
     use crate::watcher::WatcherManager;
     use crate::{
-        cancel_operation_internal, compute_volume_mount_diff, decide_autostart_launch,
-        decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
-        ensure_non_overlapping_paths, format_bytes_with_unit, get_app_version,
-        handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
+        cancel_operation_internal, classify_missing_target_path, compute_volume_mount_diff,
+        decide_autostart_launch, decide_runtime_auto_unmount, dequeue_runtime_sync_task,
+        enqueue_runtime_sync_task_internal, ensure_non_overlapping_paths, format_bytes_with_unit,
+        get_app_version, handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
-        normalize_uuid_sub_path, parse_uuid_source_path, progress_phase_to_log_category,
-        prune_auto_unmount_session_disabled_tasks, remove_runtime_sync_task_state,
-        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
-        runtime_get_state_internal, set_auto_unmount_session_disabled_internal,
+        normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
+        progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
+        remove_runtime_sync_task_state, resolve_runtime_exclude_patterns,
+        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        set_auto_unmount_session_disabled_internal, sync_dry_run_internal,
         take_runtime_pending_sync_task, validate_runtime_tasks, volume_watch_next_tick_delay,
         AppState, CancelOperationType, DataUnitSystem, RuntimeAutoUnmountDecision,
         RuntimeExclusionSet, RuntimeSyncEnqueueResult, RuntimeSyncTask, VolumeEmitDebounceState,
@@ -671,6 +673,89 @@ mod integration_tests {
 
         assert!(result.is_err());
         assert!(result.err().unwrap_or_default().contains("overlap"));
+    }
+
+    #[test]
+    fn test_classify_missing_target_path_allows_missing_subdir_on_mounted_volume() {
+        let mounted = HashSet::from(["/volumes/evo990".to_string()]);
+
+        let result = classify_missing_target_path(Path::new("/Volumes/EVO990/repo"), &mounted)
+            .expect("mounted volume root should allow creating subdir");
+
+        assert_eq!(result, TargetPreflightKind::WillCreateDirectory);
+    }
+
+    #[test]
+    fn test_classify_missing_target_path_rejects_unmounted_volume_target() {
+        let mounted = HashSet::from(["/volumes/evo990".to_string()]);
+
+        let result = classify_missing_target_path(Path::new("/Volumes/kimjeongjin/repo"), &mounted);
+
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Target volume is not mounted"));
+    }
+
+    #[test]
+    fn test_classify_missing_target_path_is_case_insensitive_for_volumes_prefix() {
+        let mounted = HashSet::from(["/volumes/evo990".to_string()]);
+
+        let result = classify_missing_target_path(Path::new("/volumes/EVO990/repo"), &mounted)
+            .expect("lowercase /volumes prefix should still be recognized");
+
+        assert_eq!(result, TargetPreflightKind::WillCreateDirectory);
+    }
+
+    #[test]
+    fn test_classify_missing_target_path_allows_missing_general_directory() {
+        let mounted = HashSet::from(["/volumes/evo990".to_string()]);
+
+        let result =
+            classify_missing_target_path(Path::new("/Users/test/new-backup-dir"), &mounted)
+                .expect("general missing directory should be creatable");
+
+        assert_eq!(result, TargetPreflightKind::WillCreateDirectory);
+    }
+
+    #[tokio::test]
+    async fn test_preflight_target_path_creates_missing_directory_for_sync() {
+        let base = temp_config_dir();
+        let target = base.join("nested/backup");
+
+        let result = preflight_target_path(&target, true)
+            .await
+            .expect("sync preflight should create missing directory");
+
+        assert_eq!(result.kind, TargetPreflightKind::CreatedDirectory);
+        assert!(target.is_dir());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn test_sync_dry_run_internal_cleans_up_cancel_token_on_error() {
+        let state = build_app_state();
+        let base = temp_config_dir();
+        let target = base.join("target");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+
+        let result = sync_dry_run_internal(
+            "task-1".to_string(),
+            base.join("missing-source"),
+            target,
+            false,
+            Vec::new(),
+            &state,
+            None,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(state.dry_run_cancel_tokens.read().await.is_empty());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

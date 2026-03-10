@@ -405,6 +405,7 @@ impl SyncEngine {
                 files_to_copy,
                 files_modified,
                 bytes_to_copy,
+                target_preflight: None,
             },
             target_newer_conflicts,
         ))

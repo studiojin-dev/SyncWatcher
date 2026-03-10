@@ -9,12 +9,14 @@ const {
   updateTaskMock,
   deleteTaskMock,
   addTaskMock,
+  showToastMock,
   statusState,
   useSyncTaskStatusStoreMock,
 } = vi.hoisted(() => {
   const updateTaskMock = vi.fn();
   const deleteTaskMock = vi.fn();
   const addTaskMock = vi.fn();
+  const showToastMock = vi.fn();
   const statusState = {
     statuses: new Map(),
     watchingTaskIds: new Set<string>(['task-1']),
@@ -22,16 +24,14 @@ const {
     syncingTaskIds: new Set<string>(),
     setLastLog: vi.fn(),
   };
-  const useSyncTaskStatusStoreMock = Object.assign(
-    () => statusState,
-    {
-      getState: () => statusState,
-    },
-  );
+  const useSyncTaskStatusStoreMock = Object.assign(() => statusState, {
+    getState: () => statusState,
+  });
   return {
     updateTaskMock,
     deleteTaskMock,
     addTaskMock,
+    showToastMock,
     statusState,
     useSyncTaskStatusStoreMock,
   };
@@ -99,7 +99,7 @@ vi.mock('../hooks/useSyncTaskStatus', () => ({
 
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({
-    showToast: vi.fn(),
+    showToast: showToastMock,
   }),
 }));
 
@@ -116,6 +116,7 @@ describe('SyncTasksView action confirmations', () => {
     statusState.syncingTaskIds = new Set();
     statusState.statuses = new Map();
     statusState.setLastLog.mockReset();
+    showToastMock.mockReset();
     listenMock.mockResolvedValue(() => {});
     openMock.mockResolvedValue(null);
     askMock.mockResolvedValue(true);
@@ -133,6 +134,7 @@ describe('SyncTasksView action confirmations', () => {
           conflictSessionId: null,
           conflictCount: 0,
           hasPendingConflicts: false,
+          targetPreflight: null,
         };
       }
       if (command === 'sync_dry_run') {
@@ -142,6 +144,7 @@ describe('SyncTasksView action confirmations', () => {
           files_to_copy: 0,
           files_modified: 0,
           bytes_to_copy: 0,
+          targetPreflight: null,
         };
       }
       return undefined;
@@ -179,9 +182,9 @@ describe('SyncTasksView action confirmations', () => {
     await waitFor(() => {
       expect(askMock).toHaveBeenCalled();
     });
-    expect(
-      invokeMock.mock.calls.some((call) => call[0] === 'start_sync'),
-    ).toBe(false);
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'start_sync')).toBe(
+      false,
+    );
   });
 
   it('does not toggle watch off when confirmation is rejected', async () => {
@@ -215,6 +218,7 @@ describe('SyncTasksView action confirmations', () => {
           conflictSessionId: null,
           conflictCount: 0,
           hasPendingConflicts: false,
+          targetPreflight: null,
         };
       }
       if (command === 'is_auto_unmount_session_disabled') {
@@ -232,17 +236,60 @@ describe('SyncTasksView action confirmations', () => {
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('is_auto_unmount_session_disabled', {
-        taskId: 'task-1',
-      });
+      expect(invokeMock).toHaveBeenCalledWith(
+        'is_auto_unmount_session_disabled',
+        {
+          taskId: 'task-1',
+        },
+      );
     });
 
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'unmount_volume'),
     ).toBe(false);
-    expect(statusState.setLastLog).toHaveBeenCalledWith('task-1', expect.objectContaining({
-      message: 'syncTasks.autoUnmountSuppressedStatus',
-      level: 'warning',
-    }));
+    expect(statusState.setLastLog).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        message: 'syncTasks.autoUnmountSuppressedStatus',
+        level: 'warning',
+      }),
+    );
+  });
+
+  it('shows a warning toast when dry-run target directory will be created later', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'sync_dry_run') {
+        return {
+          diffs: [],
+          total_files: 0,
+          files_to_copy: 0,
+          files_modified: 0,
+          bytes_to_copy: 0,
+          targetPreflight: {
+            kind: 'willCreateDirectory',
+            path: '/tmp/missing-target',
+          },
+        };
+      }
+      return undefined;
+    });
+
+    render(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+
+    await waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith(
+        'syncTasks.targetDirectoryWillBeCreated',
+        'warning',
+      );
+    });
   });
 });
