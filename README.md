@@ -116,42 +116,7 @@ The script will:
 
 If you want, use tar format in your release assets and the same flow still works with a small script change.
 
-### macOS 설치 안내 (한국어)
-
-현재는 앱 사용이 가능하지만 Apple 유료 개발자 계정(Apple Developer Program) 가입이 아직 활성화되지 않아 코드사인/공증 배포가 완료되지 않았습니다. 따라서 설치는 우선 **macOS Latest Installer (curl script)** 를 이용하는 것을 권장합니다.
-
-`curl: (56)` 또는 `404`가 계속 발생한다면, 예전 버전의 스크립트가 캐시되었거나 릴리스 에셋의 파일명이 바뀌는 경우일 수 있습니다. 현재 스크립트는 GitHub 최신 릴리스 메타데이터에서 `.dmg` 파일명을 먼저 찾아 자동으로 내려받도록 동작합니다. 동일한 설치 명령을 한 번 더 실행해 최신 스크립트를 다시 불러오세요.
-
-1. 먼저 Cosign을 설치합니다.
-   - 공식 안내: <https://docs.sigstore.dev/cosign/system_config/installation/>
-2. GitHub Releases에서 `.dmg` 파일을 다운로드합니다.
-3. 아래 helper로 같은 태그의 checksum과 attestation을 함께 검증합니다.
-
-   ```bash
-   scripts/release/verify-release-asset.sh v1.1.0 ~/Downloads/Sync.Watcher_1.1.0_aarch64.dmg
-   ```
-
-4. 검증이 끝난 뒤 `.dmg`를 열어 `SyncWatcher.app`을 `Applications` 폴더로 이동합니다.
-5. 실행이 차단되면 아래 중 하나로 진행하세요.
-   - 앱 우클릭(또는 Control 클릭) → **열기** → **열기**
-   - 또는 아래 `Security & Permissions` 절차에서 보안 허용 처리
-6. `손상됨` 경고가 보이면, 테스트 목적으로만 아래 명령으로 격리 속성을 제거할 수 있습니다:
-
-   ```bash
-   xattr -dr com.apple.quarantine ~/Downloads/Sync.Watcher_1.1.0_aarch64.dmg
-   ```
-
-   파일 경로는 다운로드한 파일명에 맞게 변경하세요.
-
-> `xattr`은 로컬 테스트용 우회 방법입니다. 공식 배포 품질 확보용 해결책이 아닙니다.
-
-## Security & Permissions (Important)
-
-This app is currently distributed via GitHub Releases and is **not notarized** with Apple Developer Program.
-
-On first launch, macOS may show a security warning (Gatekeeper) such as "cannot be opened because the developer cannot be verified."
-
-### macOS 설치(스크립트) / Homebrew Cask (선택)
+### macOS 설치(스크립트)
 
 #### 1) curl + sh로 최신 버전 자동 설치
 
