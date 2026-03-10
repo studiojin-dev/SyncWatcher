@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260310-0012-PRG",
+    "title": "Exclusion defaults consolidation into a program set",
+    "tags": [
+      "sync-task",
+      "exclusion",
+      "migration",
+      "config-store",
+      "ux",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-10",
+    "tldr": "Replace per-ecosystem built-in exclusion defaults with one `program` built-in set, automatically migrate legacy built-in IDs in stored exclusion sets and tasks, and remove `.gitignore` from the `git` built-in set.",
+    "path": "docs/adr/ADR-20260310-0012-PRG-exclusion-defaults-consolidation-into-program.md"
+  },
+  {
     "id": "ADR-20260309-0011-AUT",
     "title": "Launch-at-login autostart with hidden startup",
     "tags": [

@@ -21,6 +21,21 @@ pub const CONTROL_PLANE_SOCKET_FILE_NAME: &str = "syncwatcher-mcp.sock";
 
 const APP_SUPPORT_DIR_OVERRIDE_ENV: &str = "SYNCWATCHER_APP_SUPPORT_DIR";
 const DEFAULT_MAX_LOG_LINES: u32 = 10_000;
+const SYSTEM_DEFAULTS_SET_ID: &str = "system-defaults";
+const GIT_SET_ID: &str = "git";
+const PROGRAM_SET_ID: &str = "program";
+const LEGACY_PROGRAM_SET_IDS: [&str; 10] = [
+    "nodejs",
+    "python",
+    "rust",
+    "jvm-build",
+    "dotnet",
+    "ruby-rails",
+    "php-laravel",
+    "dart-flutter",
+    "swift-xcode",
+    "infra-terraform",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -383,7 +398,11 @@ impl ConfigStore {
     pub fn load_tasks(&self) -> Result<Vec<SyncTaskRecord>, ConfigStoreError> {
         self.ensure_config_dir()?;
         let path = self.tasks_file_path();
-        self.load_or_create_yaml(&path, Vec::<SyncTaskRecord>::new())
+        let stored: Vec<SyncTaskRecord> =
+            self.load_or_create_yaml(&path, Vec::<SyncTaskRecord>::new())?;
+        let normalized = normalize_task_records(stored);
+        self.write_if_changed(&path, &normalized)?;
+        Ok(normalized)
     }
 
     pub fn save_tasks(&self, tasks: &[SyncTaskRecord]) -> Result<(), ConfigStoreError> {
@@ -396,9 +415,9 @@ impl ConfigStore {
         let path = self.exclusion_sets_file_path();
         let stored: Vec<ExclusionSetRecord> =
             self.load_or_create_yaml(&path, default_exclusion_sets())?;
-        let merged = merge_missing_default_sets(stored);
-        self.write_if_changed(&path, &merged)?;
-        Ok(merged)
+        let normalized = normalize_exclusion_sets(stored);
+        self.write_if_changed(&path, &normalized)?;
+        Ok(normalized)
     }
 
     pub fn save_exclusion_sets(&self, sets: &[ExclusionSetRecord]) -> Result<(), ConfigStoreError> {
@@ -792,23 +811,46 @@ pub fn default_settings_record() -> StoredSettings {
 
 fn default_exclusion_sets() -> Vec<ExclusionSetRecord> {
     vec![
-        ExclusionSetRecord {
-            id: "system-defaults".to_string(),
-            name: "System Junk".to_string(),
-            patterns: vec![
-                ".DS_Store",
-                "Thumbs.db",
-                ".Trash",
-                "Desktop.ini",
-                ".fseventsd",
-                ".Spotlight-V100",
-                ".Trashes",
-                ".TemporaryItems",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-        },
+        default_system_exclusion_set(),
+        default_git_exclusion_set(),
+        default_program_exclusion_set(),
+    ]
+}
+
+pub fn default_exclusion_set_records() -> Vec<ExclusionSetRecord> {
+    default_exclusion_sets()
+}
+
+fn default_system_exclusion_set() -> ExclusionSetRecord {
+    ExclusionSetRecord {
+        id: SYSTEM_DEFAULTS_SET_ID.to_string(),
+        name: "System Junk".to_string(),
+        patterns: vec![
+            ".DS_Store",
+            "Thumbs.db",
+            ".Trash",
+            "Desktop.ini",
+            ".fseventsd",
+            ".Spotlight-V100",
+            ".Trashes",
+            ".TemporaryItems",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect(),
+    }
+}
+
+fn default_git_exclusion_set() -> ExclusionSetRecord {
+    ExclusionSetRecord {
+        id: GIT_SET_ID.to_string(),
+        name: "Git".to_string(),
+        patterns: vec![".git"].into_iter().map(str::to_string).collect(),
+    }
+}
+
+fn legacy_program_exclusion_sets() -> Vec<ExclusionSetRecord> {
+    vec![
         ExclusionSetRecord {
             id: "nodejs".to_string(),
             name: "Node.js".to_string(),
@@ -884,14 +926,6 @@ fn default_exclusion_sets() -> Vec<ExclusionSetRecord> {
             .into_iter()
             .map(str::to_string)
             .collect(),
-        },
-        ExclusionSetRecord {
-            id: "git".to_string(),
-            name: "Git".to_string(),
-            patterns: vec![".git", ".gitignore"]
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
         },
         ExclusionSetRecord {
             id: "rust".to_string(),
@@ -1021,19 +1055,133 @@ fn default_exclusion_sets() -> Vec<ExclusionSetRecord> {
     ]
 }
 
-pub fn default_exclusion_set_records() -> Vec<ExclusionSetRecord> {
-    default_exclusion_sets()
+fn default_program_exclusion_set() -> ExclusionSetRecord {
+    let mut patterns = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for set in legacy_program_exclusion_sets() {
+        extend_unique_patterns(&mut patterns, &mut seen, set.patterns);
+    }
+    ExclusionSetRecord {
+        id: PROGRAM_SET_ID.to_string(),
+        name: "Program".to_string(),
+        patterns,
+    }
 }
 
-fn merge_missing_default_sets(mut sets: Vec<ExclusionSetRecord>) -> Vec<ExclusionSetRecord> {
-    let existing_ids: std::collections::HashSet<String> =
-        sets.iter().map(|set| set.id.clone()).collect();
-    for default_set in default_exclusion_sets() {
-        if !existing_ids.contains(&default_set.id) {
-            sets.push(default_set);
+fn is_legacy_program_set_id(id: &str) -> bool {
+    LEGACY_PROGRAM_SET_IDS.contains(&id)
+}
+
+fn extend_unique_patterns(
+    target: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+    patterns: Vec<String>,
+) {
+    for pattern in patterns {
+        if seen.insert(pattern.clone()) {
+            target.push(pattern);
         }
     }
-    sets
+}
+
+fn normalize_git_patterns(patterns: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for pattern in std::iter::once(".git".to_string()).chain(
+        patterns
+            .into_iter()
+            .filter(|pattern| pattern != ".gitignore"),
+    ) {
+        if seen.insert(pattern.clone()) {
+            normalized.push(pattern);
+        }
+    }
+    normalized
+}
+
+fn normalize_exclusion_sets(sets: Vec<ExclusionSetRecord>) -> Vec<ExclusionSetRecord> {
+    let mut system_patterns = None;
+    let mut git_patterns = None;
+    let mut program_patterns = default_program_exclusion_set().patterns;
+    let mut seen_program_patterns: std::collections::HashSet<String> =
+        program_patterns.iter().cloned().collect();
+    let mut custom_sets = Vec::new();
+
+    for set in sets {
+        match set.id.as_str() {
+            SYSTEM_DEFAULTS_SET_ID => {
+                if system_patterns.is_none() {
+                    system_patterns = Some(set.patterns);
+                }
+            }
+            GIT_SET_ID => {
+                git_patterns = Some(normalize_git_patterns(set.patterns));
+            }
+            PROGRAM_SET_ID => {
+                extend_unique_patterns(
+                    &mut program_patterns,
+                    &mut seen_program_patterns,
+                    set.patterns,
+                );
+            }
+            id if is_legacy_program_set_id(id) => {
+                extend_unique_patterns(
+                    &mut program_patterns,
+                    &mut seen_program_patterns,
+                    set.patterns,
+                );
+            }
+            _ => custom_sets.push(set),
+        }
+    }
+
+    let system = ExclusionSetRecord {
+        id: SYSTEM_DEFAULTS_SET_ID.to_string(),
+        name: "System Junk".to_string(),
+        patterns: system_patterns.unwrap_or_else(|| default_system_exclusion_set().patterns),
+    };
+    let git = ExclusionSetRecord {
+        id: GIT_SET_ID.to_string(),
+        name: "Git".to_string(),
+        patterns: git_patterns.unwrap_or_else(|| default_git_exclusion_set().patterns),
+    };
+    let program = ExclusionSetRecord {
+        id: PROGRAM_SET_ID.to_string(),
+        name: "Program".to_string(),
+        patterns: program_patterns,
+    };
+
+    let mut normalized = vec![system, git, program];
+    normalized.extend(custom_sets);
+    normalized
+}
+
+fn normalize_task_exclusion_set_ids(ids: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    let mut program_added = false;
+
+    for id in ids {
+        if id == PROGRAM_SET_ID || is_legacy_program_set_id(id.as_str()) {
+            if !program_added {
+                normalized.push(PROGRAM_SET_ID.to_string());
+                program_added = true;
+            }
+            continue;
+        }
+        normalized.push(id);
+    }
+
+    normalized
+}
+
+fn normalize_task_records(tasks: Vec<SyncTaskRecord>) -> Vec<SyncTaskRecord> {
+    tasks
+        .into_iter()
+        .map(|mut task| {
+            task.exclusion_sets = normalize_task_exclusion_set_ids(task.exclusion_sets);
+            task
+        })
+        .collect()
 }
 
 fn normalize_task_source(task: &SyncTaskRecord) -> String {
@@ -1082,6 +1230,7 @@ fn should_enable_auto_unmount(task: &SyncTaskRecord) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn normalize_uuid_source_rebuilds_token() {
@@ -1107,14 +1256,184 @@ mod tests {
     }
 
     #[test]
-    fn merges_missing_default_sets() {
-        let merged = merge_missing_default_sets(vec![ExclusionSetRecord {
-            id: "custom".to_string(),
-            name: "Custom".to_string(),
-            patterns: vec!["*.tmp".to_string()],
-        }]);
+    fn default_exclusion_sets_collapse_to_three_builtins() {
+        let defaults = default_exclusion_sets();
 
-        assert!(merged.iter().any(|set| set.id == "custom"));
-        assert!(merged.iter().any(|set| set.id == "system-defaults"));
+        assert_eq!(defaults.len(), 3);
+        assert_eq!(defaults[0].id, SYSTEM_DEFAULTS_SET_ID);
+        assert_eq!(defaults[1].id, GIT_SET_ID);
+        assert_eq!(defaults[2].id, PROGRAM_SET_ID);
+        assert!(defaults[2]
+            .patterns
+            .iter()
+            .any(|pattern| pattern == ".pnpm-store"));
+        assert!(!defaults[2]
+            .patterns
+            .iter()
+            .any(|pattern| pattern == ".pnpm_store"));
+    }
+
+    #[test]
+    fn normalize_exclusion_sets_merges_legacy_program_sets_and_preserves_custom_order() {
+        let normalized = normalize_exclusion_sets(vec![
+            ExclusionSetRecord {
+                id: "custom-a".to_string(),
+                name: "Custom A".to_string(),
+                patterns: vec!["custom-a".to_string()],
+            },
+            ExclusionSetRecord {
+                id: "nodejs".to_string(),
+                name: "Node".to_string(),
+                patterns: vec!["node_modules".to_string(), "custom-node".to_string()],
+            },
+            ExclusionSetRecord {
+                id: "git".to_string(),
+                name: "Git Custom".to_string(),
+                patterns: vec![".gitignore".to_string(), "git-extra".to_string()],
+            },
+            ExclusionSetRecord {
+                id: "custom-b".to_string(),
+                name: "Custom B".to_string(),
+                patterns: vec!["custom-b".to_string()],
+            },
+            ExclusionSetRecord {
+                id: "python".to_string(),
+                name: "Python".to_string(),
+                patterns: vec!["__pycache__".to_string(), "custom-python".to_string()],
+            },
+        ]);
+
+        assert_eq!(
+            normalized
+                .iter()
+                .map(|set| set.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                SYSTEM_DEFAULTS_SET_ID,
+                GIT_SET_ID,
+                PROGRAM_SET_ID,
+                "custom-a",
+                "custom-b"
+            ]
+        );
+        assert_eq!(
+            normalized[1].patterns,
+            vec![".git".to_string(), "git-extra".to_string()]
+        );
+        assert!(normalized[2]
+            .patterns
+            .iter()
+            .any(|pattern| pattern == "custom-node"));
+        assert!(normalized[2]
+            .patterns
+            .iter()
+            .any(|pattern| pattern == "custom-python"));
+        assert!(normalized[2]
+            .patterns
+            .iter()
+            .any(|pattern| pattern == ".pnpm-store"));
+        assert!(!normalized[2]
+            .patterns
+            .iter()
+            .any(|pattern| pattern == ".pnpm_store"));
+        assert_eq!(
+            normalized[2].patterns.first().map(String::as_str),
+            Some("node_modules")
+        );
+        assert!(normalized[2]
+            .patterns
+            .windows(2)
+            .any(|pair| pair[0] == "node_modules" && pair[1] == ".pnpm"));
+        assert_eq!(
+            normalized[2].patterns.last().map(String::as_str),
+            Some("custom-python")
+        );
+    }
+
+    #[test]
+    fn normalize_task_exclusion_set_ids_collapses_legacy_program_ids() {
+        let normalized = normalize_task_exclusion_set_ids(vec![
+            "custom-a".to_string(),
+            "python".to_string(),
+            PROGRAM_SET_ID.to_string(),
+            "git".to_string(),
+            "rust".to_string(),
+            "custom-b".to_string(),
+        ]);
+
+        assert_eq!(
+            normalized,
+            vec![
+                "custom-a".to_string(),
+                PROGRAM_SET_ID.to_string(),
+                "git".to_string(),
+                "custom-b".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn load_tasks_and_exclusion_sets_normalize_on_disk() {
+        let temp = tempdir().expect("tempdir should be created");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+        let exclusion_sets = vec![
+            ExclusionSetRecord {
+                id: "python".to_string(),
+                name: "Python".to_string(),
+                patterns: vec!["__pycache__".to_string()],
+            },
+            ExclusionSetRecord {
+                id: "git".to_string(),
+                name: "Git".to_string(),
+                patterns: vec![".gitignore".to_string()],
+            },
+            ExclusionSetRecord {
+                id: "custom".to_string(),
+                name: "Custom".to_string(),
+                patterns: vec!["custom".to_string()],
+            },
+        ];
+        let tasks = vec![SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: vec![
+                "python".to_string(),
+                "custom".to_string(),
+                "rust".to_string(),
+            ],
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+        }];
+
+        store
+            .write_yaml_atomic(&store.exclusion_sets_file_path(), &exclusion_sets)
+            .expect("should write exclusion sets");
+        store
+            .write_yaml_atomic(&store.tasks_file_path(), &tasks)
+            .expect("should write tasks");
+
+        let loaded_sets = store.load_exclusion_sets().expect("should load sets");
+        let loaded_tasks = store.load_tasks().expect("should load tasks");
+
+        assert_eq!(
+            loaded_sets
+                .iter()
+                .map(|set| set.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![SYSTEM_DEFAULTS_SET_ID, GIT_SET_ID, PROGRAM_SET_ID, "custom"]
+        );
+        assert_eq!(loaded_sets[1].patterns, vec![".git".to_string()]);
+        assert_eq!(
+            loaded_tasks[0].exclusion_sets,
+            vec![PROGRAM_SET_ID.to_string(), "custom".to_string()]
+        );
     }
 }

@@ -50,23 +50,42 @@ describe('useExclusionSets', () => {
     it('appends only missing default sets and preserves existing customized sets', () => {
         const existing = [
             makeSet('system-defaults', ['.DS_Store']),
-            makeSet('nodejs', ['custom-node-cache']),
-            makeSet('python', ['custom-python-cache']),
             makeSet('git', ['.git']),
-            makeSet('rust', ['target']),
+            makeSet('program', ['custom-program-cache']),
+            makeSet('custom', ['*.tmp']),
         ];
 
         const mergedSets = mergeMissingDefaultSets(existing);
-        const nodeSet = mergedSets.find((set) => set.id === 'nodejs');
+        const programSet = mergedSets.find((set) => set.id === 'program');
 
-        expect(nodeSet?.patterns).toEqual(['custom-node-cache']);
-        expect(mergedSets.some((set) => set.id === 'jvm-build')).toBe(true);
-        expect(mergedSets.some((set) => set.id === 'dotnet')).toBe(true);
-        expect(mergedSets.some((set) => set.id === 'ruby-rails')).toBe(true);
-        expect(mergedSets.some((set) => set.id === 'php-laravel')).toBe(true);
-        expect(mergedSets.some((set) => set.id === 'dart-flutter')).toBe(true);
-        expect(mergedSets.some((set) => set.id === 'swift-xcode')).toBe(true);
-        expect(mergedSets.some((set) => set.id === 'infra-terraform')).toBe(true);
+        expect(programSet?.patterns).toEqual(['custom-program-cache']);
+        expect(mergedSets.some((set) => set.id === 'custom')).toBe(true);
+        expect(mergedSets.some((set) => set.id === 'nodejs')).toBe(false);
+        expect(mergedSets.some((set) => set.id === 'python')).toBe(false);
+        expect(mergedSets.some((set) => set.id === 'rust')).toBe(false);
+    });
+
+    it('falls back to the consolidated default sets when the backend returns no sets', async () => {
+        mockInvoke.mockImplementation(async (command: string) => {
+            if (command === 'list_exclusion_sets') {
+                return { exclusionSets: [] };
+            }
+
+            return undefined;
+        });
+
+        const { result } = renderHook(() => useExclusionSets());
+
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+
+        expect(result.current.sets.map((set) => set.id)).toEqual(['system-defaults', 'git', 'program']);
+        const gitSet = result.current.sets.find((set) => set.id === 'git');
+        const programSet = result.current.sets.find((set) => set.id === 'program');
+        expect(gitSet?.patterns).toEqual(['.git']);
+        expect(programSet?.patterns).toContain('.pnpm-store');
+        expect(programSet?.patterns).not.toContain('.pnpm_store');
     });
 
     it('loads exclusion sets from the backend store', async () => {
