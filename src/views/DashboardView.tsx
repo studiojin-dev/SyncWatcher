@@ -33,7 +33,6 @@ function loadCachedVolumes(): VolumeInfo[] {
         if (cached) {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed)) {
-                console.debug('[DashboardView] Loaded cached volumes', { count: parsed.length });
                 return parsed.map((volume) => ({
                     ...volume,
                     total_bytes: typeof volume?.total_bytes === 'number' ? volume.total_bytes : null,
@@ -54,7 +53,6 @@ function loadCachedVolumes(): VolumeInfo[] {
 function saveCachedVolumes(volumes: VolumeInfo[]): void {
     try {
         localStorage.setItem(CACHE_KEY, JSON.stringify(volumes));
-        console.debug('[DashboardView] Saved volumes to cache', { count: volumes.length });
     } catch (err) {
         console.warn('[DashboardView] Failed to save volumes to cache', err);
     }
@@ -80,14 +78,11 @@ function DashboardView() {
     const inFlightCount = useRef(0);
 
     const loadVolumes = useCallback(async () => {
-        const startTime = performance.now();
         const requestId = ++requestSeq.current;
         try {
             inFlightCount.current += 1;
             setLoading(true);
             setError(null);
-
-            console.debug('[DashboardView] loadVolumes started', { requestId, inFlight: inFlightCount.current });
 
             const result = await invoke<VolumeInfo[]>('list_volumes');
 
@@ -95,11 +90,6 @@ function DashboardView() {
                 setVolumes(result);
                 setIsAnalyzing(false);
                 saveCachedVolumes(result);
-                console.debug('[DashboardView] loadVolumes completed', {
-                    requestId,
-                    volumeCount: result.length,
-                    durationMs: Math.round(performance.now() - startTime)
-                });
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
@@ -131,7 +121,6 @@ function DashboardView() {
 
         // 2. 백엔드에서 volumes-changed 이벤트 수신
         const unlistenPromise = listen('volumes-changed', () => {
-            console.debug('[DashboardView] Received volumes-changed event');
             if (isMounted.current) {
                 loadVolumes();
             }
@@ -140,7 +129,6 @@ function DashboardView() {
         // 3. 1분마다 폴링 (폴백)
         const intervalId = setInterval(() => {
             if (isMounted.current) {
-                console.debug('[DashboardView] Polling volumes');
                 loadVolumes();
             }
         }, POLL_INTERVAL_MS);

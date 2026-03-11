@@ -26,7 +26,7 @@ export interface YamlParseError {
 
 export type YamlStoreError = YamlParseError;
 
-export function useYamlStore<T extends Record<string, any>>({
+export function useYamlStore<T extends Record<string, unknown>>({
   fileName,
   defaultData,
 }: YamlStoreOptions<T>) {
@@ -47,7 +47,6 @@ export function useYamlStore<T extends Record<string, any>>({
 
       if (!exists) {
         // File doesn't exist - create it with default data
-        console.info(`${fileName} does not exist, creating with defaults`);
         await invoke('ensure_directory_exists', { path: appDataDir });
         const yamlContent = yaml.dump(defaultData, { indent: 2, lineWidth: -1 });
         await invoke('write_yaml_file', { path: filePath, content: yamlContent });
