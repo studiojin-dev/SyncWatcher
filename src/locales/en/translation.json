@@ -329,6 +329,7 @@
       "developer": "Developer",
       "license": "License",
       "openSourceLibraries": "Open Source Libraries",
+      "openSourceDescription": "SyncWatcher includes open source libraries. Use the button below to view their license information.",
       "viewLicenses": "View Licenses",
       "viewOnGithub": "View on GitHub",
       "unregistered": "Free Use (Personal & Commercial)",

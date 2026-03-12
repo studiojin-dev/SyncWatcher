@@ -332,6 +332,7 @@
       "developer": "开发者",
       "license": "许可证",
       "openSourceLibraries": "开源库",
+      "openSourceDescription": "SyncWatcher 使用了多个开源库。你可以通过下方按钮查看它们的许可证信息。",
       "viewLicenses": "查看开源许可证",
       "viewOnGithub": "在 GitHub 上查看",
       "unregistered": "免费使用（个人/商用）",

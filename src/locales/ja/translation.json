@@ -332,6 +332,7 @@
       "developer": "開発者",
       "license": "ライセンス",
       "openSourceLibraries": "オープンソースライブラリ",
+      "openSourceDescription": "SyncWatcher は複数のオープンソースライブラリを利用しています。ライセンス情報は下のボタンから確認できます。",
       "viewLicenses": "オープンソースライセンスを表示",
       "viewOnGithub": "GitHub で表示",
       "unregistered": "無料利用（個人・商用）",

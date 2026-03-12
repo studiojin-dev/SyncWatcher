@@ -21,7 +21,7 @@ vi.mock('react-i18next', () => ({
         'about.licenseType': 'Polyform NC 1.0.0',
         'about.viewOnGithub': 'View on GitHub',
         'about.openSourceLibraries': 'Open Source Libraries',
-        'about.openSourceDescription': 'This project uses open source libraries.',
+        'about.openSourceDescription': 'SyncWatcher includes open source libraries. Use the button below to view their license information.',
         'about.viewLicenses': 'View Licenses',
         'about.licenses': 'Open Source Licenses',
         'common.loading': 'Loading...',
