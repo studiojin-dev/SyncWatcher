@@ -1,6 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Sidebar from './Sidebar';
+import { getVersion } from '@tauri-apps/api/app';
+
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn(),
+}));
 
 const mockState = vi.hoisted(() => ({
   isRegistered: false,
@@ -27,6 +32,8 @@ const mockState = vi.hoisted(() => ({
   } as Record<string, string>,
 }));
 
+const mockGetVersion = vi.mocked(getVersion);
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => mockState.translations[key] ?? key,
@@ -51,10 +58,12 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.isRegistered = false;
+    mockGetVersion.mockResolvedValue('1.1.6');
   });
 
-  it('keeps purchase and activation actions for unregistered users', () => {
+  it('keeps purchase and activation actions for unregistered users', async () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
+    await screen.findByText('v1.1.6');
 
     const purchaseLink = screen.getByRole('link', { name: 'Optional License Support' });
     expect(purchaseLink).toHaveAttribute(
@@ -69,9 +78,10 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('license-activation-modal')).toBeInTheDocument();
   });
 
-  it('shows support CTA and support modal for registered users', () => {
+  it('shows support CTA and support modal for registered users', async () => {
     mockState.isRegistered = true;
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
+    await screen.findByText('v1.1.6');
 
     expect(screen.getByText('One more pizza bite?')).toBeInTheDocument();
     expect(screen.getByText('I am bowing dramatically.')).toBeInTheDocument();
@@ -88,9 +98,10 @@ describe('Sidebar', () => {
     expect(supportLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('closes support modal on cancel button and overlay click', () => {
+  it('closes support modal on cancel button and overlay click', async () => {
     mockState.isRegistered = true;
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
+    await screen.findByText('v1.1.6');
 
     fireEvent.click(screen.getByRole('button', { name: 'Sponsor Another Slice' }));
     expect(screen.getByRole('heading', { name: 'Maximum Gratitude Mode' })).toBeInTheDocument();
@@ -101,5 +112,11 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sponsor Another Slice' }));
     fireEvent.click(screen.getByTestId('support-modal-overlay'));
     expect(screen.queryByRole('heading', { name: 'Maximum Gratitude Mode' })).not.toBeInTheDocument();
+  });
+
+  it('renders the runtime app version in the footer', async () => {
+    render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
+
+    expect(await screen.findByText('v1.1.6')).toBeInTheDocument();
   });
 });

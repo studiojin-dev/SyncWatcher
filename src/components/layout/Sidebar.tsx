@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useSettings } from '../../hooks/useSettings';
+import { useAppVersion } from '../../hooks/useAppVersion';
 import LicenseActivation from '../features/LicenseActivation';
 import PizzaBiteAnimation from '../ui/PizzaBiteAnimation';
 import {
@@ -43,6 +44,7 @@ const navItems: NavItem[] = [
 function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const { t } = useTranslation();
     const { settings } = useSettings();
+    const appVersion = useAppVersion();
     const isRegistered = settings.isRegistered;
     const [showLicenseModal, setShowLicenseModal] = useState(false);
     const [showSupportModal, setShowSupportModal] = useState(false);
@@ -163,7 +165,7 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                 </div>
 
                 <div className="neo-box p-2 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest border-2 border-[var(--border-main)] relative overflow-hidden group">
-                    <span className="relative z-10">v{import.meta.env.PACKAGE_VERSION || '1.1.0'}</span>
+                    <span className="relative z-10">v{appVersion}</span>
                     <div className="absolute inset-0 bg-[var(--accent-warning)] translate-y-full group-hover:translate-y-0 transition-transform duration-200" />
                 </div>
             </div>

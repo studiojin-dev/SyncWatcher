@@ -2,14 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AboutView from './AboutView';
-import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 
-// Mock Tauri invoke
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: vi.fn(),
+vi.mock('@tauri-apps/api/app', () => ({
+  getVersion: vi.fn(),
 }));
 
-const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
+const mockGetVersion = vi.mocked(getVersion);
 
 // Mock i18n
 vi.mock('react-i18next', () => ({
@@ -44,8 +43,7 @@ vi.stubGlobal('alert', mockAlert);
 describe('AboutView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default mock for get_app_version
-    mockInvoke.mockResolvedValue('0.1.0');
+    mockGetVersion.mockResolvedValue('0.1.0');
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([
@@ -62,31 +60,14 @@ describe('AboutView', () => {
   });
 
   it('should load version from Cargo.toml on mount', async () => {
-    mockInvoke.mockResolvedValueOnce('1.0.0');
+    mockGetVersion.mockResolvedValueOnce('1.0.0');
 
     render(<AboutView />);
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('get_app_version');
+      expect(mockGetVersion).toHaveBeenCalled();
       expect(screen.getByText('Version 1.0.0')).toBeInTheDocument();
     });
-  });
-
-  it('should fallback to hardcoded version if command fails', async () => {
-    mockInvoke.mockRejectedValueOnce(new Error('Failed to get version'));
-
-    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => { });
-
-    render(<AboutView />);
-
-    await waitFor(() => {
-      expect(consoleWarn).toHaveBeenCalledWith(
-        'Failed to get app version from Cargo.toml'
-      );
-        expect(screen.getByText('Version 1.1.0')).toBeInTheDocument();
-      });
-
-    consoleWarn.mockRestore();
   });
 
   it('should show developer information', async () => {

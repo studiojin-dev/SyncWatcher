@@ -1,24 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconLicense, IconBrandGithub } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { LicenseCard, LicenseData } from '../components/ui/LicenseCard';
+import { useAppVersion } from '../hooks/useAppVersion';
 
 function AboutView() {
   const { t } = useTranslation();
   const [showLicenses, setShowLicenses] = useState(false);
-  const [appVersion, setAppVersion] = useState('1.1.0');
+  const appVersion = useAppVersion();
   const [licenseData, setLicenseData] = useState<LicenseData[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
-
-  useEffect(() => {
-    invoke<string>('get_app_version')
-      .then(setAppVersion)
-      .catch(() => {
-        // Fallback to hardcoded version if command fails
-        console.warn('Failed to get app version from Cargo.toml');
-      });
-  }, []);
 
   const handleViewLicenses = async () => {
     try {
