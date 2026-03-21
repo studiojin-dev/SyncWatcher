@@ -3,7 +3,9 @@ mod integration_tests {
     use crate::config_store::{launch_at_login_status_or_default, ConfigStore};
     use crate::logging::LogManager;
     use crate::mcp_jobs::McpJobRegistry;
-    use crate::sync_engine::TargetPreflightKind;
+    use crate::sync_engine::types::{
+        DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
+    };
     use crate::watcher::WatcherManager;
     use crate::{
         cancel_operation_internal, classify_missing_target_path, compute_volume_mount_diff,
@@ -13,6 +15,7 @@ mod integration_tests {
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
         progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
+        DryRunLiveState,
         remove_runtime_sync_task_state, resolve_runtime_exclude_patterns,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
         set_auto_unmount_session_disabled_internal, sync_dry_run_internal,
@@ -69,12 +72,39 @@ mod integration_tests {
         }
     }
 
+    fn build_dry_run_progress(
+        phase: DryRunPhase,
+        message: &str,
+        current: u64,
+        total: u64,
+        total_files: usize,
+        files_to_copy: usize,
+        files_modified: usize,
+        bytes_to_copy: u64,
+    ) -> DryRunProgress {
+        DryRunProgress {
+            phase,
+            message: message.to_string(),
+            current,
+            total,
+            processed_bytes: bytes_to_copy,
+            total_bytes: bytes_to_copy,
+            summary: DryRunSummary {
+                total_files,
+                files_to_copy,
+                files_modified,
+                bytes_to_copy,
+            },
+        }
+    }
+
     fn build_app_state() -> AppState {
         AppState {
             config_store: Arc::new(ConfigStore::from_config_dir(temp_config_dir())),
             log_manager: Arc::new(LogManager::new(100)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            dry_running_tasks: Arc::new(RwLock::new(HashSet::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(Default::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -742,6 +772,7 @@ mod integration_tests {
         std::fs::create_dir_all(&target).expect("target directory should be created");
 
         let result = sync_dry_run_internal(
+            None,
             "task-1".to_string(),
             base.join("missing-source"),
             target,
@@ -749,11 +780,162 @@ mod integration_tests {
             Vec::new(),
             &state,
             None,
+            None,
         )
         .await;
 
         assert!(result.is_err());
         assert!(state.dry_run_cancel_tokens.read().await.is_empty());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn test_runtime_get_state_includes_dry_running_tasks() {
+        let state = build_app_state();
+
+        {
+            let mut running = state.dry_running_tasks.write().await;
+            running.insert("task-1".to_string());
+        }
+
+        let runtime = runtime_get_state_internal(&state).await;
+
+        assert_eq!(runtime.dry_running_tasks, vec!["task-1".to_string()]);
+    }
+
+    #[test]
+    fn test_dry_run_live_state_throttles_progress_and_flushes_timed_batches() {
+        let live = DryRunLiveState::new();
+        let base = Instant::now();
+        let scan_progress = build_dry_run_progress(
+            DryRunPhase::ScanningSource,
+            "scanning",
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+        );
+
+        let (first_progress, first_batch) = live.record_progress(scan_progress.clone(), base);
+        assert_eq!(first_progress.as_ref().map(|progress| progress.message.as_str()), Some("scanning"));
+        assert!(first_batch.is_none());
+
+        let (second_progress, second_batch) =
+            live.record_progress(scan_progress.clone(), base + Duration::from_millis(50));
+        assert!(second_progress.is_none());
+        assert!(second_batch.is_none());
+
+        let compare_progress = build_dry_run_progress(
+            DryRunPhase::Comparing,
+            "compare",
+            2,
+            3,
+            3,
+            2,
+            1,
+            4096,
+        );
+        let diff_a = FileDiff {
+            path: PathBuf::from("b.txt"),
+            kind: FileDiffKind::New,
+            source_size: Some(1024),
+            target_size: None,
+            checksum_source: None,
+            checksum_target: None,
+        };
+        let diff_b = FileDiff {
+            path: PathBuf::from("a.txt"),
+            kind: FileDiffKind::Modified,
+            source_size: Some(2048),
+            target_size: Some(1024),
+            checksum_source: None,
+            checksum_target: None,
+        };
+
+        assert!(live
+            .record_diff(diff_a, compare_progress.clone(), base + Duration::from_millis(120))
+            .is_none());
+        assert!(live
+            .record_diff(diff_b, compare_progress.clone(), base + Duration::from_millis(180))
+            .is_none());
+
+        let (third_progress, timed_batch) =
+            live.record_progress(compare_progress.clone(), base + Duration::from_millis(320));
+        assert!(third_progress.is_some());
+        let (diffs, batch_progress) = timed_batch.expect("timed batch should flush");
+        assert_eq!(diffs.len(), 2);
+        assert_eq!(batch_progress.phase, DryRunPhase::Comparing);
+        assert_eq!(batch_progress.message, "compare");
+    }
+
+    #[test]
+    fn test_dry_run_live_state_flushes_on_batch_size_limit() {
+        let live = DryRunLiveState::new();
+        let progress = build_dry_run_progress(
+            DryRunPhase::Comparing,
+            "compare",
+            50,
+            50,
+            50,
+            50,
+            0,
+            1024,
+        );
+
+        let mut batch = None;
+        for index in 0..50 {
+            let diff = FileDiff {
+                path: PathBuf::from(format!("file-{index}.txt")),
+                kind: FileDiffKind::New,
+                source_size: Some(1),
+                target_size: None,
+                checksum_source: None,
+                checksum_target: None,
+            };
+            batch = live.record_diff(diff, progress.clone(), Instant::now());
+        }
+
+        let (diffs, batch_progress) = batch.expect("batch size flush should trigger");
+        assert_eq!(diffs.len(), 50);
+        assert_eq!(batch_progress.phase, DryRunPhase::Comparing);
+    }
+
+    #[tokio::test]
+    async fn test_sync_dry_run_internal_returns_sorted_diff_order() {
+        let state = build_app_state();
+        let base = temp_config_dir();
+        let source = base.join("source");
+        let target = base.join("target");
+        std::fs::create_dir_all(&source).expect("source directory should be created");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+
+        std::fs::write(source.join("b.txt"), b"bbb").expect("should write b.txt");
+        std::fs::write(source.join("a.txt"), b"aaa").expect("should write a.txt");
+
+        let result = sync_dry_run_internal(
+            None,
+            "task-1".to_string(),
+            source.clone(),
+            target.clone(),
+            false,
+            Vec::new(),
+            &state,
+            None,
+            None,
+        )
+        .await
+        .expect("dry run should succeed");
+
+        let paths: Vec<String> = result
+            .diffs
+            .iter()
+            .map(|diff| diff.path.to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(paths, vec!["a.txt".to_string(), "b.txt".to_string()]);
 
         let _ = std::fs::remove_dir_all(&base);
     }

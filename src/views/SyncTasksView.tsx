@@ -74,7 +74,7 @@ type SubView =
       target: string;
       excludePatterns: string[];
     }
-  | { kind: 'dryRun'; taskName: string; result: DryRunResult };
+  | { kind: 'dryRun'; taskId: string; taskName: string };
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -156,7 +156,8 @@ function SyncTasksView() {
   const [subView, setSubView] = useState<SubView>({ kind: 'list' });
 
   // 상태 스토어 연동
-  const { statuses, watchingTaskIds, queuedTaskIds } = useSyncTaskStatusStore();
+  const { statuses, watchingTaskIds, queuedTaskIds, dryRunSessions, clearDryRunSession } =
+    useSyncTaskStatusStore();
 
   // Changing the logic: adding state for selected sets in form
   const [selectedSets, setSelectedSets] = useState<string[]>([]);
@@ -169,8 +170,6 @@ function SyncTasksView() {
   const [watchMode, setWatchMode] = useState(false);
   const [autoUnmount, setAutoUnmount] = useState(false);
 
-  // Dry Run state
-  const [dryRunning, setDryRunning] = useState<string | null>(null);
   const [watchTogglePendingIds, setWatchTogglePendingIds] = useState<
     Set<string>
   >(new Set());
@@ -192,6 +191,20 @@ function SyncTasksView() {
     ConflictSessionSummary[]
   >([]);
   const [conflictSessionsLoading, setConflictSessionsLoading] = useState(false);
+
+  useEffect(() => {
+    const taskIds = new Set(tasks.map((task) => task.id));
+
+    for (const taskId of dryRunSessions.keys()) {
+      if (!taskIds.has(taskId)) {
+        clearDryRunSession(taskId);
+      }
+    }
+
+    if (subView.kind === 'dryRun' && !taskIds.has(subView.taskId)) {
+      setSubView({ kind: 'list' });
+    }
+  }, [clearDryRunSession, dryRunSessions, subView, tasks]);
 
   const loadConflictSessions = useCallback(async () => {
     try {
@@ -728,13 +741,15 @@ function SyncTasksView() {
     [showToast, t, updateTask, watchTogglePendingIds],
   );
 
-  const handleDryRun = async (task: SyncTask) => {
-    if (dryRunning === task.id) {
-      // 이미 실행 중이면 취소 확인 모달 표시
-      setCancelConfirm({ type: 'dryRun', taskId: task.id });
-      return;
-    }
+  const openDryRunSession = useCallback((task: SyncTask) => {
+    setSubView({
+      kind: 'dryRun',
+      taskId: task.id,
+      taskName: task.name,
+    });
+  }, []);
 
+  const startDryRun = useCallback(async (task: SyncTask) => {
     const confirmed = await ask(
       t('syncTasks.confirmDryRun', {
         defaultValue: 'Dry Run을 시작할까요?',
@@ -748,9 +763,13 @@ function SyncTasksView() {
       return;
     }
 
+    const store = useSyncTaskStatusStore.getState();
+    store.beginDryRunSession(task.id, task.name);
+    store.setDryRunning(task.id, true);
+    openDryRunSession(task);
+    showToast(t('syncTasks.dryRun') + '...', 'info');
+
     try {
-      setDryRunning(task.id);
-      showToast(t('syncTasks.dryRun') + '...', 'info');
       const result = await invoke<DryRunResult>('sync_dry_run', {
         taskId: task.id,
         source: task.source,
@@ -758,20 +777,38 @@ function SyncTasksView() {
         checksumMode: task.checksumMode,
         excludePatterns: getPatternsForSets(task.exclusionSets || []),
       });
+      store.completeDryRunSession(task.id, result);
       showTargetPreflightToast(result.targetPreflight, showToast, t);
       showToast(t('syncTasks.dryRun') + ' ' + t('common.success'), 'success');
-      setSubView({
-        kind: 'dryRun',
-        taskName: task.name,
-        result,
-      });
     } catch (err) {
       console.error('Dry run failed:', err);
-      showToast(String(err), 'error');
+      const errorMessage = getErrorMessage(err);
+      store.failDryRunSession(task.id, errorMessage);
+      if (errorMessage.toLowerCase().includes('cancel')) {
+        return;
+      }
+      showToast(errorMessage, 'error');
     } finally {
-      setDryRunning(null);
+      store.setDryRunning(task.id, false);
     }
-  };
+  }, [getPatternsForSets, openDryRunSession, showToast, t]);
+
+  const handleDryRun = useCallback(async (task: SyncTask) => {
+    const taskStatus = statuses.get(task.id);
+    const existingSession = dryRunSessions.get(task.id);
+
+    if (existingSession) {
+      openDryRunSession(task);
+      return;
+    }
+
+    if (taskStatus?.status === 'dryRunning') {
+      setCancelConfirm({ type: 'dryRun', taskId: task.id });
+      return;
+    }
+
+    await startDryRun(task);
+  }, [dryRunSessions, openDryRunSession, startDryRun, statuses]);
 
   const handleDelete = async (task: SyncTask) => {
     const confirmed = await ask(
@@ -787,6 +824,7 @@ function SyncTasksView() {
     if (confirmed) {
       try {
         await deleteTask(task.id);
+        clearDryRunSession(task.id);
         showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
       } catch (error) {
         showToast(getErrorMessage(error), 'error');
@@ -817,8 +855,6 @@ function SyncTasksView() {
     } finally {
       if (cancelConfirm.type === 'sync') {
         setSyncing(null);
-      } else {
-        setDryRunning(null);
       }
       setCancelConfirm(null);
     }
@@ -833,6 +869,14 @@ function SyncTasksView() {
       }
     },
     [showToast],
+  );
+
+  const activeDryRunTask = useMemo(
+    () =>
+      subView.kind === 'dryRun'
+        ? tasks.find((task) => task.id === subView.taskId) ?? null
+        : null,
+    [subView, tasks],
   );
 
   return (
@@ -1253,9 +1297,17 @@ function SyncTasksView() {
 
       {subView.kind === 'dryRun' ? (
         <DryRunResultView
+          taskId={subView.taskId}
           taskName={subView.taskName}
-          result={subView.result}
           onBack={() => setSubView({ kind: 'list' })}
+          onRequestCancel={() => setCancelConfirm({ type: 'dryRun', taskId: subView.taskId })}
+          onRequestRerun={
+            activeDryRunTask
+              ? () => {
+                  void startDryRun(activeDryRunTask);
+                }
+              : undefined
+          }
         />
       ) : null}
 
@@ -1272,7 +1324,13 @@ function SyncTasksView() {
               void handleOpenConflictSession(sessionId);
             }}
           />
-          {tasks.map((task, index) => (
+          {tasks.map((task, index) => {
+            const taskStatus = statuses.get(task.id);
+            const dryRunSession = dryRunSessions.get(task.id);
+            const hasDryRunSession = Boolean(dryRunSession);
+            const isDryRunning = taskStatus?.status === 'dryRunning';
+
+            return (
             <CardAnimation key={task.id} index={index}>
               <div className="neo-box p-5 relative transition-opacity">
                 <div className="flex flex-col md:flex-row justify-between items-start gap-4">
@@ -1323,15 +1381,19 @@ function SyncTasksView() {
                     </div>
                     <div className="flex gap-2 pb-2 shrink-0 md:self-start self-end mt-2 md:mt-0">
                       <button
-                        className={`p-2 border-2 border-[var(--border-main)] transition-all ${dryRunning === task.id ? 'bg-[var(--color-accent-warning)] animate-pulse' : 'hover:bg-[var(--bg-tertiary)]'}`}
+                        className={`p-2 border-2 border-[var(--border-main)] transition-all ${isDryRunning ? 'bg-[var(--color-accent-warning)] animate-pulse' : 'hover:bg-[var(--bg-tertiary)]'}`}
                         onClick={() => handleDryRun(task)}
                         title={
-                          dryRunning === task.id
+                          hasDryRunSession
+                            ? t('syncTasks.dryRun')
+                            : isDryRunning
                             ? t('common.cancel', { defaultValue: '취소' })
                             : t('syncTasks.dryRun')
                         }
                       >
-                        {dryRunning === task.id ? (
+                        {hasDryRunSession ? (
+                          <IconEye size={20} stroke={2} />
+                        ) : isDryRunning ? (
                           <IconPlayerStop size={20} stroke={2} />
                         ) : (
                           <IconFlask size={20} stroke={2} />
@@ -1520,7 +1582,8 @@ function SyncTasksView() {
                 </div>
               </div>
             </CardAnimation>
-          ))}
+            );
+          })}
         </div>
       ) : null}
     </div>

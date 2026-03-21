@@ -68,23 +68,24 @@ SyncWatcher is a high-performance, native-feeling macOS file synchronization app
 ### Prerequisites
 
 - **Rust** 1.70+ - For CLI and backend
-- **Node.js** 18+ - For frontend development
+- **Node.js** `^20.19.0 || >=22.12.0` - For frontend development
+- **pnpm** 10+ - Canonical package manager for this repository
 - **macOS** 11+ - Target platform
 
 ### Development
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Run development server (Tauri + Vite)
-npm run dev
+pnpm dev
 
 # Build for production
-npm run build
+pnpm build
 
 # Build Tauri bundle
-npm run tauri build
+pnpm tauri build
 ```
 
 ### macOS Installation

@@ -1,4 +1,12 @@
 import { create } from 'zustand';
+import type {
+    DryRunDiffBatchEvent,
+    DryRunProgressEvent,
+    DryRunResult,
+    DryRunResultSummary,
+    DryRunSessionState,
+} from '../types/syncEngine';
+import { isTerminalDryRunSessionStatus } from '../types/syncEngine';
 
 export interface TaskStatus {
     taskId: string;
@@ -19,6 +27,51 @@ export interface TaskStatus {
     };
 }
 
+function createEmptyDryRunResult(): DryRunResult {
+    return {
+        diffs: [],
+        total_files: 0,
+        files_to_copy: 0,
+        files_modified: 0,
+        bytes_to_copy: 0,
+        targetPreflight: null,
+    };
+}
+
+function createDryRunSession(taskId: string, taskName: string): DryRunSessionState {
+    return {
+        taskId,
+        taskName,
+        status: 'running',
+        result: createEmptyDryRunResult(),
+        updatedAtUnixMs: Date.now(),
+    };
+}
+
+function mergeDryRunSummary(
+    result: DryRunResult,
+    summary?: Partial<DryRunResultSummary>,
+): DryRunResult {
+    if (!summary) {
+        return result;
+    }
+
+    return {
+        ...result,
+        total_files: summary.total_files ?? result.total_files,
+        files_to_copy: summary.files_to_copy ?? result.files_to_copy,
+        files_modified: summary.files_modified ?? result.files_modified,
+        bytes_to_copy: summary.bytes_to_copy ?? result.bytes_to_copy,
+    };
+}
+
+function getOrCreateDryRunSession(
+    sessions: Map<string, DryRunSessionState>,
+    taskId: string,
+): DryRunSessionState {
+    return sessions.get(taskId) || createDryRunSession(taskId, taskId);
+}
+
 interface SyncTaskStatusStore {
     /** 각 Task의 상태 맵 */
     statuses: Map<string, TaskStatus>;
@@ -28,37 +81,49 @@ interface SyncTaskStatusStore {
     queuedTaskIds: Set<string>;
     /** 런타임에서 동기화 실행 중인 Task ID 집합 */
     syncingTaskIds: Set<string>;
+    /** 런타임에서 dry-run 실행 중인 Task ID 집합 */
+    dryRunningTaskIds: Set<string>;
+    /** dry-run 라이브 세션 맵 */
+    dryRunSessions: Map<string, DryRunSessionState>;
 
     /** 상태 업데이트 */
     setStatus: (taskId: string, status: TaskStatus['status']) => void;
-
     /** 마지막 로그 업데이트 */
     setLastLog: (taskId: string, log: TaskStatus['lastLog']) => void;
-
     /** 진행률 업데이트 */
     setProgress: (taskId: string, progress: TaskStatus['progress']) => void;
-
     /** 상태 조회 */
     getStatus: (taskId: string) => TaskStatus | undefined;
-
     /** 감시 상태 업데이트 */
     setWatching: (taskId: string, watching: boolean) => void;
-
     /** 감시 상태 일괄 업데이트 */
     setWatchingTasks: (taskIds: string[]) => void;
-
     /** 큐 상태 업데이트 */
     setQueued: (taskId: string, queued: boolean) => void;
-
     /** 큐 상태 일괄 업데이트 */
     setQueuedTasks: (taskIds: string[]) => void;
-
     /** syncing 상태 업데이트 */
     setSyncing: (taskId: string, syncing: boolean) => void;
-
     /** syncing 상태 일괄 업데이트 */
     setSyncingTasks: (taskIds: string[]) => void;
-
+    /** dry-run 상태 업데이트 */
+    setDryRunning: (taskId: string, dryRunning: boolean) => void;
+    /** dry-run 상태 일괄 업데이트 */
+    setDryRunningTasks: (taskIds: string[]) => void;
+    /** dry-run 세션 초기화 */
+    beginDryRunSession: (taskId: string, taskName: string) => void;
+    /** dry-run 진행 상태 업데이트 */
+    setDryRunProgress: (taskId: string, progress: DryRunProgressEvent) => void;
+    /** dry-run diff 배치 반영 */
+    appendDryRunDiffBatch: (taskId: string, batch: DryRunDiffBatchEvent) => void;
+    /** dry-run 완료 상태 반영 */
+    completeDryRunSession: (taskId: string, result: DryRunResult) => void;
+    /** dry-run 실패 상태 반영 */
+    failDryRunSession: (taskId: string, error: string) => void;
+    /** dry-run 세션 조회 */
+    getDryRunSession: (taskId: string) => DryRunSessionState | undefined;
+    /** dry-run 세션 초기화 */
+    clearDryRunSession: (taskId: string) => void;
     /** 상태 초기화 */
     clearStatus: (taskId: string) => void;
 }
@@ -72,6 +137,8 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
     watchingTaskIds: new Set<string>(),
     queuedTaskIds: new Set<string>(),
     syncingTaskIds: new Set<string>(),
+    dryRunningTaskIds: new Set<string>(),
+    dryRunSessions: new Map<string, DryRunSessionState>(),
 
     setStatus: (taskId, status) => {
         set((state) => {
@@ -100,9 +167,7 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
         });
     },
 
-    getStatus: (taskId) => {
-        return get().statuses.get(taskId);
-    },
+    getStatus: (taskId) => get().statuses.get(taskId),
 
     setWatching: (taskId, watching) => {
         set((state) => {
@@ -186,6 +251,157 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
         set({ syncingTaskIds: new Set(taskIds) });
     },
 
+    setDryRunning: (taskId, dryRunning) => {
+        set((state) => {
+            const nextDryRunning = new Set(state.dryRunningTaskIds);
+            const nextStatuses = new Map(state.statuses);
+            const current = nextStatuses.get(taskId) || { taskId, status: 'idle' as const };
+
+            if (dryRunning) {
+                nextDryRunning.add(taskId);
+                if (current.status !== 'syncing' && current.status !== 'queued') {
+                    nextStatuses.set(taskId, { ...current, status: 'dryRunning' });
+                }
+            } else {
+                nextDryRunning.delete(taskId);
+                if (
+                    current.status === 'dryRunning' &&
+                    !state.syncingTaskIds.has(taskId) &&
+                    !state.queuedTaskIds.has(taskId)
+                ) {
+                    nextStatuses.set(taskId, {
+                        ...current,
+                        status: state.watchingTaskIds.has(taskId) ? 'watching' : 'idle',
+                    });
+                }
+            }
+
+            return {
+                dryRunningTaskIds: nextDryRunning,
+                statuses: nextStatuses,
+            };
+        });
+    },
+
+    setDryRunningTasks: (taskIds) => {
+        set((state) => {
+            const nextDryRunning = new Set(taskIds);
+            const nextStatuses = new Map(state.statuses);
+
+            for (const taskId of nextDryRunning) {
+                const current = nextStatuses.get(taskId) || { taskId, status: 'idle' as const };
+                if (current.status !== 'syncing' && current.status !== 'queued') {
+                    nextStatuses.set(taskId, { ...current, status: 'dryRunning' });
+                }
+            }
+
+            for (const [taskId, current] of nextStatuses.entries()) {
+                if (
+                    current.status === 'dryRunning' &&
+                    !nextDryRunning.has(taskId) &&
+                    !state.syncingTaskIds.has(taskId) &&
+                    !state.queuedTaskIds.has(taskId)
+                ) {
+                    nextStatuses.set(taskId, {
+                        ...current,
+                        status: state.watchingTaskIds.has(taskId) ? 'watching' : 'idle',
+                    });
+                }
+            }
+
+            return {
+                dryRunningTaskIds: nextDryRunning,
+                statuses: nextStatuses,
+            };
+        });
+    },
+
+    beginDryRunSession: (taskId, taskName) => {
+        set((state) => {
+            const nextSessions = new Map(state.dryRunSessions);
+            nextSessions.set(taskId, createDryRunSession(taskId, taskName));
+            return { dryRunSessions: nextSessions };
+        });
+    },
+
+    setDryRunProgress: (taskId, progress) => {
+        set((state) => {
+            const nextSessions = new Map(state.dryRunSessions);
+            const current = getOrCreateDryRunSession(nextSessions, taskId);
+            if (isTerminalDryRunSessionStatus(current.status)) {
+                return { dryRunSessions: nextSessions };
+            }
+            nextSessions.set(taskId, {
+                ...current,
+                status: 'running',
+                progress,
+                updatedAtUnixMs: Date.now(),
+            });
+            return { dryRunSessions: nextSessions };
+        });
+    },
+
+    appendDryRunDiffBatch: (taskId, batch) => {
+        set((state) => {
+            const nextSessions = new Map(state.dryRunSessions);
+            const current = getOrCreateDryRunSession(nextSessions, taskId);
+            if (isTerminalDryRunSessionStatus(current.status)) {
+                return { dryRunSessions: nextSessions };
+            }
+            const currentResult = mergeDryRunSummary(current.result, batch.summary);
+            nextSessions.set(taskId, {
+                ...current,
+                status: 'running',
+                result: {
+                    ...currentResult,
+                    diffs: [...currentResult.diffs, ...batch.diffs],
+                    targetPreflight: batch.targetPreflight ?? currentResult.targetPreflight,
+                },
+                updatedAtUnixMs: Date.now(),
+            });
+            return { dryRunSessions: nextSessions };
+        });
+    },
+
+    completeDryRunSession: (taskId, result) => {
+        set((state) => {
+            const nextSessions = new Map(state.dryRunSessions);
+            const current = nextSessions.get(taskId) || createDryRunSession(taskId, taskId);
+            nextSessions.set(taskId, {
+                ...current,
+                status: 'completed',
+                result,
+                error: undefined,
+                updatedAtUnixMs: Date.now(),
+            });
+            return { dryRunSessions: nextSessions };
+        });
+    },
+
+    failDryRunSession: (taskId, error) => {
+        set((state) => {
+            const nextSessions = new Map(state.dryRunSessions);
+            const current = nextSessions.get(taskId) || createDryRunSession(taskId, taskId);
+            nextSessions.set(taskId, {
+                ...current,
+                status: error.toLowerCase().includes('cancel') ? 'cancelled' : 'failed',
+                error,
+                updatedAtUnixMs: Date.now(),
+            });
+            return { dryRunSessions: nextSessions };
+        });
+    },
+
+    getDryRunSession: (taskId) => get().dryRunSessions.get(taskId),
+
+    clearDryRunSession: (taskId) => {
+        set((state) => {
+            const nextSessions = new Map(state.dryRunSessions);
+            nextSessions.delete(taskId);
+            return { dryRunSessions: nextSessions };
+        });
+    },
+
     clearStatus: (taskId) => {
         set((state) => {
             const newStatuses = new Map(state.statuses);
@@ -214,4 +430,8 @@ export function useSyncTaskStatus(taskId: string) {
         setProgress: (progress: TaskStatus['progress']) => setProgress(taskId, progress),
         clearStatus: () => clearStatus(taskId),
     };
+}
+
+export function useDryRunSession(taskId: string) {
+    return useSyncTaskStatusStore((state) => state.dryRunSessions.get(taskId));
 }

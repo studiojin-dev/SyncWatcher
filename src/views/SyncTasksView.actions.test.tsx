@@ -22,7 +22,18 @@ const {
     watchingTaskIds: new Set<string>(['task-1']),
     queuedTaskIds: new Set<string>(),
     syncingTaskIds: new Set<string>(),
+    dryRunningTaskIds: new Set<string>(),
+    dryRunSessions: new Map<string, unknown>(),
     setLastLog: vi.fn(),
+    setDryRunning: vi.fn(),
+    setDryRunningTasks: vi.fn(),
+    beginDryRunSession: vi.fn(),
+    setDryRunProgress: vi.fn(),
+    appendDryRunDiffBatch: vi.fn(),
+    completeDryRunSession: vi.fn(),
+    failDryRunSession: vi.fn(),
+    getDryRunSession: vi.fn(),
+    clearDryRunSession: vi.fn(),
   };
   const useSyncTaskStatusStoreMock = Object.assign(() => statusState, {
     getState: () => statusState,
@@ -95,6 +106,7 @@ vi.mock('../hooks/useSettings', () => ({
 
 vi.mock('../hooks/useSyncTaskStatus', () => ({
   useSyncTaskStatusStore: useSyncTaskStatusStoreMock,
+  useDryRunSession: (taskId: string) => statusState.dryRunSessions.get(taskId),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -114,8 +126,18 @@ describe('SyncTasksView action confirmations', () => {
     statusState.watchingTaskIds = new Set(['task-1']);
     statusState.queuedTaskIds = new Set();
     statusState.syncingTaskIds = new Set();
+    statusState.dryRunningTaskIds = new Set();
+    statusState.dryRunSessions = new Map();
     statusState.statuses = new Map();
     statusState.setLastLog.mockReset();
+    statusState.setDryRunning.mockReset();
+    statusState.beginDryRunSession.mockReset();
+    statusState.completeDryRunSession.mockReset();
+    statusState.failDryRunSession.mockReset();
+    statusState.clearDryRunSession.mockReset();
+    statusState.clearDryRunSession.mockImplementation((taskId: string) => {
+      statusState.dryRunSessions.delete(taskId);
+    });
     showToastMock.mockReset();
     listenMock.mockResolvedValue(() => {});
     openMock.mockResolvedValue(null);
@@ -167,6 +189,60 @@ describe('SyncTasksView action confirmations', () => {
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
     ).toBe(false);
+  });
+
+  it('reopens an existing dry-run session instead of starting a new run', async () => {
+    statusState.dryRunSessions = new Map([
+      [
+        'task-1',
+        {
+          taskId: 'task-1',
+          taskName: 'Task 1',
+          status: 'completed',
+          result: {
+            diffs: [],
+            total_files: 0,
+            files_to_copy: 0,
+            files_modified: 0,
+            bytes_to_copy: 0,
+            targetPreflight: null,
+          },
+        },
+      ],
+    ]);
+
+    render(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+
+    expect(askMock).not.toHaveBeenCalled();
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+    ).toBe(false);
+    expect(screen.getByText('syncTasks.dryRun · Task 1')).toBeInTheDocument();
+  });
+
+  it('keeps the cancel modal path when dry-run is active without a local session', async () => {
+    statusState.statuses = new Map([
+      ['task-1', { taskId: 'task-1', status: 'dryRunning' }],
+    ]);
+
+    render(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('common.cancel')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('common.cancel'));
+
+    expect(askMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('syncTasks.cancelDryRun', { exact: false }),
+    ).toBeInTheDocument();
   });
 
   it('does not execute sync when confirmation is rejected', async () => {
@@ -254,6 +330,43 @@ describe('SyncTasksView action confirmations', () => {
         level: 'warning',
       }),
     );
+  });
+
+  it('starts a new dry-run from the result view retry action', async () => {
+    statusState.dryRunSessions = new Map([
+      [
+        'task-1',
+        {
+          taskId: 'task-1',
+          taskName: 'Task 1',
+          status: 'completed',
+          result: {
+            diffs: [],
+            total_files: 0,
+            files_to_copy: 0,
+            files_modified: 0,
+            bytes_to_copy: 0,
+            targetPreflight: null,
+          },
+        },
+      ],
+    ]);
+
+    render(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+    fireEvent.click(screen.getByText('common.retry'));
+
+    await waitFor(() => {
+      expect(askMock).toHaveBeenCalled();
+    });
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+    ).toBe(true);
   });
 
   it('shows a warning toast when dry-run target directory will be created later', async () => {

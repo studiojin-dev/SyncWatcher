@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewUrl, WebviewWindow,
@@ -30,8 +30,9 @@ use tokio_util::sync::CancellationToken;
 
 use sync_engine::{
     types::{
-        DeleteOrphanResult, OrphanFile, SyncResult, TargetNewerConflictCandidate,
-        TargetPreflightInfo, TargetPreflightKind,
+        DeleteOrphanResult, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff,
+        OrphanFile, SyncResult, TargetNewerConflictCandidate, TargetPreflightInfo,
+        TargetPreflightKind,
     },
     DryRunResult, SyncEngine, SyncOptions,
 };
@@ -151,6 +152,144 @@ impl SyncProgressState {
     }
 }
 
+const DRY_RUN_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+const DRY_RUN_DIFF_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
+const DRY_RUN_DIFF_BATCH_MAX_SIZE: usize = 50;
+
+struct DryRunLiveStateInner {
+    last_progress_emit_at: Instant,
+    pending_diff_since: Option<Instant>,
+    pending_diffs: Vec<FileDiff>,
+    latest_progress: Option<DryRunProgress>,
+}
+
+impl DryRunLiveStateInner {
+    fn new() -> Self {
+        Self {
+            last_progress_emit_at: Instant::now() - DRY_RUN_PROGRESS_EMIT_INTERVAL,
+            pending_diff_since: None,
+            pending_diffs: Vec::with_capacity(DRY_RUN_DIFF_BATCH_MAX_SIZE),
+            latest_progress: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct DryRunLiveState {
+    inner: Arc<StdMutex<DryRunLiveStateInner>>,
+}
+
+impl DryRunLiveState {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(StdMutex::new(DryRunLiveStateInner::new())),
+        }
+    }
+
+    fn record_progress(
+        &self,
+        progress: DryRunProgress,
+        now: Instant,
+    ) -> (Option<DryRunProgress>, Option<(Vec<FileDiff>, DryRunProgress)>) {
+        let Ok(mut state) = self.inner.lock() else {
+            return (None, None);
+        };
+
+        state.latest_progress = Some(progress.clone());
+
+        let batch = if let Some(pending_since) = state.pending_diff_since {
+            if now.duration_since(pending_since) >= DRY_RUN_DIFF_BATCH_EMIT_INTERVAL
+                && !state.pending_diffs.is_empty()
+            {
+                state.pending_diff_since = None;
+                Some((
+                    std::mem::replace(
+                        &mut state.pending_diffs,
+                        Vec::with_capacity(DRY_RUN_DIFF_BATCH_MAX_SIZE),
+                    ),
+                    progress.clone(),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let should_emit_progress =
+            now.duration_since(state.last_progress_emit_at) >= DRY_RUN_PROGRESS_EMIT_INTERVAL;
+        let emitted_progress = if should_emit_progress {
+            state.last_progress_emit_at = now;
+            Some(progress)
+        } else {
+            None
+        };
+
+        (emitted_progress, batch)
+    }
+
+    fn record_diff(
+        &self,
+        diff: FileDiff,
+        progress: DryRunProgress,
+        now: Instant,
+    ) -> Option<(Vec<FileDiff>, DryRunProgress)> {
+        let Ok(mut state) = self.inner.lock() else {
+            return None;
+        };
+
+        state.latest_progress = Some(progress.clone());
+        if state.pending_diffs.is_empty() {
+            state.pending_diff_since = Some(now);
+        }
+
+        state.pending_diffs.push(diff);
+
+        if state.pending_diffs.len() >= DRY_RUN_DIFF_BATCH_MAX_SIZE {
+            state.pending_diff_since = None;
+            return Some((
+                std::mem::replace(
+                    &mut state.pending_diffs,
+                    Vec::with_capacity(DRY_RUN_DIFF_BATCH_MAX_SIZE),
+                ),
+                progress,
+            ));
+        }
+
+        None
+    }
+
+    fn flush_pending_diffs(
+        &self,
+        progress: DryRunProgress,
+    ) -> Option<(Vec<FileDiff>, DryRunProgress)> {
+        let Ok(mut state) = self.inner.lock() else {
+            return None;
+        };
+
+        if state.pending_diffs.is_empty() {
+            return None;
+        }
+
+        state.pending_diff_since = None;
+        Some((
+            std::mem::replace(
+                &mut state.pending_diffs,
+                Vec::with_capacity(DRY_RUN_DIFF_BATCH_MAX_SIZE),
+            ),
+            progress,
+        ))
+    }
+
+    fn latest_progress(&self) -> Option<DryRunProgress> {
+        let Ok(state) = self.inner.lock() else {
+            return None;
+        };
+
+        state.latest_progress.clone()
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     config_store: Arc<ConfigStore>,
@@ -159,6 +298,8 @@ pub struct AppState {
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// 현재 실행 중인 dry-run 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
     dry_run_cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    /// 현재 실행 중인 dry-run task 집합
+    dry_running_tasks: Arc<RwLock<HashSet<String>>>,
     /// 파일 시스템 감시 매니저
     watcher_manager: Arc<RwLock<WatcherManager>>,
     /// 프론트엔드에서 전달된 최신 런타임 설정
@@ -277,6 +418,7 @@ struct RuntimeState {
     watching_tasks: Vec<String>,
     syncing_tasks: Vec<String>,
     queued_tasks: Vec<String>,
+    dry_running_tasks: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -301,6 +443,39 @@ struct RuntimeSyncQueueStateEvent {
     task_id: String,
     queued: bool,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeDryRunStateEvent {
+    task_id: String,
+    dry_running: bool,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DryRunProgressEvent {
+    task_id: String,
+    phase: DryRunPhase,
+    message: String,
+    current: u64,
+    total: u64,
+    processed_bytes: u64,
+    total_bytes: u64,
+    summary: DryRunSummary,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DryRunDiffBatchEvent {
+    task_id: String,
+    phase: DryRunPhase,
+    message: String,
+    summary: DryRunSummary,
+    diffs: Vec<FileDiff>,
+    #[serde(rename = "targetPreflight")]
+    target_preflight: Option<TargetPreflightInfo>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -862,6 +1037,53 @@ fn emit_runtime_sync_queue_state(
         reason,
     };
     let _ = app.emit("runtime-sync-queue-state", &event);
+}
+
+fn emit_runtime_dry_run_state(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    dry_running: bool,
+    reason: Option<String>,
+) {
+    let event = RuntimeDryRunStateEvent {
+        task_id: task_id.to_string(),
+        dry_running,
+        reason,
+    };
+    let _ = app.emit("runtime-dry-run-state", &event);
+}
+
+fn emit_dry_run_progress(app: &tauri::AppHandle, event: &DryRunProgressEvent) {
+    let _ = app.emit("dry-run-progress", event);
+}
+
+fn emit_dry_run_diff_batch(app: &tauri::AppHandle, event: &DryRunDiffBatchEvent) {
+    let _ = app.emit("dry-run-diff-batch", event);
+}
+
+fn dry_run_progress_event(task_id: &str, progress: &DryRunProgress) -> DryRunProgressEvent {
+    DryRunProgressEvent {
+        task_id: task_id.to_string(),
+        phase: progress.phase.clone(),
+        message: progress.message.clone(),
+        current: progress.current,
+        total: progress.total,
+        processed_bytes: progress.processed_bytes,
+        total_bytes: progress.total_bytes,
+        summary: progress.summary.clone(),
+    }
+}
+
+fn mcp_progress_from_dry_run(progress: &DryRunProgress) -> McpJobProgress {
+    McpJobProgress {
+        message: Some(progress.message.clone()),
+        current: progress.current,
+        total: progress.total,
+        processed_bytes: progress.processed_bytes,
+        total_bytes: progress.total_bytes,
+        current_file_bytes_copied: 0,
+        current_file_total_bytes: 0,
+    }
 }
 
 fn emit_runtime_auto_unmount_request(
@@ -1793,11 +2015,16 @@ async fn runtime_get_state_internal(state: &AppState) -> RuntimeState {
         let queue = state.runtime_sync_queue.read().await;
         queue.iter().cloned().collect()
     };
+    let dry_running_tasks = {
+        let running = state.dry_running_tasks.read().await;
+        running.iter().cloned().collect()
+    };
 
     RuntimeState {
         watching_tasks,
         syncing_tasks,
         queued_tasks,
+        dry_running_tasks,
     }
 }
 
@@ -2981,6 +3208,7 @@ async fn repair_config_store_file(
 }
 
 async fn sync_dry_run_internal(
+    app: Option<AppHandle>,
     task_id: String,
     source: PathBuf,
     target: PathBuf,
@@ -2988,6 +3216,7 @@ async fn sync_dry_run_internal(
     exclude_patterns: Vec<String>,
     state: &AppState,
     external_cancel_token: Option<CancellationToken>,
+    mcp_job_id: Option<String>,
 ) -> Result<DryRunResult, String> {
     try_acquire_task_operation(&task_id, TaskOperationKind::DryRun, state).await?;
 
@@ -3005,6 +3234,19 @@ async fn sync_dry_run_internal(
             .map_err(|e| e.to_string())?;
         input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
         let target_preflight = preflight_target_path(&target, false).await?;
+
+        {
+            let mut running = state.dry_running_tasks.write().await;
+            running.insert(task_id.clone());
+        }
+        if let Some(app_handle) = app.as_ref() {
+            emit_runtime_dry_run_state(
+                app_handle,
+                &task_id,
+                true,
+                Some("Dry run started".to_string()),
+            );
+        }
 
         state
             .log_manager
@@ -3043,8 +3285,94 @@ async fn sync_dry_run_internal(
             tokens.insert(task_id.clone(), cancel_token.clone());
         }
 
+        let live_state = DryRunLiveState::new();
+        let progress_target_preflight = target_preflight.clone();
+        let diff_target_preflight = target_preflight.clone();
+
+        let progress_state = live_state.clone();
+        let progress_app = app.clone();
+        let progress_jobs = state.mcp_jobs.clone();
+        let progress_job_id = mcp_job_id.clone();
+        let progress_task_id = task_id.clone();
+        let progress_emit = move |progress: DryRunProgress| {
+            let now = Instant::now();
+            let (maybe_progress, maybe_batch) = progress_state.record_progress(progress.clone(), now);
+
+            if let Some((diffs, batch_progress)) = maybe_batch {
+                if let Some(app_handle) = progress_app.as_ref() {
+                    let event = DryRunDiffBatchEvent {
+                        task_id: progress_task_id.clone(),
+                        phase: batch_progress.phase,
+                        message: batch_progress.message.clone(),
+                        summary: batch_progress.summary.clone(),
+                        diffs,
+                        target_preflight: Some(progress_target_preflight.clone()),
+                    };
+                    emit_dry_run_diff_batch(app_handle, &event);
+                }
+
+                if let Some(job_id) = progress_job_id.as_deref() {
+                    progress_jobs.try_update_progress(
+                        job_id,
+                        mcp_progress_from_dry_run(&batch_progress),
+                        unix_now_ms(),
+                    );
+                }
+            }
+
+            if let Some(emitted_progress) = maybe_progress {
+                if let Some(app_handle) = progress_app.as_ref() {
+                    let event = dry_run_progress_event(&progress_task_id, &emitted_progress);
+                    emit_dry_run_progress(app_handle, &event);
+                }
+
+                if let Some(job_id) = progress_job_id.as_deref() {
+                    progress_jobs.try_update_progress(
+                        job_id,
+                        mcp_progress_from_dry_run(&emitted_progress),
+                        unix_now_ms(),
+                    );
+                }
+            }
+        };
+
+        let diff_state = live_state.clone();
+        let diff_app = app.clone();
+        let diff_jobs = state.mcp_jobs.clone();
+        let diff_job_id = mcp_job_id.clone();
+        let diff_task_id = task_id.clone();
+        let diff_emit = move |diff: FileDiff, progress: DryRunProgress| {
+            let now = Instant::now();
+            if let Some((diffs, batch_progress)) = diff_state.record_diff(diff, progress, now) {
+                if let Some(app_handle) = diff_app.as_ref() {
+                    let event = DryRunDiffBatchEvent {
+                        task_id: diff_task_id.clone(),
+                        phase: batch_progress.phase,
+                        message: batch_progress.message.clone(),
+                        summary: batch_progress.summary.clone(),
+                        diffs,
+                        target_preflight: Some(diff_target_preflight.clone()),
+                    };
+                    emit_dry_run_diff_batch(app_handle, &event);
+                }
+
+                if let Some(job_id) = diff_job_id.as_deref() {
+                    diff_jobs.try_update_progress(
+                        job_id,
+                        mcp_progress_from_dry_run(&batch_progress),
+                        unix_now_ms(),
+                    );
+                }
+            }
+        };
+
         let result = engine
-            .dry_run_with_cancel(&options, cancel_token)
+            .dry_run_with_progress(
+                &options,
+                cancel_token.clone(),
+                progress_emit,
+                diff_emit,
+            )
             .await
             .map_err(|e| format!("{:#}", e));
 
@@ -3053,7 +3381,101 @@ async fn sync_dry_run_internal(
             tokens.remove(&task_id);
         }
 
-        let result = result?;
+        let result = match result {
+            Ok(result) => result,
+            Err(err) => {
+                if let Some(final_progress) = live_state.latest_progress() {
+                    if let Some((diffs, batch_progress)) =
+                        live_state.flush_pending_diffs(final_progress.clone())
+                    {
+                        if let Some(app_handle) = app.as_ref() {
+                            let event = DryRunDiffBatchEvent {
+                                task_id: task_id.clone(),
+                                phase: batch_progress.phase,
+                                message: batch_progress.message.clone(),
+                                summary: batch_progress.summary.clone(),
+                                diffs,
+                                target_preflight: Some(target_preflight.clone()),
+                            };
+                            emit_dry_run_diff_batch(app_handle, &event);
+                        }
+
+                        if let Some(job_id) = mcp_job_id.as_deref() {
+                            state.mcp_jobs.try_update_progress(
+                                job_id,
+                                mcp_progress_from_dry_run(&batch_progress),
+                                unix_now_ms(),
+                            );
+                        }
+                    }
+
+                    if let Some(app_handle) = app.as_ref() {
+                        let event = dry_run_progress_event(&task_id, &final_progress);
+                        emit_dry_run_progress(app_handle, &event);
+                    }
+
+                    if let Some(job_id) = mcp_job_id.as_deref() {
+                        state.mcp_jobs.try_update_progress(
+                            job_id,
+                            mcp_progress_from_dry_run(&final_progress),
+                            unix_now_ms(),
+                        );
+                    }
+                }
+
+                return Err(err);
+            }
+        };
+
+        if let Some(final_progress) = live_state.latest_progress().or_else(|| {
+            Some(DryRunProgress {
+                phase: DryRunPhase::Comparing,
+                message: "Dry run completed".to_string(),
+                current: result.total_files as u64,
+                total: result.total_files as u64,
+                processed_bytes: result.bytes_to_copy,
+                total_bytes: result.bytes_to_copy,
+                summary: DryRunSummary {
+                    total_files: result.total_files,
+                    files_to_copy: result.files_to_copy,
+                    files_modified: result.files_modified,
+                    bytes_to_copy: result.bytes_to_copy,
+                },
+            })
+        }) {
+            if let Some((diffs, batch_progress)) = live_state.flush_pending_diffs(final_progress.clone()) {
+                if let Some(app_handle) = app.as_ref() {
+                    let event = DryRunDiffBatchEvent {
+                        task_id: task_id.clone(),
+                        phase: batch_progress.phase,
+                        message: batch_progress.message.clone(),
+                        summary: batch_progress.summary.clone(),
+                        diffs,
+                        target_preflight: Some(target_preflight.clone()),
+                    };
+                    emit_dry_run_diff_batch(app_handle, &event);
+                }
+
+                if let Some(job_id) = mcp_job_id.as_deref() {
+                    state.mcp_jobs.try_update_progress(
+                        job_id,
+                        mcp_progress_from_dry_run(&batch_progress),
+                        unix_now_ms(),
+                    );
+                }
+            }
+
+            if let Some(app_handle) = app.as_ref() {
+                let event = dry_run_progress_event(&task_id, &final_progress);
+                emit_dry_run_progress(app_handle, &event);
+            }
+
+            if let Some(job_id) = mcp_job_id.as_deref() {
+                state
+                    .mcp_jobs
+                    .try_update_progress(job_id, mcp_progress_from_dry_run(&final_progress), unix_now_ms());
+            }
+        }
 
         Ok({
             let mut result = result;
@@ -3062,6 +3484,11 @@ async fn sync_dry_run_internal(
         })
     }
     .await;
+
+    {
+        let mut running = state.dry_running_tasks.write().await;
+        running.remove(&task_id);
+    }
 
     release_task_operation(&task_id, state).await;
 
@@ -3073,7 +3500,15 @@ async fn sync_dry_run_internal(
                 format_number(result.files_to_copy as u64),
                 format_bytes_with_unit(result.bytes_to_copy, unit_system)
             );
-            state.log_manager.log("success", &msg, Some(task_id));
+            state.log_manager.log("success", &msg, Some(task_id.clone()));
+            if let Some(app_handle) = app.as_ref() {
+                emit_runtime_dry_run_state(
+                    app_handle,
+                    &task_id,
+                    false,
+                    Some("Dry run completed".to_string()),
+                );
+            }
             Ok(result)
         }
         Err(e) => {
@@ -3081,11 +3516,22 @@ async fn sync_dry_run_internal(
             if err_text.contains("cancelled by user") {
                 state
                     .log_manager
-                    .log("warning", "Dry run cancelled by user", Some(task_id));
+                    .log("warning", "Dry run cancelled by user", Some(task_id.clone()));
+                if let Some(app_handle) = app.as_ref() {
+                    emit_runtime_dry_run_state(
+                        app_handle,
+                        &task_id,
+                        false,
+                        Some("Dry run cancelled by user".to_string()),
+                    );
+                }
                 Err("Dry run cancelled by user".to_string())
             } else {
                 let msg = format!("Dry run failed: {err_text}");
-                state.log_manager.log("error", &msg, Some(task_id));
+                state.log_manager.log("error", &msg, Some(task_id.clone()));
+                if let Some(app_handle) = app.as_ref() {
+                    emit_runtime_dry_run_state(app_handle, &task_id, false, Some(msg.clone()));
+                }
                 Err(err_text)
             }
         }
@@ -3222,6 +3668,7 @@ async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), Strin
 
 #[tauri::command]
 async fn sync_dry_run(
+    app: AppHandle,
     task_id: String,
     source: PathBuf,
     target: PathBuf,
@@ -3230,12 +3677,14 @@ async fn sync_dry_run(
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
     sync_dry_run_internal(
+        Some(app),
         task_id,
         source,
         target,
         checksum_mode,
         exclude_patterns,
         state.inner(),
+        None,
         None,
     )
     .await
@@ -4222,7 +4671,11 @@ async fn spawn_mcp_sync_job(
     Ok(job_id)
 }
 
-async fn spawn_mcp_dry_run_job(task_id: String, state: AppState) -> Result<String, String> {
+async fn spawn_mcp_dry_run_job(
+    task_id: String,
+    app: AppHandle,
+    state: AppState,
+) -> Result<String, String> {
     let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
     let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let job_id = next_mcp_job_id(McpJobKind::DryRun, seq);
@@ -4250,6 +4703,7 @@ async fn spawn_mcp_dry_run_job(task_id: String, state: AppState) -> Result<Strin
             .set_status(&job_id_for_job, McpJobStatus::Running, unix_now_ms())
             .await;
         let result = sync_dry_run_internal(
+            Some(app.clone()),
             task.id.clone(),
             PathBuf::from(task.source.clone()),
             PathBuf::from(task.target.clone()),
@@ -4257,6 +4711,7 @@ async fn spawn_mcp_dry_run_job(task_id: String, state: AppState) -> Result<Strin
             exclude_patterns,
             &state_for_job,
             Some(cancel_token.clone()),
+            Some(job_id_for_job.clone()),
         )
         .await;
         state_for_job
@@ -4516,7 +4971,7 @@ async fn handle_control_plane_request(
             let params = serde_json::from_value::<TaskIdParams>(request.params.clone())
                 .map_err(|error| format!("Invalid task id payload: {error}"));
             match params {
-                Ok(params) => spawn_mcp_dry_run_job(params.task_id, state.clone())
+                Ok(params) => spawn_mcp_dry_run_job(params.task_id, app.clone(), state.clone())
                     .await
                     .map(|job_id| serde_json::json!({ "jobId": job_id })),
                 Err(error) => Err(error),
@@ -5278,6 +5733,7 @@ pub fn run() {
             log_manager: managed_log_manager,
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            dry_running_tasks: Arc::new(RwLock::new(HashSet::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(RuntimeConfigPayload::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),

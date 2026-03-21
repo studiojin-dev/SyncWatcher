@@ -5,7 +5,7 @@ pub async fn generate_licenses_report(app: tauri::AppHandle) -> Result<String, S
     let report = r#"# Open Source Licenses
 
 ## Backend (Rust)
-- Tauri 2.0.0 - https://github.com/tauri-apps/tauri (MIT/Apache-2.0)
+- Tauri 2.10.3 - https://github.com/tauri-apps/tauri (MIT/Apache-2.0)
 - Tokio 1.40.0 - https://tokio.rs (MIT)
 - serde 1.0.215 - https://serde.rs (MIT/Apache-2.0)
 - serde_yaml 0.9.34 - https://github.com/dtolnay/serde-yaml (MIT/Apache-2.0)
@@ -13,17 +13,17 @@ pub async fn generate_licenses_report(app: tauri::AppHandle) -> Result<String, S
 - notify 6.1.0 - https://github.com/notify-rs/notify (MIT)
 
 ## Frontend (TypeScript/React)
-- React 18.3.1 - https://react.dev (MIT)
-- Mantine 8.3.13 - https://mantine.dev (MIT)
+- React 19.2.4 - https://react.dev (MIT)
+- Mantine 8.3.16 - https://mantine.dev (MIT)
 - Tabler Icons 3.22.0 - https://tabler-icons.io (MIT)
 - i18next 24.0.2 - https://www.i18next.com (MIT)
 - Framer Motion 11.11.17 - https://www.framer.com/motion (MIT)
 - js-yaml 4.1.1 - https://github.com/nodeca/js-yaml (MIT)
 
 ## Development Tools
-- TypeScript 5.6.2 - https://www.typescriptlang.org (Apache-2.0)
-- Vite 6.0.3 - https://vitejs.dev (MIT)
-- Tailwind CSS 4.1.18 - https://tailwindcss.com (MIT)
+- TypeScript 5.9.3 - https://www.typescriptlang.org (Apache-2.0)
+- Vite 8.0.0 - https://vite.dev (MIT)
+- Tailwind CSS 4.2.1 - https://tailwindcss.com (MIT)
 
 ## License Summary
 

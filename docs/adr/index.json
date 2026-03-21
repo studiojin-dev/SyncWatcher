@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260321-0014-DRY",
+    "title": "Live dry-run session reentry and terminal immutability",
+    "tags": [
+      "dry-run",
+      "runtime",
+      "mcp",
+      "ux",
+      "tauri",
+      "reliability"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-21",
+    "tldr": "Treat live dry-run sessions as task-scoped UI state, keep terminal sessions immutable against late events, and expose MCP-origin dry-run sessions through task-button reentry instead of auto-navigation.",
+    "path": "docs/adr/ADR-20260321-0014-DRY-live-dry-run-session-reentry-and-terminal-immutability.md"
+  },
+  {
     "id": "ADR-20260310-0013-TGT",
     "title": "Target path preflight and missing-target policy",
     "tags": [

@@ -86,6 +86,35 @@ pub struct DryRunResult {
     pub target_preflight: Option<TargetPreflightInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DryRunSummary {
+    pub total_files: usize,
+    pub files_to_copy: usize,
+    pub files_modified: usize,
+    pub bytes_to_copy: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DryRunPhase {
+    ScanningSource,
+    ScanningTarget,
+    Comparing,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DryRunProgress {
+    pub phase: DryRunPhase,
+    pub message: String,
+    pub current: u64,
+    pub total: u64,
+    pub processed_bytes: u64,
+    pub total_bytes: u64,
+    pub summary: DryRunSummary,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TargetPreflightKind {

@@ -28,6 +28,55 @@ export interface DryRunResult {
   targetPreflight: TargetPreflightInfo | null;
 }
 
+export type DryRunSessionStatus = 'running' | 'completed' | 'cancelled' | 'failed';
+
+export function isTerminalDryRunSessionStatus(
+  status: DryRunSessionStatus | undefined,
+): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'failed';
+}
+
+export type DryRunProgressPhase = 'scanningSource' | 'scanningTarget' | 'comparing';
+
+export interface DryRunResultSummary {
+  total_files: number;
+  files_to_copy: number;
+  files_modified: number;
+  bytes_to_copy: number;
+}
+
+export interface DryRunProgressEvent {
+  taskId?: string;
+  phase?: DryRunProgressPhase | string;
+  message?: string;
+  current?: number;
+  total?: number;
+  summary?: Partial<DryRunResultSummary>;
+  processedBytes?: number;
+  totalBytes?: number;
+  currentFileBytesCopied?: number;
+  currentFileTotalBytes?: number;
+}
+
+export interface DryRunDiffBatchEvent {
+  taskId?: string;
+  phase?: DryRunProgressPhase | string;
+  message?: string;
+  diffs: FileDiff[];
+  summary?: Partial<DryRunResultSummary>;
+  targetPreflight?: TargetPreflightInfo | null;
+}
+
+export interface DryRunSessionState {
+  taskId: string;
+  taskName: string;
+  status: DryRunSessionStatus;
+  result: DryRunResult;
+  progress?: DryRunProgressEvent;
+  error?: string;
+  updatedAtUnixMs: number;
+}
+
 export type ConflictSessionOrigin = 'manual' | 'watch';
 export type ConflictItemStatus =
   | 'pending'

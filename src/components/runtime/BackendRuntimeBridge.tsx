@@ -6,13 +6,20 @@ import { useSyncTasksContext } from '../../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../../context/ExclusionSetsContext';
 import { useSettings } from '../../hooks/useSettings';
 import { useSyncTaskStatusStore } from '../../hooks/useSyncTaskStatus';
+import type { TaskStatus } from '../../hooks/useSyncTaskStatus';
 import { useToast } from '../ui/Toast';
 import {
+    RuntimeDryRunStateEvent,
     RuntimeState,
     RuntimeSyncQueueStateEvent,
     RuntimeSyncStateEvent,
     RuntimeWatchStateEvent,
 } from '../../types/runtime';
+import {
+    DryRunDiffBatchEvent,
+    DryRunProgressEvent,
+    isTerminalDryRunSessionStatus,
+} from '../../types/syncEngine';
 import { listenConfigStoreChanged } from '../../utils/configStore';
 
 interface SyncProgressEvent {
@@ -42,15 +49,20 @@ const AUTO_UNMOUNT_STATUS_KEYS = [
     'syncTasks.autoUnmountSuppressedStatus',
 ] as const;
 
+function isProtectedRuntimeStatus(status: TaskStatus['status'] | undefined): boolean {
+    return status === 'syncing' || status === 'queued' || status === 'dryRunning';
+}
+
 function applyRuntimeSnapshotToStore(state: RuntimeState) {
     const store = useSyncTaskStatusStore.getState();
     store.setWatchingTasks(state.watchingTasks);
     store.setSyncingTasks(state.syncingTasks);
     store.setQueuedTasks(state.queuedTasks);
+    store.setDryRunningTasks(state.dryRunningTasks);
 
     for (const taskId of state.watchingTasks) {
         const currentStatus = store.getStatus(taskId)?.status;
-        if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
+        if (!isProtectedRuntimeStatus(currentStatus)) {
             store.setStatus(taskId, 'watching');
         }
     }
@@ -64,6 +76,13 @@ function applyRuntimeSnapshotToStore(state: RuntimeState) {
 
     for (const taskId of state.syncingTasks) {
         store.setStatus(taskId, 'syncing');
+    }
+
+    for (const taskId of state.dryRunningTasks) {
+        const currentStatus = store.getStatus(taskId)?.status;
+        if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
+            store.setStatus(taskId, 'dryRunning');
+        }
     }
 }
 
@@ -106,6 +125,24 @@ function shouldShowRuntimeSyncErrorToast(
         return true;
     }
     return now - previous.at > RUNTIME_SYNC_ERROR_TOAST_DEDUP_WINDOW_MS;
+}
+
+function dryRunLogLevel(
+    dryRunning: boolean,
+    reason: string
+): 'info' | 'success' | 'warning' | 'error' {
+    if (dryRunning) {
+        return 'info';
+    }
+
+    const normalized = reason.toLowerCase();
+    if (normalized.includes('cancel')) {
+        return 'warning';
+    }
+    if (normalized.includes('failed') || normalized.includes('error')) {
+        return 'error';
+    }
+    return 'success';
 }
 
 function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBridgeProps) {
@@ -153,6 +190,71 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             }
         });
 
+        const unlistenDryRunState = listen<RuntimeDryRunStateEvent>('runtime-dry-run-state', (event) => {
+            const { taskId, dryRunning, reason } = event.payload;
+            const store = useSyncTaskStatusStore.getState();
+
+            store.setDryRunning(taskId, dryRunning);
+
+            if (reason) {
+                store.setLastLog(taskId, {
+                    message: reason,
+                    timestamp: new Date().toLocaleTimeString(),
+                    level: dryRunLogLevel(dryRunning, reason),
+                });
+            }
+
+            if (!dryRunning) {
+                store.setProgress(taskId, {
+                    current: 0,
+                    total: 0,
+                    currentFile: undefined,
+                    processedBytes: 0,
+                    totalBytes: 0,
+                    currentFileBytesCopied: 0,
+                    currentFileTotalBytes: 0,
+                });
+            }
+        });
+
+        const unlistenDryRunProgress = listen<DryRunProgressEvent>('dry-run-progress', (event) => {
+            if (!event.payload.taskId) {
+                return;
+            }
+
+            const store = useSyncTaskStatusStore.getState();
+            const taskId = event.payload.taskId;
+            if (isTerminalDryRunSessionStatus(store.getDryRunSession(taskId)?.status)) {
+                return;
+            }
+            store.setDryRunning(taskId, true);
+            store.setDryRunProgress(taskId, event.payload);
+
+            if (event.payload.message) {
+                const previousMessage = store.getStatus(taskId)?.lastLog?.message;
+                if (previousMessage !== event.payload.message) {
+                    store.setLastLog(taskId, {
+                        message: event.payload.message,
+                        timestamp: new Date().toLocaleTimeString(),
+                        level: 'info',
+                    });
+                }
+            }
+        });
+
+        const unlistenDryRunDiffBatch = listen<DryRunDiffBatchEvent>('dry-run-diff-batch', (event) => {
+            if (!event.payload.taskId) {
+                return;
+            }
+
+            const store = useSyncTaskStatusStore.getState();
+            if (isTerminalDryRunSessionStatus(store.getDryRunSession(event.payload.taskId)?.status)) {
+                return;
+            }
+            store.setDryRunning(event.payload.taskId, true);
+            store.appendDryRunDiffBatch(event.payload.taskId, event.payload);
+        });
+
         const unlistenWatchState = listen<RuntimeWatchStateEvent>('runtime-watch-state', (event) => {
             const { taskId, watching, reason } = event.payload;
             const store = useSyncTaskStatusStore.getState();
@@ -161,13 +263,13 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             if (watching) {
                 watchingTasksRef.current.add(taskId);
                 const currentStatus = store.getStatus(taskId)?.status;
-                if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
+                if (!isProtectedRuntimeStatus(currentStatus)) {
                     store.setStatus(taskId, 'watching');
                 }
             } else {
                 watchingTasksRef.current.delete(taskId);
                 const currentStatus = store.getStatus(taskId)?.status;
-                if (currentStatus !== 'syncing' && currentStatus !== 'queued') {
+                if (!isProtectedRuntimeStatus(currentStatus)) {
                     store.setStatus(taskId, 'idle');
                 }
             }
@@ -281,6 +383,9 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             queuedStatusDemotionTimersRef.current.forEach((timer) => clearTimeout(timer));
             queuedStatusDemotionTimersRef.current.clear();
             unlistenProgress.then((fn) => fn());
+            unlistenDryRunState.then((fn) => fn());
+            unlistenDryRunProgress.then((fn) => fn());
+            unlistenDryRunDiffBatch.then((fn) => fn());
             unlistenWatchState.then((fn) => fn());
             unlistenQueueState.then((fn) => fn());
             unlistenSyncState.then((fn) => fn());

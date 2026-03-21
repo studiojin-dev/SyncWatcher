@@ -1,11 +1,35 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DryRunResult as DryRunResultModel } from '../../types/syncEngine';
 import DryRunResultView from './DryRunResultView';
 
+const sessionState = vi.hoisted(() => ({
+  current: undefined as
+    | {
+        taskId: string;
+        taskName: string;
+        status: 'running' | 'completed' | 'cancelled' | 'failed';
+        result: DryRunResultModel;
+        progress?: {
+          phase?: string;
+          message?: string;
+          current?: number;
+          total?: number;
+          processedBytes?: number;
+          totalBytes?: number;
+        };
+        error?: string;
+      }
+    | undefined,
+}));
+
 vi.mock('../../hooks/useSettings', () => ({
   useSettings: () => ({ settings: { dataUnitSystem: 'binary' } }),
+}));
+
+vi.mock('../../hooks/useSyncTaskStatus', () => ({
+  useDryRunSession: () => sessionState.current,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -35,18 +59,29 @@ vi.mock('react-virtuoso', () => ({
 }));
 
 describe('DryRunResultView', () => {
+  beforeEach(() => {
+    sessionState.current = undefined;
+  });
+
   it('renders summary and empty state', () => {
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'completed',
+      result: {
+        diffs: [],
+        total_files: 12,
+        files_to_copy: 0,
+        files_modified: 0,
+        bytes_to_copy: 0,
+        targetPreflight: null,
+      },
+    };
+
     render(
       <DryRunResultView
+        taskId="task-1"
         taskName="Task A"
-        result={{
-          diffs: [],
-          total_files: 12,
-          files_to_copy: 0,
-          files_modified: 0,
-          bytes_to_copy: 0,
-          targetPreflight: null,
-        }}
         onBack={vi.fn()}
       />,
     );
@@ -57,34 +92,41 @@ describe('DryRunResultView', () => {
   });
 
   it('renders diff rows', () => {
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'completed',
+      result: {
+        diffs: [
+          {
+            path: 'a.txt',
+            kind: 'New',
+            source_size: 1024,
+            target_size: null,
+            checksum_source: null,
+            checksum_target: null,
+          },
+          {
+            path: 'b.txt',
+            kind: 'Modified',
+            source_size: 2048,
+            target_size: 1024,
+            checksum_source: null,
+            checksum_target: null,
+          },
+        ],
+        total_files: 2,
+        files_to_copy: 2,
+        files_modified: 1,
+        bytes_to_copy: 3072,
+        targetPreflight: null,
+      },
+    };
+
     render(
       <DryRunResultView
+        taskId="task-1"
         taskName="Task A"
-        result={{
-          diffs: [
-            {
-              path: 'a.txt',
-              kind: 'New',
-              source_size: 1024,
-              target_size: null,
-              checksum_source: null,
-              checksum_target: null,
-            },
-            {
-              path: 'b.txt',
-              kind: 'Modified',
-              source_size: 2048,
-              target_size: 1024,
-              checksum_source: null,
-              checksum_target: null,
-            },
-          ],
-          total_files: 2,
-          files_to_copy: 2,
-          files_modified: 1,
-          bytes_to_copy: 3072,
-          targetPreflight: null,
-        }}
         onBack={vi.fn()}
       />,
     );
@@ -96,20 +138,27 @@ describe('DryRunResultView', () => {
   });
 
   it('renders a banner when target directory will be created later', () => {
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'completed',
+      result: {
+        diffs: [],
+        total_files: 0,
+        files_to_copy: 0,
+        files_modified: 0,
+        bytes_to_copy: 0,
+        targetPreflight: {
+          kind: 'willCreateDirectory',
+          path: '/tmp/missing-target',
+        },
+      },
+    };
+
     render(
       <DryRunResultView
+        taskId="task-1"
         taskName="Task A"
-        result={{
-          diffs: [],
-          total_files: 0,
-          files_to_copy: 0,
-          files_modified: 0,
-          bytes_to_copy: 0,
-          targetPreflight: {
-            kind: 'willCreateDirectory',
-            path: '/tmp/missing-target',
-          },
-        }}
         onBack={vi.fn()}
       />,
     );
@@ -118,5 +167,70 @@ describe('DryRunResultView', () => {
       screen.getByText(/dryRun.targetWillBeCreatedBanner/),
     ).toBeInTheDocument();
     expect(screen.getByText(/\/tmp\/missing-target/)).toBeInTheDocument();
+  });
+
+  it('shows live scanning state while dry-run is running', () => {
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'running',
+      result: {
+        diffs: [],
+        total_files: 0,
+        files_to_copy: 0,
+        files_modified: 0,
+        bytes_to_copy: 0,
+        targetPreflight: null,
+      },
+      progress: {
+        phase: 'scanningSource',
+        message: 'Scanning source',
+        current: 3,
+        total: 10,
+        processedBytes: 1536,
+        totalBytes: 0,
+      },
+    };
+
+    render(
+      <DryRunResultView
+        taskId="task-1"
+        taskName="Task A"
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('dryRun.statusRunning')).toBeInTheDocument();
+    expect(screen.getAllByText(/dryRun.phaseScanningSource/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/30%/).length).toBeGreaterThan(0);
+  });
+
+  it('shows a rerun action for terminal sessions', () => {
+    const onRequestRerun = vi.fn();
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'completed',
+      result: {
+        diffs: [],
+        total_files: 0,
+        files_to_copy: 0,
+        files_modified: 0,
+        bytes_to_copy: 0,
+        targetPreflight: null,
+      },
+    };
+
+    render(
+      <DryRunResultView
+        taskId="task-1"
+        taskName="Task A"
+        onBack={vi.fn()}
+        onRequestRerun={onRequestRerun}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('common.retry'));
+    expect(onRequestRerun).toHaveBeenCalledTimes(1);
   });
 });

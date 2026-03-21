@@ -35,6 +35,13 @@ export interface RuntimeState {
     watchingTasks: string[];
     syncingTasks: string[];
     queuedTasks: string[];
+    dryRunningTasks: string[];
+}
+
+export interface RuntimeDryRunStateEvent {
+    taskId: string;
+    dryRunning: boolean;
+    reason?: string;
 }
 
 export interface RuntimeWatchStateEvent {

@@ -49,8 +49,8 @@ Out of scope for this smoke:
 ## 4) Prerequisites
 
 - macOS
-- a working local dev environment for `npm run tauri dev`
-- `node`, `npm`, `cargo`, and `mkfile`
+- a working local dev environment for `pnpm tauri dev`
+- `node`, `pnpm`, `cargo`, and `mkfile`
 - a user session that can launch the SyncWatcher app window
 
 Operational constraints:
@@ -83,7 +83,7 @@ The script:
 - creates an isolated app-support directory under `/tmp`
 - writes an isolated `settings.yaml`
 - verifies the disabled error before app startup
-- launches `npm run tauri dev`
+- launches `pnpm tauri dev`
 - enables MCP and waits for the Unix socket listener
 - creates temp source and target fixtures
 - executes `dry-run`, orphan scan, and real sync through MCP stdio
@@ -161,6 +161,6 @@ Artifacts from the verified run:
 - `path must be shorter than SUN_LEN`
   - The Unix socket path is too long for macOS. Use a shorter app-support root such as `/tmp/...`.
 - `Port 1420 is already in use`
-  - A stale Vite dev server is still running. Stop it before restarting `npm run tauri dev`.
+  - A stale Vite dev server is still running. Stop it before restarting `pnpm tauri dev`.
 - screenshot capture fails
   - Check macOS screen recording/display permissions. Report success still counts if all MCP phases complete and `report.json` is clean.

@@ -15,12 +15,12 @@ describe('useAppVersion', () => {
   });
 
   it('returns the runtime version when Tauri app API succeeds', async () => {
-    mockGetVersion.mockResolvedValueOnce('1.1.6');
+    mockGetVersion.mockResolvedValueOnce('1.2.0-beta');
 
     const { result } = renderHook(() => useAppVersion());
 
     await waitFor(() => {
-      expect(result.current).toBe('1.1.6');
+      expect(result.current).toBe('1.2.0-beta');
     });
   });
 

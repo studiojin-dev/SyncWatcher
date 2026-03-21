@@ -1,6 +1,7 @@
 use crate::sync_engine::types::{
-    ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunResult, FileDiff,
-    FileDiffKind, FileMetadata, OrphanFile, SyncOptions, SyncResult, TargetNewerConflictCandidate,
+    ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunPhase, DryRunProgress,
+    DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile, SyncOptions,
+    SyncResult, TargetNewerConflictCandidate,
 };
 use anyhow::Context;
 use anyhow::Result;
@@ -9,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::hash::Hasher;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::SystemTime;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -71,6 +73,26 @@ impl SyncEngine {
         }
     }
 
+    fn build_dry_run_progress(
+        phase: DryRunPhase,
+        message: String,
+        current: u64,
+        total: u64,
+        processed_bytes: u64,
+        total_bytes: u64,
+        summary: DryRunSummary,
+    ) -> DryRunProgress {
+        DryRunProgress {
+            phase,
+            message,
+            current,
+            total,
+            processed_bytes,
+            total_bytes,
+            summary,
+        }
+    }
+
     async fn calculate_checksum(&self, path: &Path) -> Result<String> {
         use twox_hash::XxHash64;
 
@@ -91,17 +113,27 @@ impl SyncEngine {
         Ok(format!("{:x}", hasher.finish()))
     }
 
-    async fn read_directory(
+    async fn read_directory<P>(
         &self,
         dir: &Path,
+        phase: DryRunPhase,
         exclude_patterns: &[String],
         cancel_token: Option<CancellationToken>,
-    ) -> Result<Vec<FileMetadata>> {
+        progress_callback: Arc<StdMutex<P>>,
+    ) -> Result<Vec<FileMetadata>>
+    where
+        P: FnMut(DryRunProgress) + Send + 'static,
+    {
         let dir_buf = dir.to_path_buf();
         let patterns = exclude_patterns.to_vec();
 
         tokio::task::spawn_blocking(move || {
             let mut files = Vec::new();
+            let mut scanned_entries = 0u64;
+            let mut scanned_files = 0usize;
+            let mut scanned_bytes = 0u64;
+            let mut last_emit_at = std::time::Instant::now() - std::time::Duration::from_millis(100);
+            let emit_interval = std::time::Duration::from_millis(100);
 
             // Pattern validation constants
             const MAX_PATTERN_LENGTH: usize = 255;
@@ -205,6 +237,13 @@ impl SyncEngine {
                 };
 
                 let relative_path = path.strip_prefix(&dir_buf)?.to_path_buf();
+                scanned_entries += 1;
+                let current_path = Some(relative_path.to_string_lossy().to_string());
+
+                if metadata.is_file() {
+                    scanned_files += 1;
+                    scanned_bytes += metadata.len();
+                }
 
                 files.push(FileMetadata {
                     path: relative_path,
@@ -215,6 +254,49 @@ impl SyncEngine {
                     created: metadata.created().ok(),
                     is_file: metadata.is_file(),
                 });
+
+                let now = std::time::Instant::now();
+                let should_emit = now.duration_since(last_emit_at) >= emit_interval;
+
+                if should_emit {
+                    last_emit_at = now;
+                    let progress = SyncEngine::build_dry_run_progress(
+                        phase,
+                        current_path.unwrap_or_else(|| dir_buf.to_string_lossy().to_string()),
+                        scanned_entries,
+                        0,
+                        scanned_bytes,
+                        0,
+                        DryRunSummary {
+                            total_files: scanned_files,
+                            files_to_copy: 0,
+                            files_modified: 0,
+                            bytes_to_copy: 0,
+                        },
+                    );
+
+                    if let Ok(mut callback) = progress_callback.lock() {
+                        callback(progress);
+                    }
+                }
+            }
+
+            let final_progress = SyncEngine::build_dry_run_progress(
+                phase,
+                dir_buf.to_string_lossy().to_string(),
+                scanned_entries,
+                0,
+                scanned_bytes,
+                0,
+                DryRunSummary {
+                    total_files: scanned_files,
+                    files_to_copy: 0,
+                    files_modified: 0,
+                    bytes_to_copy: 0,
+                },
+            );
+            if let Ok(mut callback) = progress_callback.lock() {
+                callback(final_progress);
             }
 
             Ok(files)
@@ -222,11 +304,25 @@ impl SyncEngine {
         .await?
     }
 
-    async fn compare_dirs_internal(
+    async fn compare_dirs_internal<P, D>(
         &self,
         options: &SyncOptions,
         cancel_token: Option<CancellationToken>,
-    ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)> {
+        on_progress: P,
+        mut on_diff: D,
+    ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)>
+    where
+        P: FnMut(DryRunProgress) + Send + 'static,
+        D: FnMut(FileDiff, DryRunProgress),
+    {
+        let progress_callback = Arc::new(StdMutex::new(on_progress));
+
+        let emit_progress = |progress: DryRunProgress| {
+            if let Ok(mut callback) = progress_callback.lock() {
+                callback(progress);
+            }
+        };
+
         // 1. Canonicalize source to resolve symlinks and .. (TOCTOU protection)
         let source_canonical = tokio::fs::canonicalize(&self.source)
             .await
@@ -280,19 +376,45 @@ impl SyncEngine {
         let source_files = self
             .read_directory(
                 &source_canonical,
+                DryRunPhase::ScanningSource,
                 &options.exclude_patterns,
                 cancel_token.clone(),
+                progress_callback.clone(),
             )
             .await
             .context("Failed to read source directory")?;
 
         let target_files = if let Some(ref target) = target_canonical {
-            self.read_directory(target, &options.exclude_patterns, cancel_token.clone())
-                .await
-                .context("Failed to read target directory")?
+            self.read_directory(
+                target,
+                DryRunPhase::ScanningTarget,
+                &options.exclude_patterns,
+                cancel_token.clone(),
+                progress_callback.clone(),
+            )
+            .await
+            .context("Failed to read target directory")?
         } else {
             Vec::new()
         };
+
+        let total_files = source_files.iter().filter(|f| f.is_file).count();
+        let total_bytes = source_files
+            .iter()
+            .filter(|f| f.is_file)
+            .map(|file| file.size)
+            .sum();
+        let mut compare_summary = DryRunSummary {
+            total_files,
+            files_to_copy: 0,
+            files_modified: 0,
+            bytes_to_copy: 0,
+        };
+        let mut compare_processed_files = 0u64;
+        let mut compare_processed_bytes = 0u64;
+        let mut last_compare_emit_at =
+            std::time::Instant::now() - std::time::Duration::from_millis(100);
+        let compare_emit_interval = std::time::Duration::from_millis(100);
 
         let mut source_map: HashMap<PathBuf, &FileMetadata> = HashMap::new();
         let mut target_map: HashMap<PathBuf, &FileMetadata> = HashMap::new();
@@ -308,15 +430,33 @@ impl SyncEngine {
         let mut diffs = Vec::new();
         let mut bytes_to_copy = 0u64;
         let mut target_newer_conflicts = Vec::new();
+        let mut compare_paths: Vec<PathBuf> = source_map.keys().cloned().collect();
+        compare_paths.sort();
 
-        for (path, source_meta) in &source_map {
-            if let Some(target_meta) = target_map.get(path) {
+        emit_progress(SyncEngine::build_dry_run_progress(
+            DryRunPhase::Comparing,
+            "Comparing...".to_string(),
+            0,
+            total_files as u64,
+            0,
+            total_bytes,
+            compare_summary.clone(),
+        ));
+
+        for path in compare_paths {
+            let Some(source_meta) = source_map.get(&path) else {
+                continue;
+            };
+
+            if let Some(target_meta) = target_map.get(&path) {
                 if source_meta.is_file {
-                    let source_path = source_canonical.join(path);
+                    compare_processed_files += 1;
+                    compare_processed_bytes += source_meta.size;
+                    let source_path = source_canonical.join(&path);
                     let target_path = target_canonical
                         .as_ref()
-                        .map(|target| target.join(path))
-                        .unwrap_or_else(|| self.target.join(path));
+                        .map(|target| target.join(&path))
+                        .unwrap_or_else(|| self.target.join(&path));
                     let mut already_checked_equal_hash = false;
 
                     if target_meta.modified > source_meta.modified {
@@ -329,6 +469,21 @@ impl SyncEngine {
                                 source: Self::snapshot_from_metadata(source_meta),
                                 target: Self::snapshot_from_metadata(target_meta),
                             });
+                            let now = std::time::Instant::now();
+                            if now.duration_since(last_compare_emit_at) >= compare_emit_interval
+                                || compare_processed_files == total_files as u64
+                            {
+                                last_compare_emit_at = now;
+                                emit_progress(SyncEngine::build_dry_run_progress(
+                                    DryRunPhase::Comparing,
+                                    path.to_string_lossy().to_string(),
+                                    compare_processed_files,
+                                    total_files as u64,
+                                    compare_processed_bytes,
+                                    total_bytes,
+                                    compare_summary.clone(),
+                                ));
+                            }
                             continue;
                         }
 
@@ -342,6 +497,21 @@ impl SyncEngine {
                                 source: Self::snapshot_from_metadata(source_meta),
                                 target: Self::snapshot_from_metadata(target_meta),
                             });
+                            let now = std::time::Instant::now();
+                            if now.duration_since(last_compare_emit_at) >= compare_emit_interval
+                                || compare_processed_files == total_files as u64
+                            {
+                                last_compare_emit_at = now;
+                                emit_progress(SyncEngine::build_dry_run_progress(
+                                    DryRunPhase::Comparing,
+                                    path.to_string_lossy().to_string(),
+                                    compare_processed_files,
+                                    total_files as u64,
+                                    compare_processed_bytes,
+                                    total_bytes,
+                                    compare_summary.clone(),
+                                ));
+                            }
                             continue;
                         }
 
@@ -364,46 +534,101 @@ impl SyncEngine {
 
                     if needs_copy {
                         bytes_to_copy += source_meta.size;
-                        diffs.push(FileDiff {
+                        compare_summary.files_to_copy += 1;
+                        compare_summary.files_modified += 1;
+                        compare_summary.bytes_to_copy = bytes_to_copy;
+                        let diff = FileDiff {
                             path: path.clone(),
                             kind: FileDiffKind::Modified,
                             source_size: Some(source_meta.size),
                             target_size: Some(target_meta.size),
                             checksum_source: None,
                             checksum_target: None,
-                        });
+                        };
+                        on_diff(
+                            diff.clone(),
+                            SyncEngine::build_dry_run_progress(
+                                DryRunPhase::Comparing,
+                                path.to_string_lossy().to_string(),
+                                compare_processed_files,
+                                total_files as u64,
+                                compare_processed_bytes,
+                                total_bytes,
+                                compare_summary.clone(),
+                            ),
+                        );
+                        diffs.push(diff);
                     }
                 }
             } else if source_meta.is_file {
+                compare_processed_files += 1;
+                compare_processed_bytes += source_meta.size;
                 bytes_to_copy += source_meta.size;
-                diffs.push(FileDiff {
+                compare_summary.files_to_copy += 1;
+                compare_summary.bytes_to_copy = bytes_to_copy;
+                let diff = FileDiff {
                     path: path.clone(),
                     kind: FileDiffKind::New,
                     source_size: Some(source_meta.size),
                     target_size: None,
                     checksum_source: None,
                     checksum_target: None,
-                });
+                };
+                on_diff(
+                    diff.clone(),
+                    SyncEngine::build_dry_run_progress(
+                        DryRunPhase::Comparing,
+                        path.to_string_lossy().to_string(),
+                        compare_processed_files,
+                        total_files as u64,
+                        compare_processed_bytes,
+                        total_bytes,
+                        compare_summary.clone(),
+                    ),
+                );
+                diffs.push(diff);
+            }
+
+            let now = std::time::Instant::now();
+            if now.duration_since(last_compare_emit_at) >= compare_emit_interval
+                || compare_processed_files == total_files as u64
+            {
+                last_compare_emit_at = now;
+                emit_progress(SyncEngine::build_dry_run_progress(
+                    DryRunPhase::Comparing,
+                    path.to_string_lossy().to_string(),
+                    compare_processed_files,
+                    total_files as u64,
+                    compare_processed_bytes,
+                    total_bytes,
+                    compare_summary.clone(),
+                ));
             }
         }
 
-        let files_to_copy = diffs
-            .iter()
-            .filter(|d| d.kind == FileDiffKind::New || d.kind == FileDiffKind::Modified)
-            .count();
-        let files_modified = diffs
+        compare_summary.total_files = total_files;
+        compare_summary.bytes_to_copy = bytes_to_copy;
+        compare_summary.files_to_copy = diffs.len();
+        compare_summary.files_modified = diffs
             .iter()
             .filter(|d| d.kind == FileDiffKind::Modified)
             .count();
-
-        let total_files = source_files.iter().filter(|f| f.is_file).count();
+        emit_progress(SyncEngine::build_dry_run_progress(
+            DryRunPhase::Comparing,
+            "Comparison complete".to_string(),
+            compare_processed_files,
+            total_files as u64,
+            compare_processed_bytes,
+            total_bytes,
+            compare_summary.clone(),
+        ));
 
         Ok((
             DryRunResult {
                 diffs,
                 total_files,
-                files_to_copy,
-                files_modified,
+                files_to_copy: compare_summary.files_to_copy,
+                files_modified: compare_summary.files_modified,
                 bytes_to_copy,
                 target_preflight: None,
             },
@@ -412,7 +637,9 @@ impl SyncEngine {
     }
 
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
-        let (dry_run, _) = self.compare_dirs_internal(options, None).await?;
+        let (dry_run, _) = self
+            .compare_dirs_internal(options, None, |_| {}, |_, _| {})
+            .await?;
         Ok(dry_run)
     }
 
@@ -420,7 +647,9 @@ impl SyncEngine {
         &self,
         options: &SyncOptions,
     ) -> Result<Vec<TargetNewerConflictCandidate>> {
-        let (_, conflicts) = self.compare_dirs_internal(options, None).await?;
+        let (_, conflicts) = self
+            .compare_dirs_internal(options, None, |_| {}, |_, _| {})
+            .await?;
         Ok(conflicts)
     }
 
@@ -434,7 +663,24 @@ impl SyncEngine {
         cancel_token: CancellationToken,
     ) -> Result<DryRunResult> {
         let (dry_run, _) = self
-            .compare_dirs_internal(options, Some(cancel_token))
+            .compare_dirs_internal(options, Some(cancel_token), |_| {}, |_, _| {})
+            .await?;
+        Ok(dry_run)
+    }
+
+    pub async fn dry_run_with_progress<P, D>(
+        &self,
+        options: &SyncOptions,
+        cancel_token: CancellationToken,
+        on_progress: P,
+        on_diff: D,
+    ) -> Result<DryRunResult>
+    where
+        P: FnMut(DryRunProgress) + Send + 'static,
+        D: FnMut(FileDiff, DryRunProgress),
+    {
+        let (dry_run, _) = self
+            .compare_dirs_internal(options, Some(cancel_token), on_progress, on_diff)
             .await?;
         Ok(dry_run)
     }
@@ -444,7 +690,9 @@ impl SyncEngine {
         options: &SyncOptions,
         progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
     ) -> Result<SyncResult> {
-        let (dry_run, _) = self.compare_dirs_internal(options, None).await?;
+        let (dry_run, _) = self
+            .compare_dirs_internal(options, None, |_| {}, |_, _| {})
+            .await?;
 
         let mut result = SyncResult {
             files_copied: 0,
@@ -576,11 +824,23 @@ impl SyncEngine {
         };
 
         let source_files = self
-            .read_directory(&source_canonical, exclude_patterns, cancel_token.clone())
+            .read_directory(
+                &source_canonical,
+                DryRunPhase::ScanningSource,
+                exclude_patterns,
+                cancel_token.clone(),
+                Arc::new(StdMutex::new(|_: DryRunProgress| {})),
+            )
             .await
             .context("Failed to read source directory")?;
         let target_files = self
-            .read_directory(&target_canonical, exclude_patterns, cancel_token)
+            .read_directory(
+                &target_canonical,
+                DryRunPhase::ScanningTarget,
+                exclude_patterns,
+                cancel_token,
+                Arc::new(StdMutex::new(|_: DryRunProgress| {})),
+            )
             .await
             .context("Failed to read target directory")?;
 

@@ -58,12 +58,12 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.isRegistered = false;
-    mockGetVersion.mockResolvedValue('1.1.6');
+    mockGetVersion.mockResolvedValue('1.2.0-beta');
   });
 
   it('keeps purchase and activation actions for unregistered users', async () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
-    await screen.findByText('v1.1.6');
+    await screen.findByText('v1.2.0-beta');
 
     const purchaseLink = screen.getByRole('link', { name: 'Optional License Support' });
     expect(purchaseLink).toHaveAttribute(
@@ -81,7 +81,7 @@ describe('Sidebar', () => {
   it('shows support CTA and support modal for registered users', async () => {
     mockState.isRegistered = true;
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
-    await screen.findByText('v1.1.6');
+    await screen.findByText('v1.2.0-beta');
 
     expect(screen.getByText('One more pizza bite?')).toBeInTheDocument();
     expect(screen.getByText('I am bowing dramatically.')).toBeInTheDocument();
@@ -101,7 +101,7 @@ describe('Sidebar', () => {
   it('closes support modal on cancel button and overlay click', async () => {
     mockState.isRegistered = true;
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
-    await screen.findByText('v1.1.6');
+    await screen.findByText('v1.2.0-beta');
 
     fireEvent.click(screen.getByRole('button', { name: 'Sponsor Another Slice' }));
     expect(screen.getByRole('heading', { name: 'Maximum Gratitude Mode' })).toBeInTheDocument();
@@ -117,6 +117,6 @@ describe('Sidebar', () => {
   it('renders the runtime app version in the footer', async () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
 
-    expect(await screen.findByText('v1.1.6')).toBeInTheDocument();
+    expect(await screen.findByText('v1.2.0-beta')).toBeInTheDocument();
   });
 });

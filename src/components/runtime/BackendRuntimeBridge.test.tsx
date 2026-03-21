@@ -48,15 +48,32 @@ const storeState = {
   setWatchingTasks: vi.fn(),
   setSyncingTasks: vi.fn(),
   setQueuedTasks: vi.fn(),
-  getStatus: vi.fn((_taskId?: string): { lastLog?: { message: string } } | undefined => undefined),
+  setDryRunningTasks: vi.fn(),
+  getStatus: vi.fn(
+    (
+      _taskId?: string,
+    ):
+      | { status?: string; lastLog?: { message: string } }
+      | undefined => undefined,
+  ),
   setStatus: vi.fn(),
   setLastLog: vi.fn(),
   setProgress: vi.fn(),
   setWatching: vi.fn(),
   setQueued: vi.fn(),
   setSyncing: vi.fn(),
+  setDryRunning: vi.fn(),
+  beginDryRunSession: vi.fn(),
+  setDryRunProgress: vi.fn(),
+  appendDryRunDiffBatch: vi.fn(),
+  completeDryRunSession: vi.fn(),
+  failDryRunSession: vi.fn(),
+  getDryRunSession: vi.fn((taskId: string) => storeState.dryRunSessions.get(taskId)),
+  clearDryRunSession: vi.fn(),
   queuedTaskIds: new Set<string>(),
   syncingTaskIds: new Set<string>(),
+  dryRunningTaskIds: new Set<string>(),
+  dryRunSessions: new Map<string, unknown>(),
 };
 
 vi.mock('../../hooks/useSyncTaskStatus', () => ({
@@ -79,9 +96,19 @@ describe('BackendRuntimeBridge', () => {
     eventHandlers.clear();
     storeState.queuedTaskIds = new Set<string>();
     storeState.syncingTaskIds = new Set<string>();
+    storeState.dryRunningTaskIds = new Set<string>();
+    storeState.dryRunSessions = new Map<string, unknown>();
     storeState.getStatus.mockImplementation(() => undefined);
     storeState.setLastLog.mockImplementation(() => undefined);
     storeState.setProgress.mockImplementation(() => undefined);
+    storeState.setDryRunning.mockImplementation(() => undefined);
+    storeState.setDryRunningTasks.mockImplementation(() => undefined);
+    storeState.beginDryRunSession.mockImplementation(() => undefined);
+    storeState.setDryRunProgress.mockImplementation(() => undefined);
+    storeState.appendDryRunDiffBatch.mockImplementation(() => undefined);
+    storeState.completeDryRunSession.mockImplementation(() => undefined);
+    storeState.failDryRunSession.mockImplementation(() => undefined);
+    storeState.getDryRunSession.mockImplementation((taskId: string) => storeState.dryRunSessions.get(taskId));
     mockListen.mockImplementation(async (eventName: string, handler: (event: { payload?: unknown }) => void) => {
       eventHandlers.set(eventName, handler);
       return () => {
@@ -136,6 +163,7 @@ describe('BackendRuntimeBridge', () => {
       watchingTasks: [],
       syncingTasks: [],
       queuedTasks: [],
+      dryRunningTasks: [],
     });
 
     const onStateChange = vi.fn();
@@ -151,15 +179,17 @@ describe('BackendRuntimeBridge', () => {
   it('refreshes runtime state when config-store-changed is emitted', async () => {
     mockInvoke
       .mockResolvedValueOnce({
-        watchingTasks: [],
-        syncingTasks: [],
-        queuedTasks: [],
-      })
-      .mockResolvedValueOnce({
-        watchingTasks: ['task-1'],
-        syncingTasks: [],
-        queuedTasks: [],
-      });
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    })
+    .mockResolvedValueOnce({
+      watchingTasks: ['task-1'],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
 
     render(<BackendRuntimeBridge />);
 
@@ -198,6 +228,7 @@ describe('BackendRuntimeBridge', () => {
       watchingTasks: [],
       syncingTasks: [],
       queuedTasks: [],
+      dryRunningTasks: [],
     });
 
     render(<BackendRuntimeBridge />);
@@ -242,6 +273,171 @@ describe('BackendRuntimeBridge', () => {
     expect(storeState.setLastLog).toHaveBeenCalledTimes(1);
   });
 
+  it('stores dry-run progress and batches using the dry-run listeners', async () => {
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('runtime-dry-run-state')).toBe(true);
+      expect(eventHandlers.has('dry-run-progress')).toBe(true);
+      expect(eventHandlers.has('dry-run-diff-batch')).toBe(true);
+    });
+
+    act(() => {
+      eventHandlers.get('runtime-dry-run-state')?.({
+        payload: {
+          taskId: 'task-1',
+          dryRunning: true,
+          reason: 'Dry run started',
+        },
+      });
+      eventHandlers.get('dry-run-progress')?.({
+        payload: {
+          taskId: 'task-1',
+          phase: 'scanningSource',
+          message: 'Scanning source',
+          current: 2,
+          total: 10,
+          processedBytes: 2048,
+          totalBytes: 8192,
+        },
+      });
+      eventHandlers.get('dry-run-diff-batch')?.({
+        payload: {
+          taskId: 'task-1',
+          diffs: [
+            {
+              path: 'a.txt',
+              kind: 'New',
+              source_size: 1024,
+              target_size: null,
+              checksum_source: null,
+              checksum_target: null,
+            },
+          ],
+          summary: {
+            total_files: 10,
+            files_to_copy: 1,
+            files_modified: 0,
+            bytes_to_copy: 1024,
+          },
+        },
+      });
+    });
+
+    expect(storeState.setDryRunning).toHaveBeenCalledWith('task-1', true);
+    expect(storeState.setDryRunProgress).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        phase: 'scanningSource',
+        message: 'Scanning source',
+      }),
+    );
+    expect(storeState.appendDryRunDiffBatch).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        diffs: expect.any(Array),
+      }),
+    );
+    expect(storeState.setLastLog).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        message: 'Dry run started',
+        level: 'info',
+      }),
+    );
+  });
+
+  it('keeps dry-running status when runtime-watch-state arrives for the same task', async () => {
+    storeState.getStatus.mockImplementation((taskId?: string) => (
+      taskId === 'task-1' ? { status: 'dryRunning' } : undefined
+    ));
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('runtime-watch-state')).toBe(true);
+    });
+
+    act(() => {
+      eventHandlers.get('runtime-watch-state')?.({
+        payload: {
+          taskId: 'task-1',
+          watching: true,
+        },
+      });
+    });
+
+    expect(storeState.setStatus).not.toHaveBeenCalledWith('task-1', 'watching');
+    expect(storeState.setStatus).not.toHaveBeenCalledWith('task-1', 'idle');
+  });
+
+  it('ignores late dry-run progress and batches after a terminal session', async () => {
+    storeState.dryRunSessions = new Map<string, unknown>([
+      [
+        'task-1',
+        {
+          taskId: 'task-1',
+          taskName: 'Task 1',
+          status: 'completed',
+          result: {
+            diffs: [],
+            total_files: 0,
+            files_to_copy: 0,
+            files_modified: 0,
+            bytes_to_copy: 0,
+            targetPreflight: null,
+          },
+        },
+      ],
+    ]);
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('dry-run-progress')).toBe(true);
+      expect(eventHandlers.has('dry-run-diff-batch')).toBe(true);
+    });
+
+    act(() => {
+      eventHandlers.get('dry-run-progress')?.({
+        payload: {
+          taskId: 'task-1',
+          phase: 'comparing',
+          message: 'late progress',
+        },
+      });
+      eventHandlers.get('dry-run-diff-batch')?.({
+        payload: {
+          taskId: 'task-1',
+          diffs: [],
+        },
+      });
+    });
+
+    expect(storeState.setDryRunning).not.toHaveBeenCalledWith('task-1', true);
+    expect(storeState.setDryRunProgress).not.toHaveBeenCalled();
+    expect(storeState.appendDryRunDiffBatch).not.toHaveBeenCalled();
+  });
+
   it('sets sync completion message when runtime sync ends without reason', async () => {
     storeState.getStatus.mockImplementation((taskId?: string) => (
       taskId ? { lastLog: { message: 'Syncing...' } } : undefined
@@ -250,6 +446,7 @@ describe('BackendRuntimeBridge', () => {
       watchingTasks: [],
       syncingTasks: [],
       queuedTasks: [],
+      dryRunningTasks: [],
     });
 
     render(<BackendRuntimeBridge />);
@@ -286,6 +483,7 @@ describe('BackendRuntimeBridge', () => {
       watchingTasks: [],
       syncingTasks: [],
       queuedTasks: [],
+      dryRunningTasks: [],
     });
 
     render(<BackendRuntimeBridge />);

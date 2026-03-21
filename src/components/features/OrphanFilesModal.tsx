@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -155,8 +155,8 @@ function renderTree(
     toggleNode: (node: TreeNode) => void,
     selectablePathMap: Map<string, string[]>,
     depth = 0
-): JSX.Element[] {
-    const rows: JSX.Element[] = [];
+): ReactElement[] {
+    const rows: ReactElement[] = [];
 
     const isNodeChecked = (node: TreeNode): boolean => {
         const paths = selectablePathMap.get(node.fullPath) ?? [];
