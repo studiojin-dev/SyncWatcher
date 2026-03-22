@@ -20,7 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.40", features = ["full"] }
 tokio-stream = "0.1"
-notify = "6.1"
+notify = "8"
 walkdir = "2.5"
 twox-hash = "1.6"
 globset = "0.4"
