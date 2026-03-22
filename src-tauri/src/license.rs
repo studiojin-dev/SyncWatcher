@@ -14,7 +14,7 @@ pub async fn generate_licenses_report(app: tauri::AppHandle) -> Result<String, S
 
 ## Frontend (TypeScript/React)
 - React 19.2.4 - https://react.dev (MIT)
-- Mantine 8.3.16 - https://mantine.dev (MIT)
+- Mantine 8.3.18 - https://mantine.dev (MIT)
 - Tabler Icons 3.22.0 - https://tabler-icons.io (MIT)
 - i18next 24.0.2 - https://www.i18next.com (MIT)
 - Framer Motion 11.11.17 - https://www.framer.com/motion (MIT)
@@ -22,8 +22,8 @@ pub async fn generate_licenses_report(app: tauri::AppHandle) -> Result<String, S
 
 ## Development Tools
 - TypeScript 5.9.3 - https://www.typescriptlang.org (Apache-2.0)
-- Vite 8.0.0 - https://vite.dev (MIT)
-- Tailwind CSS 4.2.1 - https://tailwindcss.com (MIT)
+- Vite 8.0.1 - https://vite.dev (MIT)
+- Tailwind CSS 4.2.2 - https://tailwindcss.com (MIT)
 
 ## License Summary
 
