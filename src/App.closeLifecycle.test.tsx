@@ -127,6 +127,10 @@ vi.mock('./components/runtime/BackendRuntimeBridge', () => ({
   default: () => null,
 }));
 
+vi.mock('./components/runtime/SyncTaskSourceRecommendationBridge', () => ({
+  default: () => null,
+}));
+
 vi.mock('./components/ui/AutoUnmountConfirmModal', () => ({
   default: ({
     opened,
@@ -159,6 +163,9 @@ vi.mock('./components/ui/StartupProgressOverlay', () => ({
 
 vi.mock('./components/ui/Toast', () => ({
   ToastProvider: ({ children }: { children: ReactNode }) => children,
+  useToast: () => ({
+    showToast: vi.fn(),
+  }),
 }));
 
 vi.mock('./components/ui/ErrorBoundary', () => ({
@@ -238,6 +245,11 @@ describe('App close lifecycle', () => {
           watchingTasks: [],
           syncingTasks: [],
           queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
         };
       }
 

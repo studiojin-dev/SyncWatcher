@@ -197,6 +197,33 @@ pub struct SyncTaskRecord {
     pub source_uuid_type: Option<SourceUuidType>,
     #[serde(default)]
     pub source_sub_path: Option<String>,
+    #[serde(default)]
+    pub source_identity: Option<SourceIdentitySnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceIdentitySnapshot {
+    #[serde(default)]
+    pub device_serial: Option<String>,
+    #[serde(default)]
+    pub media_uuid: Option<String>,
+    #[serde(default)]
+    pub device_guid: Option<String>,
+    #[serde(default)]
+    pub transport_serial: Option<String>,
+    #[serde(default)]
+    pub bus_protocol: Option<String>,
+    #[serde(default)]
+    pub filesystem_name: Option<String>,
+    #[serde(default)]
+    pub total_bytes: Option<u64>,
+    #[serde(default)]
+    pub volume_name: Option<String>,
+    #[serde(default)]
+    pub last_seen_disk_uuid: Option<String>,
+    #[serde(default)]
+    pub last_seen_volume_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -223,6 +250,8 @@ pub struct CreateSyncTaskRequest {
     pub source_uuid_type: Option<SourceUuidType>,
     #[serde(default)]
     pub source_sub_path: Option<String>,
+    #[serde(default)]
+    pub source_identity: Option<SourceIdentitySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -241,6 +270,7 @@ pub struct UpdateSyncTaskRequest {
     pub source_uuid: Option<String>,
     pub source_uuid_type: Option<SourceUuidType>,
     pub source_sub_path: Option<String>,
+    pub source_identity: Option<SourceIdentitySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -682,6 +712,7 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
         normalized.source_uuid = None;
         normalized.source_uuid_type = None;
         normalized.source_sub_path = None;
+        normalized.source_identity = None;
     } else {
         let sub_path = normalized
             .source_sub_path
@@ -717,6 +748,7 @@ pub fn build_sync_task_record(
         source_uuid: request.source_uuid,
         source_uuid_type: request.source_uuid_type,
         source_sub_path: request.source_sub_path,
+        source_identity: request.source_identity,
     })
 }
 
@@ -724,7 +756,27 @@ pub fn apply_sync_task_update(
     task: SyncTaskRecord,
     update: &UpdateSyncTaskRequest,
 ) -> Result<SyncTaskRecord, ConfigStoreError> {
-    let next = SyncTaskRecord {
+    let source_changed = update
+        .source
+        .as_ref()
+        .is_some_and(|value| value != &task.source)
+        || update
+            .source_type
+            .as_ref()
+            .is_some_and(|value| Some(value.clone()) != task.source_type)
+        || update
+            .source_uuid
+            .as_ref()
+            .is_some_and(|value| Some(value.clone()) != task.source_uuid)
+        || update
+            .source_uuid_type
+            .as_ref()
+            .is_some_and(|value| Some(value.clone()) != task.source_uuid_type)
+        || update
+            .source_sub_path
+            .as_ref()
+            .is_some_and(|value| Some(value.clone()) != task.source_sub_path);
+    let mut next = SyncTaskRecord {
         id: task.id,
         name: update.name.clone().unwrap_or(task.name),
         source: update.source.clone().unwrap_or(task.source),
@@ -738,7 +790,11 @@ pub fn apply_sync_task_update(
         source_uuid: update.source_uuid.clone().or(task.source_uuid),
         source_uuid_type: update.source_uuid_type.clone().or(task.source_uuid_type),
         source_sub_path: update.source_sub_path.clone().or(task.source_sub_path),
+        source_identity: update.source_identity.clone().or(task.source_identity),
     };
+    if update.source_identity.is_none() && source_changed {
+        next.source_identity = None;
+    }
     normalize_sync_task(next)
 }
 
@@ -1248,6 +1304,7 @@ mod tests {
             source_uuid: Some("disk-a".to_string()),
             source_uuid_type: Some(SourceUuidType::Disk),
             source_sub_path: Some("DCIM".to_string()),
+            source_identity: None,
         })
         .expect("task should normalize");
 
@@ -1411,6 +1468,7 @@ mod tests {
             source_uuid: None,
             source_uuid_type: None,
             source_sub_path: None,
+            source_identity: None,
         }];
 
         store

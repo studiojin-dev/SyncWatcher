@@ -24,6 +24,19 @@ export interface SyncTask {
     sourceUuidType?: 'disk' | 'volume';
     /** UUID 볼륨 내 하위 경로 (예: /DCIM/100MSDCF) */
     sourceSubPath?: string;
+    /** UUID 소스 재식별을 위한 보조 스냅샷 */
+    sourceIdentity?: {
+        deviceSerial?: string;
+        mediaUuid?: string;
+        deviceGuid?: string;
+        transportSerial?: string;
+        busProtocol?: string;
+        filesystemName?: string;
+        totalBytes?: number;
+        volumeName?: string;
+        lastSeenDiskUuid?: string;
+        lastSeenVolumeUuid?: string;
+    };
 }
 
 interface PersistedSyncTask extends SyncTask {
@@ -50,6 +63,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         sourceUuid: task.sourceUuid,
         sourceUuidType: task.sourceUuidType,
         sourceSubPath: task.sourceSubPath,
+        sourceIdentity: task.sourceIdentity,
     };
 
     normalizedTask.autoUnmount = shouldEnableAutoUnmount(normalizedTask);

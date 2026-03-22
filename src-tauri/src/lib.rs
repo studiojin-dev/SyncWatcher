@@ -30,9 +30,8 @@ use tokio_util::sync::CancellationToken;
 
 use sync_engine::{
     types::{
-        DeleteOrphanResult, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff,
-        OrphanFile, SyncResult, TargetNewerConflictCandidate, TargetPreflightInfo,
-        TargetPreflightKind,
+        DeleteOrphanResult, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, OrphanFile,
+        SyncResult, TargetNewerConflictCandidate, TargetPreflightInfo, TargetPreflightKind,
     },
     DryRunResult, SyncEngine, SyncOptions,
 };
@@ -43,8 +42,8 @@ use config_store::{
     default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
     AppSettings, ConfigStore, ConfigStoreChangedEvent, DeleteResultEnvelope, ExclusionSetEnvelope,
     ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NewSyncTaskRecord,
-    SettingsEnvelope, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope, UpdateSettingsPayload,
-    UpdateSyncTaskRequest,
+    SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope,
+    UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use license::generate_licenses_report;
@@ -190,7 +189,10 @@ impl DryRunLiveState {
         &self,
         progress: DryRunProgress,
         now: Instant,
-    ) -> (Option<DryRunProgress>, Option<(Vec<FileDiff>, DryRunProgress)>) {
+    ) -> (
+        Option<DryRunProgress>,
+        Option<(Vec<FileDiff>, DryRunProgress)>,
+    ) {
         let Ok(mut state) = self.inner.lock() else {
             return (None, None);
         };
@@ -737,6 +739,7 @@ fn normalize_sync_task_record(mut task: SyncTaskRecord) -> SyncTaskRecord {
         task.source_uuid = None;
         task.source_uuid_type = None;
         task.source_sub_path = None;
+        task.source_identity = None;
     }
 
     task.auto_unmount = task.auto_unmount
@@ -1499,6 +1502,417 @@ fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
             uuid
         )),
     }
+}
+
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "camelCase")]
+struct SyncTaskSourceRecommendation {
+    task_id: String,
+    task_name: String,
+    current_uuid: String,
+    current_uuid_type: String,
+    proposed_uuid: String,
+    proposed_uuid_type: String,
+    suggested_source: String,
+    proposed_mount_point: PathBuf,
+    proposed_volume_name: String,
+    confidence_label: String,
+    evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+struct SyncTaskSourceRecommendationsEnvelope {
+    recommendations: Vec<SyncTaskSourceRecommendation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecommendationConfidence {
+    DeviceSerial,
+    DeviceGuid,
+    MediaUuid,
+    LastSeenUuid,
+    Composite,
+}
+
+impl RecommendationConfidence {
+    fn label(self, has_transport_serial: bool) -> &'static str {
+        match self {
+            RecommendationConfidence::Composite if has_transport_serial => "medium",
+            RecommendationConfidence::Composite => "fallback",
+            RecommendationConfidence::LastSeenUuid => "medium",
+            RecommendationConfidence::DeviceSerial
+            | RecommendationConfidence::DeviceGuid
+            | RecommendationConfidence::MediaUuid => "high",
+        }
+    }
+}
+
+fn trim_to_option(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn task_uuid_descriptor(
+    task: &SyncTaskRecord,
+) -> Option<(UuidTokenType, config_store::SourceUuidType, String)> {
+    if let (Some(uuid), Some(uuid_type)) = (&task.source_uuid, &task.source_uuid_type) {
+        let token_type = match uuid_type {
+            config_store::SourceUuidType::Disk => UuidTokenType::Disk,
+            config_store::SourceUuidType::Volume => UuidTokenType::Volume,
+        };
+        return Some((token_type, uuid_type.clone(), uuid.clone()));
+    }
+
+    let parsed = parse_uuid_source_path(&task.source)?;
+    let preferred_type = match parsed.token_type {
+        UuidTokenType::Disk => config_store::SourceUuidType::Disk,
+        UuidTokenType::Volume => config_store::SourceUuidType::Volume,
+        UuidTokenType::Legacy => config_store::SourceUuidType::Disk,
+    };
+    Some((parsed.token_type, preferred_type, parsed.uuid.to_string()))
+}
+
+fn effective_source_identity(task: &SyncTaskRecord) -> SourceIdentitySnapshot {
+    let mut identity = task.source_identity.clone().unwrap_or_default();
+    if let Some((token_type, preferred_type, uuid)) = task_uuid_descriptor(task) {
+        if identity.last_seen_disk_uuid.is_none()
+            && (preferred_type == config_store::SourceUuidType::Disk
+                || token_type == UuidTokenType::Disk)
+        {
+            identity.last_seen_disk_uuid = Some(uuid.clone());
+        }
+        if identity.last_seen_volume_uuid.is_none()
+            && (preferred_type == config_store::SourceUuidType::Volume
+                || token_type == UuidTokenType::Volume)
+        {
+            identity.last_seen_volume_uuid = Some(uuid);
+        }
+    }
+    identity
+}
+
+fn select_volume_for_task<'a>(
+    token_type: UuidTokenType,
+    uuid: &str,
+    volumes: &'a [system_integration::VolumeInfo],
+) -> Option<&'a system_integration::VolumeInfo> {
+    match token_type {
+        UuidTokenType::Disk => volumes
+            .iter()
+            .find(|volume| volume.disk_uuid.as_deref() == Some(uuid)),
+        UuidTokenType::Volume => volumes
+            .iter()
+            .find(|volume| volume.volume_uuid.as_deref() == Some(uuid)),
+        UuidTokenType::Legacy => volumes
+            .iter()
+            .find(|volume| volume.disk_uuid.as_deref() == Some(uuid))
+            .or_else(|| {
+                volumes
+                    .iter()
+                    .find(|volume| volume.volume_uuid.as_deref() == Some(uuid))
+            }),
+    }
+}
+
+fn build_source_identity_snapshot(
+    task: &SyncTaskRecord,
+    volumes: &[system_integration::VolumeInfo],
+) -> Option<SourceIdentitySnapshot> {
+    let (token_type, _, uuid) = task_uuid_descriptor(task)?;
+    let volume = select_volume_for_task(token_type, &uuid, volumes)?;
+    Some(SourceIdentitySnapshot {
+        device_serial: trim_to_option(volume.device_serial.clone()),
+        media_uuid: trim_to_option(volume.media_uuid.clone()),
+        device_guid: trim_to_option(volume.device_guid.clone()),
+        transport_serial: trim_to_option(volume.transport_serial.clone()),
+        bus_protocol: trim_to_option(volume.bus_protocol.clone()),
+        filesystem_name: trim_to_option(volume.filesystem_name.clone()),
+        total_bytes: volume.total_bytes,
+        volume_name: trim_to_option(Some(volume.name.clone())),
+        last_seen_disk_uuid: trim_to_option(volume.disk_uuid.clone()),
+        last_seen_volume_uuid: trim_to_option(volume.volume_uuid.clone()),
+    })
+}
+
+fn refresh_uuid_source_identity(
+    task: &mut SyncTaskRecord,
+    volumes: &[system_integration::VolumeInfo],
+) {
+    if !is_uuid_source(&task.source, task.source_type.clone()) {
+        task.source_identity = None;
+        return;
+    }
+
+    if let Some(snapshot) = build_source_identity_snapshot(task, volumes) {
+        task.source_identity = Some(snapshot);
+    }
+}
+
+fn eq_option_case_insensitive(left: &Option<String>, right: &Option<String>) -> bool {
+    match (left.as_deref(), right.as_deref()) {
+        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+        _ => false,
+    }
+}
+
+fn normalized_uuid_sub_path_for_task(task: &SyncTaskRecord) -> Option<String> {
+    task.source_sub_path
+        .clone()
+        .or_else(|| parse_uuid_source_path(&task.source).map(|parsed| parsed.sub_path.to_string()))
+        .and_then(|sub_path| normalize_uuid_sub_path(&sub_path).ok())
+}
+
+fn uuid_sub_path_for_task(task: &SyncTaskRecord) -> Option<String> {
+    normalized_uuid_sub_path_for_task(task)
+        .and_then(|normalized| (normalized != "/").then_some(normalized))
+}
+
+fn composite_candidate_matches(
+    task: &SyncTaskRecord,
+    identity: &SourceIdentitySnapshot,
+    volume: &system_integration::VolumeInfo,
+) -> Option<Vec<String>> {
+    let total_bytes = identity.total_bytes?;
+    let filesystem_name = identity.filesystem_name.as_ref()?;
+    if volume.total_bytes != Some(total_bytes) {
+        return None;
+    }
+    if volume.filesystem_name.as_deref() != Some(filesystem_name.as_str()) {
+        return None;
+    }
+
+    let sub_path_exists = uuid_sub_path_for_task(task)
+        .map(|sub_path| {
+            volume
+                .mount_point
+                .join(sub_path.trim_start_matches('/'))
+                .exists()
+        })
+        .unwrap_or(false);
+    let volume_name_matches = identity.volume_name.as_deref() == Some(volume.name.as_str());
+
+    if !volume_name_matches && !sub_path_exists {
+        return None;
+    }
+
+    let mut evidence = vec![
+        format!("capacity matched ({total_bytes} bytes)"),
+        format!("filesystem matched ({filesystem_name})"),
+    ];
+    if volume_name_matches {
+        evidence.push(format!("volume name matched ({})", volume.name));
+    }
+    if sub_path_exists {
+        evidence.push("configured source subpath exists".to_string());
+    }
+    if eq_option_case_insensitive(&identity.transport_serial, &volume.transport_serial) {
+        evidence.push("transport serial matched".to_string());
+    }
+
+    Some(evidence)
+}
+
+fn select_unique_volume<'a>(
+    matches: Vec<(&'a system_integration::VolumeInfo, Vec<String>)>,
+) -> Option<(&'a system_integration::VolumeInfo, Vec<String>)> {
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn resolve_recommended_uuid(
+    preferred_type: config_store::SourceUuidType,
+    volume: &system_integration::VolumeInfo,
+) -> Option<(config_store::SourceUuidType, String)> {
+    match preferred_type {
+        config_store::SourceUuidType::Disk => volume
+            .disk_uuid
+            .clone()
+            .map(|uuid| (config_store::SourceUuidType::Disk, uuid))
+            .or_else(|| {
+                volume
+                    .volume_uuid
+                    .clone()
+                    .map(|uuid| (config_store::SourceUuidType::Volume, uuid))
+            }),
+        config_store::SourceUuidType::Volume => volume
+            .volume_uuid
+            .clone()
+            .map(|uuid| (config_store::SourceUuidType::Volume, uuid))
+            .or_else(|| {
+                volume
+                    .disk_uuid
+                    .clone()
+                    .map(|uuid| (config_store::SourceUuidType::Disk, uuid))
+            }),
+    }
+}
+
+fn build_recommendation(
+    task: &SyncTaskRecord,
+    volume: &system_integration::VolumeInfo,
+    current_token_type: UuidTokenType,
+    current_uuid: &str,
+    preferred_type: config_store::SourceUuidType,
+    confidence: RecommendationConfidence,
+    evidence: Vec<String>,
+) -> Option<SyncTaskSourceRecommendation> {
+    let (proposed_uuid_type, proposed_uuid) = resolve_recommended_uuid(preferred_type, volume)?;
+    let token_label = match current_token_type {
+        UuidTokenType::Disk => "disk",
+        UuidTokenType::Volume => "volume",
+        UuidTokenType::Legacy => "legacy",
+    };
+    let proposed_type_label = match proposed_uuid_type {
+        config_store::SourceUuidType::Disk => "disk",
+        config_store::SourceUuidType::Volume => "volume",
+    };
+    let suggested_source = format!(
+        "{}{}]{}",
+        if proposed_uuid_type == config_store::SourceUuidType::Disk {
+            "[DISK_UUID:"
+        } else {
+            "[VOLUME_UUID:"
+        },
+        proposed_uuid,
+        normalized_uuid_sub_path_for_task(task)?
+    );
+    let has_transport_serial = evidence
+        .iter()
+        .any(|item| item == "transport serial matched");
+
+    Some(SyncTaskSourceRecommendation {
+        task_id: task.id.clone(),
+        task_name: task.name.clone(),
+        current_uuid: current_uuid.to_string(),
+        current_uuid_type: token_label.to_string(),
+        proposed_uuid,
+        proposed_uuid_type: proposed_type_label.to_string(),
+        suggested_source,
+        proposed_mount_point: volume.mount_point.clone(),
+        proposed_volume_name: volume.name.clone(),
+        confidence_label: confidence.label(has_transport_serial).to_string(),
+        evidence,
+    })
+}
+
+fn find_task_source_recommendation(
+    task: &SyncTaskRecord,
+    volumes: &[system_integration::VolumeInfo],
+) -> Option<SyncTaskSourceRecommendation> {
+    let (current_token_type, preferred_type, current_uuid) = task_uuid_descriptor(task)?;
+    if select_volume_for_task(current_token_type, &current_uuid, volumes).is_some() {
+        return None;
+    }
+
+    let identity = effective_source_identity(task);
+
+    let exact_checks = [
+        (
+            RecommendationConfidence::DeviceSerial,
+            identity.device_serial.clone(),
+            "device serial matched".to_string(),
+            Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
+                volume.device_serial.as_deref() == Some(value)
+            }) as Box<dyn Fn(&system_integration::VolumeInfo, &str) -> bool>,
+        ),
+        (
+            RecommendationConfidence::DeviceGuid,
+            identity.device_guid.clone(),
+            "device GUID matched".to_string(),
+            Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
+                volume.device_guid.as_deref() == Some(value)
+            }),
+        ),
+        (
+            RecommendationConfidence::MediaUuid,
+            identity.media_uuid.clone(),
+            "media UUID matched".to_string(),
+            Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
+                volume.media_uuid.as_deref() == Some(value)
+            }),
+        ),
+        (
+            RecommendationConfidence::LastSeenUuid,
+            identity
+                .last_seen_disk_uuid
+                .clone()
+                .or_else(|| identity.last_seen_volume_uuid.clone()),
+            "last seen UUID matched".to_string(),
+            Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
+                volume.disk_uuid.as_deref() == Some(value)
+                    || volume.volume_uuid.as_deref() == Some(value)
+            }),
+        ),
+    ];
+
+    for (confidence, probe, evidence_label, matcher) in exact_checks {
+        let Some(probe) = trim_to_option(probe) else {
+            continue;
+        };
+        let matches = volumes
+            .iter()
+            .filter(|volume| matcher(volume, &probe))
+            .map(|volume| (volume, vec![evidence_label.clone()]))
+            .collect::<Vec<_>>();
+        if let Some((volume, evidence)) = select_unique_volume(matches) {
+            return build_recommendation(
+                task,
+                volume,
+                current_token_type,
+                &current_uuid,
+                preferred_type,
+                confidence,
+                evidence,
+            );
+        }
+    }
+
+    let composite_matches = volumes
+        .iter()
+        .filter_map(|volume| {
+            composite_candidate_matches(task, &identity, volume).map(|evidence| (volume, evidence))
+        })
+        .collect::<Vec<_>>();
+    let (volume, evidence) = select_unique_volume(composite_matches)?;
+    build_recommendation(
+        task,
+        volume,
+        current_token_type,
+        &current_uuid,
+        preferred_type,
+        RecommendationConfidence::Composite,
+        evidence,
+    )
+}
+
+async fn find_sync_task_source_recommendations_internal(
+    state: &AppState,
+) -> Result<Vec<SyncTaskSourceRecommendation>, String> {
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let volumes = DiskMonitor::new()
+        .get_removable_volumes()
+        .map_err(|error| format!("Failed to list removable volumes: {error}"))?;
+
+    Ok(tasks
+        .iter()
+        .filter(|task| is_uuid_source(&task.source, task.source_type.clone()))
+        .filter_map(|task| find_task_source_recommendation(task, &volumes))
+        .collect())
 }
 
 fn resolve_runtime_exclude_patterns(
@@ -3500,7 +3914,9 @@ async fn sync_dry_run_internal(
                 format_number(result.files_to_copy as u64),
                 format_bytes_with_unit(result.bytes_to_copy, unit_system)
             );
-            state.log_manager.log("success", &msg, Some(task_id.clone()));
+            state
+                .log_manager
+                .log("success", &msg, Some(task_id.clone()));
             if let Some(app_handle) = app.as_ref() {
                 emit_runtime_dry_run_state(
                     app_handle,
@@ -3514,9 +3930,11 @@ async fn sync_dry_run_internal(
         Err(e) => {
             let err_text = format!("{:#}", e);
             if err_text.contains("cancelled by user") {
-                state
-                    .log_manager
-                    .log("warning", "Dry run cancelled by user", Some(task_id.clone()));
+                state.log_manager.log(
+                    "warning",
+                    "Dry run cancelled by user",
+                    Some(task_id.clone()),
+                );
                 if let Some(app_handle) = app.as_ref() {
                     emit_runtime_dry_run_state(
                         app_handle,
@@ -4298,6 +4716,14 @@ async fn list_sync_tasks(state: tauri::State<'_, AppState>) -> Result<SyncTasksE
 }
 
 #[tauri::command]
+async fn find_sync_task_source_recommendations(
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncTaskSourceRecommendationsEnvelope, String> {
+    let recommendations = find_sync_task_source_recommendations_internal(state.inner()).await?;
+    Ok(SyncTaskSourceRecommendationsEnvelope { recommendations })
+}
+
+#[tauri::command]
 async fn get_sync_task(
     task_id: String,
     state: tauri::State<'_, AppState>,
@@ -4339,6 +4765,7 @@ struct SyncTaskUpdatePayload {
     source_uuid: Option<String>,
     source_uuid_type: Option<config_store::SourceUuidType>,
     source_sub_path: Option<String>,
+    source_identity: Option<config_store::SourceIdentitySnapshot>,
 }
 
 #[tauri::command]
@@ -4363,6 +4790,7 @@ async fn update_sync_task(
             source_uuid: updates.source_uuid,
             source_uuid_type: updates.source_uuid_type,
             source_sub_path: updates.source_sub_path,
+            source_identity: updates.source_identity,
         },
         app,
         state.inner(),
@@ -5080,7 +5508,11 @@ async fn create_sync_task_internal(
     app: tauri::AppHandle,
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
-    let task = normalize_sync_task_record(task);
+    let mut task = normalize_sync_task_record(task);
+    let current_volumes = DiskMonitor::new()
+        .list_volumes()
+        .map_err(|error| format!("Failed to list mounted volumes: {error}"))?;
+    refresh_uuid_source_identity(&mut task, &current_volumes);
     input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
     let mut tasks = state
         .config_store
@@ -5116,8 +5548,12 @@ async fn patch_sync_task_internal(
     else {
         return Err(format!("Sync task not found: {}", update.task_id));
     };
-    let task = apply_sync_task_update(tasks[index].clone(), &update)
+    let mut task = apply_sync_task_update(tasks[index].clone(), &update)
         .map_err(config_store_error_to_string)?;
+    let current_volumes = DiskMonitor::new()
+        .list_volumes()
+        .map_err(|error| format!("Failed to list mounted volumes: {error}"))?;
+    refresh_uuid_source_identity(&mut task, &current_volumes);
     tasks[index] = task.clone();
     validate_sync_task_records(&tasks)?;
     state
@@ -5776,6 +6212,7 @@ pub fn run() {
             unmount_volume,
             start_sync,
             list_sync_tasks,
+            find_sync_task_source_recommendations,
             get_sync_task,
             create_sync_task,
             update_sync_task,

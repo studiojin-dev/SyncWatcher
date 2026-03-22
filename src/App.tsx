@@ -18,6 +18,7 @@ import UpdateChecker from './components/features/UpdateChecker';
 import AutoUnmountConfirmModal from './components/ui/AutoUnmountConfirmModal';
 import FirstRunIntroModal from './components/ui/FirstRunIntroModal';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
+import SyncTaskSourceRecommendationBridge from './components/runtime/SyncTaskSourceRecommendationBridge';
 import ConflictReviewWindow from './components/features/ConflictReviewWindow';
 // SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
 import SyncTasksView from './views/SyncTasksView';
@@ -62,6 +63,11 @@ function AppContent() {
   const [initialRuntimeSync, setInitialRuntimeSync] = useState<InitialRuntimeSyncState>('idle');
   const [showFirstRunIntro, setShowFirstRunIntro] = useState(false);
   const [isEnablingLaunchAtLogin, setIsEnablingLaunchAtLogin] = useState(false);
+  const [requestedTaskEditId, setRequestedTaskEditId] = useState<string | null>(null);
+  const [sourceReviewRequest, setSourceReviewRequest] = useState<{
+    taskId: string | null;
+    nonce: number;
+  } | null>(null);
   const [pendingAutoUnmountRequests, setPendingAutoUnmountRequests] = useState<RuntimeAutoUnmountRequestEvent[]>([]);
   const [activeAutoUnmountRequest, setActiveAutoUnmountRequest] = useState<RuntimeAutoUnmountRequestEvent | null>(null);
   const isHandlingCloseRef = useRef(false);
@@ -79,6 +85,18 @@ function AppContent() {
       timestamp: new Date().toLocaleTimeString(),
       level,
     });
+  }, []);
+
+  const requestSourceRecommendationReview = useCallback((taskId?: string | null) => {
+    setSourceReviewRequest({
+      taskId: taskId ?? null,
+      nonce: Date.now(),
+    });
+  }, []);
+
+  const openTaskEditor = useCallback((taskId: string) => {
+    setRequestedTaskEditId(taskId);
+    setActiveTab('sync-tasks');
   }, []);
 
   // 앱 시작 시 라이선스 검증
@@ -564,7 +582,13 @@ function AppContent() {
       case 'dashboard':
         return <DashboardView />;
       case 'sync-tasks':
-        return <SyncTasksView />;
+        return (
+          <SyncTasksView
+            requestedEditTaskId={requestedTaskEditId}
+            onRequestedEditTaskHandled={() => setRequestedTaskEditId(null)}
+            onRequestSourceRecommendationReview={requestSourceRecommendationReview}
+          />
+        );
       case 'activity-log':
         return <ActivityLogView />;
       case 'settings':
@@ -587,7 +611,18 @@ function AppContent() {
 
   return (
     <>
-      <BackendRuntimeBridge onInitialRuntimeSyncChange={setInitialRuntimeSync} />
+      <BackendRuntimeBridge
+        onInitialRuntimeSyncChange={setInitialRuntimeSync}
+        onUuidSourceResolutionError={(taskId) => {
+          requestSourceRecommendationReview(taskId);
+        }}
+      />
+      <SyncTaskSourceRecommendationBridge
+        reviewRequestTaskId={sourceReviewRequest?.taskId ?? null}
+        reviewRequestNonce={sourceReviewRequest?.nonce ?? 0}
+        onReviewRequestHandled={() => setSourceReviewRequest(null)}
+        onOpenTaskEditor={openTaskEditor}
+      />
       {canRenderAppShell ? (
         <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
           <Suspense

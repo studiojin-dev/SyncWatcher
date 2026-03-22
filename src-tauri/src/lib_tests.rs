@@ -1,27 +1,32 @@
 #[cfg(test)]
 mod integration_tests {
-    use crate::config_store::{launch_at_login_status_or_default, ConfigStore};
+    use crate::config_store::{
+        apply_sync_task_update, launch_at_login_status_or_default, ConfigStore,
+        SourceIdentitySnapshot, SourceType, SourceUuidType, SyncTaskRecord, UpdateSyncTaskRequest,
+    };
     use crate::logging::LogManager;
     use crate::mcp_jobs::McpJobRegistry;
     use crate::sync_engine::types::{
         DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
     };
+    use crate::system_integration::VolumeInfo;
     use crate::watcher::WatcherManager;
     use crate::{
         cancel_operation_internal, classify_missing_target_path, compute_volume_mount_diff,
         decide_autostart_launch, decide_runtime_auto_unmount, dequeue_runtime_sync_task,
-        enqueue_runtime_sync_task_internal, ensure_non_overlapping_paths, format_bytes_with_unit,
-        get_app_version, handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
+        enqueue_runtime_sync_task_internal, ensure_non_overlapping_paths,
+        find_task_source_recommendation, format_bytes_with_unit, get_app_version,
+        handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
         progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
-        DryRunLiveState,
-        remove_runtime_sync_task_state, resolve_runtime_exclude_patterns,
-        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        set_auto_unmount_session_disabled_internal, sync_dry_run_internal,
-        take_runtime_pending_sync_task, validate_runtime_tasks, volume_watch_next_tick_delay,
-        AppState, CancelOperationType, DataUnitSystem, RuntimeAutoUnmountDecision,
-        RuntimeExclusionSet, RuntimeSyncEnqueueResult, RuntimeSyncTask, VolumeEmitDebounceState,
+        refresh_uuid_source_identity, remove_runtime_sync_task_state,
+        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
+        runtime_get_state_internal, set_auto_unmount_session_disabled_internal,
+        sync_dry_run_internal, take_runtime_pending_sync_task, validate_runtime_tasks,
+        volume_watch_next_tick_delay, AppState, CancelOperationType, DataUnitSystem,
+        DryRunLiveState, RuntimeAutoUnmountDecision, RuntimeExclusionSet, RuntimeSyncEnqueueResult,
+        RuntimeSyncTask, VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
@@ -95,6 +100,58 @@ mod integration_tests {
                 files_modified,
                 bytes_to_copy,
             },
+        }
+    }
+
+    fn build_uuid_task(
+        id: &str,
+        source_uuid_type: SourceUuidType,
+        source_uuid: &str,
+        source_sub_path: &str,
+        source_identity: Option<SourceIdentitySnapshot>,
+    ) -> SyncTaskRecord {
+        let token = match source_uuid_type {
+            SourceUuidType::Disk => "DISK_UUID",
+            SourceUuidType::Volume => "VOLUME_UUID",
+        };
+        SyncTaskRecord {
+            id: id.to_string(),
+            name: format!("task-{id}"),
+            source: format!(
+                "[{token}:{source_uuid}]{}",
+                normalize_uuid_sub_path(source_sub_path).unwrap()
+            ),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Uuid),
+            source_uuid: Some(source_uuid.to_string()),
+            source_uuid_type: Some(source_uuid_type),
+            source_sub_path: Some(normalize_uuid_sub_path(source_sub_path).unwrap()),
+            source_identity,
+        }
+    }
+
+    fn build_volume(name: &str, mount_point: &str) -> VolumeInfo {
+        VolumeInfo {
+            name: name.to_string(),
+            path: PathBuf::from(mount_point),
+            mount_point: PathBuf::from(mount_point),
+            total_bytes: Some(256),
+            available_bytes: Some(128),
+            is_network: false,
+            is_removable: true,
+            volume_uuid: None,
+            disk_uuid: None,
+            device_serial: None,
+            media_uuid: None,
+            device_guid: None,
+            transport_serial: None,
+            bus_protocol: None,
+            filesystem_name: None,
         }
     }
 
@@ -621,6 +678,331 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_source_recommendation_matches_by_device_serial() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-1".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut candidate = build_volume("Card A", "/Volumes/CardA");
+        candidate.disk_uuid = Some("disk-new".to_string());
+        candidate.device_serial = Some("SERIAL-1".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[candidate]).unwrap();
+        assert_eq!(recommendation.proposed_uuid, "disk-new");
+        assert_eq!(recommendation.proposed_uuid_type, "disk");
+        assert_eq!(recommendation.confidence_label, "high");
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "device serial matched"));
+    }
+
+    #[test]
+    fn test_source_recommendation_matches_by_device_guid() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/",
+            Some(SourceIdentitySnapshot {
+                device_guid: Some("GUID-1".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut candidate = build_volume("Card A", "/Volumes/CardA");
+        candidate.disk_uuid = Some("disk-new".to_string());
+        candidate.device_guid = Some("GUID-1".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[candidate]).unwrap();
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "device GUID matched"));
+    }
+
+    #[test]
+    fn test_source_recommendation_matches_by_media_uuid() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/",
+            Some(SourceIdentitySnapshot {
+                media_uuid: Some("MEDIA-1".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut candidate = build_volume("Card A", "/Volumes/CardA");
+        candidate.disk_uuid = Some("disk-new".to_string());
+        candidate.media_uuid = Some("MEDIA-1".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[candidate]).unwrap();
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "media UUID matched"));
+    }
+
+    #[test]
+    fn test_source_recommendation_resolves_stale_volume_uuid_via_device_serial() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "old-volume",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-1".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut candidate = build_volume("Card A", "/Volumes/CardA");
+        candidate.volume_uuid = Some("volume-new".to_string());
+        candidate.device_serial = Some("SERIAL-1".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[candidate]).unwrap();
+        assert_eq!(recommendation.proposed_uuid, "volume-new");
+        assert_eq!(recommendation.proposed_uuid_type, "volume");
+    }
+
+    #[test]
+    fn test_source_recommendation_preserves_parsed_sub_path_when_field_missing() {
+        let mut task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-1".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        task.source_sub_path = None;
+        let mut candidate = build_volume("Card A", "/Volumes/CardA");
+        candidate.disk_uuid = Some("disk-new".to_string());
+        candidate.device_serial = Some("SERIAL-1".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[candidate]).unwrap();
+        assert_eq!(recommendation.suggested_source, "[DISK_UUID:disk-new]/DCIM");
+    }
+
+    #[test]
+    fn test_source_recommendation_does_not_match_transport_serial_alone() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/",
+            Some(SourceIdentitySnapshot {
+                transport_serial: Some("USB-BRIDGE".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut candidate = build_volume("Card A", "/Volumes/CardA");
+        candidate.disk_uuid = Some("disk-new".to_string());
+        candidate.transport_serial = Some("USB-BRIDGE".to_string());
+
+        assert!(find_task_source_recommendation(&task, &[candidate]).is_none());
+    }
+
+    #[test]
+    fn test_source_recommendation_continues_past_ambiguous_device_serial() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-1".to_string()),
+                media_uuid: Some("MEDIA-UNIQUE".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut first = build_volume("Card A", "/Volumes/CardA");
+        first.disk_uuid = Some("disk-a".to_string());
+        first.device_serial = Some("SERIAL-1".to_string());
+        first.media_uuid = Some("MEDIA-UNIQUE".to_string());
+
+        let mut second = build_volume("Card B", "/Volumes/CardB");
+        second.disk_uuid = Some("disk-b".to_string());
+        second.device_serial = Some("SERIAL-1".to_string());
+        second.media_uuid = Some("MEDIA-OTHER".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[first, second]).unwrap();
+        assert_eq!(recommendation.proposed_uuid, "disk-a");
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "media UUID matched"));
+    }
+
+    #[test]
+    fn test_source_recommendation_uses_unique_composite_fallback() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                total_bytes: Some(512),
+                filesystem_name: Some("ExFAT".to_string()),
+                volume_name: Some("Untitled".to_string()),
+                transport_serial: Some("USB-BRIDGE".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut candidate = build_volume("Untitled", "/Volumes/Untitled");
+        candidate.total_bytes = Some(512);
+        candidate.filesystem_name = Some("ExFAT".to_string());
+        candidate.transport_serial = Some("USB-BRIDGE".to_string());
+        candidate.disk_uuid = Some("disk-new".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[candidate]).unwrap();
+        assert_eq!(recommendation.confidence_label, "medium");
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "capacity matched (512 bytes)"));
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "transport serial matched"));
+    }
+
+    #[test]
+    fn test_source_recommendation_skips_ambiguous_composite_matches() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "missing-disk",
+            "/",
+            Some(SourceIdentitySnapshot {
+                total_bytes: Some(512),
+                filesystem_name: Some("ExFAT".to_string()),
+                volume_name: Some("Untitled".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut first = build_volume("Untitled", "/Volumes/CardA");
+        first.total_bytes = Some(512);
+        first.filesystem_name = Some("ExFAT".to_string());
+        first.disk_uuid = Some("disk-a".to_string());
+
+        let mut second = build_volume("Untitled", "/Volumes/CardB");
+        second.total_bytes = Some(512);
+        second.filesystem_name = Some("ExFAT".to_string());
+        second.disk_uuid = Some("disk-b".to_string());
+
+        assert!(find_task_source_recommendation(&task, &[first, second]).is_none());
+    }
+
+    #[test]
+    fn test_accepting_recommendation_rewrites_uuid_fields_and_refreshes_identity() {
+        let original_task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "old-disk",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-OLD".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let update = UpdateSyncTaskRequest {
+            task_id: original_task.id.clone(),
+            source: Some("[VOLUME_UUID:new-volume]/DCIM".to_string()),
+            source_uuid: Some("new-volume".to_string()),
+            source_uuid_type: Some(SourceUuidType::Volume),
+            source_sub_path: Some("/DCIM".to_string()),
+            ..UpdateSyncTaskRequest::default()
+        };
+        let mut updated_task = apply_sync_task_update(original_task, &update).unwrap();
+
+        let mut volume = build_volume("Card A", "/Volumes/CardA");
+        volume.volume_uuid = Some("new-volume".to_string());
+        volume.disk_uuid = Some("disk-current".to_string());
+        volume.device_serial = Some("SERIAL-NEW".to_string());
+        volume.filesystem_name = Some("ExFAT".to_string());
+        volume.total_bytes = Some(1024);
+
+        refresh_uuid_source_identity(&mut updated_task, &[volume]);
+
+        assert_eq!(updated_task.source_uuid.as_deref(), Some("new-volume"));
+        assert_eq!(updated_task.source_uuid_type, Some(SourceUuidType::Volume));
+        let identity = updated_task.source_identity.unwrap();
+        assert_eq!(
+            identity.last_seen_volume_uuid.as_deref(),
+            Some("new-volume")
+        );
+        assert_eq!(
+            identity.last_seen_disk_uuid.as_deref(),
+            Some("disk-current")
+        );
+        assert_eq!(identity.device_serial.as_deref(), Some("SERIAL-NEW"));
+    }
+
+    #[test]
+    fn test_retargeting_uuid_source_clears_stale_identity_when_new_media_missing() {
+        let original_task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "old-disk",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-OLD".to_string()),
+                last_seen_disk_uuid: Some("old-disk".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let update = UpdateSyncTaskRequest {
+            task_id: original_task.id.clone(),
+            source: Some("[VOLUME_UUID:new-volume]/DCIM".to_string()),
+            source_uuid: Some("new-volume".to_string()),
+            source_uuid_type: Some(SourceUuidType::Volume),
+            source_sub_path: Some("/DCIM".to_string()),
+            ..UpdateSyncTaskRequest::default()
+        };
+        let mut updated_task = apply_sync_task_update(original_task, &update).unwrap();
+
+        assert!(updated_task.source_identity.is_none());
+
+        refresh_uuid_source_identity(&mut updated_task, &[]);
+        assert!(updated_task.source_identity.is_none());
+    }
+
+    #[test]
+    fn test_non_source_updates_preserve_existing_uuid_identity() {
+        let original_task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Disk,
+            "old-disk",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                device_serial: Some("SERIAL-OLD".to_string()),
+                last_seen_disk_uuid: Some("old-disk".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let update = UpdateSyncTaskRequest {
+            task_id: original_task.id.clone(),
+            name: Some("Renamed task".to_string()),
+            ..UpdateSyncTaskRequest::default()
+        };
+        let mut updated_task = apply_sync_task_update(original_task, &update).unwrap();
+
+        refresh_uuid_source_identity(&mut updated_task, &[]);
+
+        let identity = updated_task.source_identity.unwrap();
+        assert_eq!(identity.device_serial.as_deref(), Some("SERIAL-OLD"));
+        assert_eq!(identity.last_seen_disk_uuid.as_deref(), Some("old-disk"));
+    }
+
+    #[test]
     fn test_normalize_uuid_sub_path_normalizes_common_cases() {
         assert_eq!(normalize_uuid_sub_path("").unwrap(), "/");
         assert_eq!(normalize_uuid_sub_path("DCIM").unwrap(), "/DCIM");
@@ -808,19 +1190,16 @@ mod integration_tests {
     fn test_dry_run_live_state_throttles_progress_and_flushes_timed_batches() {
         let live = DryRunLiveState::new();
         let base = Instant::now();
-        let scan_progress = build_dry_run_progress(
-            DryRunPhase::ScanningSource,
-            "scanning",
-            1,
-            0,
-            1,
-            0,
-            0,
-            0,
-        );
+        let scan_progress =
+            build_dry_run_progress(DryRunPhase::ScanningSource, "scanning", 1, 0, 1, 0, 0, 0);
 
         let (first_progress, first_batch) = live.record_progress(scan_progress.clone(), base);
-        assert_eq!(first_progress.as_ref().map(|progress| progress.message.as_str()), Some("scanning"));
+        assert_eq!(
+            first_progress
+                .as_ref()
+                .map(|progress| progress.message.as_str()),
+            Some("scanning")
+        );
         assert!(first_batch.is_none());
 
         let (second_progress, second_batch) =
@@ -828,16 +1207,8 @@ mod integration_tests {
         assert!(second_progress.is_none());
         assert!(second_batch.is_none());
 
-        let compare_progress = build_dry_run_progress(
-            DryRunPhase::Comparing,
-            "compare",
-            2,
-            3,
-            3,
-            2,
-            1,
-            4096,
-        );
+        let compare_progress =
+            build_dry_run_progress(DryRunPhase::Comparing, "compare", 2, 3, 3, 2, 1, 4096);
         let diff_a = FileDiff {
             path: PathBuf::from("b.txt"),
             kind: FileDiffKind::New,
@@ -856,10 +1227,18 @@ mod integration_tests {
         };
 
         assert!(live
-            .record_diff(diff_a, compare_progress.clone(), base + Duration::from_millis(120))
+            .record_diff(
+                diff_a,
+                compare_progress.clone(),
+                base + Duration::from_millis(120)
+            )
             .is_none());
         assert!(live
-            .record_diff(diff_b, compare_progress.clone(), base + Duration::from_millis(180))
+            .record_diff(
+                diff_b,
+                compare_progress.clone(),
+                base + Duration::from_millis(180)
+            )
             .is_none());
 
         let (third_progress, timed_batch) =
@@ -874,16 +1253,8 @@ mod integration_tests {
     #[test]
     fn test_dry_run_live_state_flushes_on_batch_size_limit() {
         let live = DryRunLiveState::new();
-        let progress = build_dry_run_progress(
-            DryRunPhase::Comparing,
-            "compare",
-            50,
-            50,
-            50,
-            50,
-            0,
-            1024,
-        );
+        let progress =
+            build_dry_run_progress(DryRunPhase::Comparing, "compare", 50, 50, 50, 50, 0, 1024);
 
         let mut batch = None;
         for index in 0..50 {

@@ -1,7 +1,9 @@
 use anyhow::Result;
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use schemars::JsonSchema;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub struct FolderWatcher {
     _watcher: RecommendedWatcher,
@@ -32,17 +34,45 @@ pub struct VolumeInfo {
     pub is_removable: bool,
     /// 파일시스템 UUID (포맷 시 변경될 수 있음)
     pub volume_uuid: Option<String>,
-    /// 파티션 UUID (포맷 후에도 유지됨, SD 카드 식별에 권장)
+    /// 파티션/미디어 UUID (재포맷·재파티셔닝 시 변경될 수 있음)
     pub disk_uuid: Option<String>,
+    pub device_serial: Option<String>,
+    pub media_uuid: Option<String>,
+    pub device_guid: Option<String>,
+    pub transport_serial: Option<String>,
+    pub bus_protocol: Option<String>,
+    pub filesystem_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct VolumeMetadata {
     volume_uuid: Option<String>,
     disk_uuid: Option<String>,
+    device_serial: Option<String>,
+    media_uuid: Option<String>,
+    device_guid: Option<String>,
+    transport_serial: Option<String>,
+    bus_protocol: Option<String>,
+    filesystem_name: Option<String>,
+    volume_name: Option<String>,
+    device_identifier: Option<String>,
+    parent_whole_disk: Option<String>,
     internal: Option<bool>,
     ejectable: Option<bool>,
     removable_media: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct IoRegistryIdentity {
+    device_serial: Option<String>,
+    media_uuid: Option<String>,
+    device_guid: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct UsbMassStorageIdentity {
+    device_serial: Option<String>,
+    transport_serial: Option<String>,
 }
 
 pub struct DiskMonitor;
@@ -61,8 +91,6 @@ impl DiskMonitor {
     /// 마운트 포인트 메타데이터를 획득합니다.
     /// `diskutil info -plist <mount_point>` 명령을 사용합니다.
     fn get_volume_metadata(mount_point: &Path) -> Option<VolumeMetadata> {
-        use std::process::Command;
-
         let output = Command::new("diskutil")
             .arg("info")
             .arg("-plist")
@@ -86,14 +114,19 @@ impl DiskMonitor {
         let value = plist::from_bytes::<plist::Value>(data).ok()?;
         let dict = value.as_dictionary()?;
         Some(VolumeMetadata {
-            volume_uuid: dict
-                .get("VolumeUUID")
-                .and_then(|v| v.as_string())
-                .map(|s| s.to_string()),
-            disk_uuid: dict
-                .get("DiskPartitionUUID")
-                .and_then(|v| v.as_string())
-                .map(|s| s.to_string()),
+            volume_uuid: plist_string(dict, "VolumeUUID"),
+            disk_uuid: plist_string(dict, "DiskUUID")
+                .or_else(|| plist_string(dict, "DiskPartitionUUID")),
+            device_serial: plist_nested_string(dict, &["DeviceCharacteristics", "Serial Number"]),
+            media_uuid: plist_string(dict, "MediaUUID"),
+            device_guid: plist_data_or_string(dict, "DeviceGUID"),
+            transport_serial: plist_string(dict, "USB Serial Number")
+                .or_else(|| plist_nested_string(dict, &["USB Device Info", "USB Serial Number"])),
+            bus_protocol: plist_string(dict, "BusProtocol"),
+            filesystem_name: plist_string(dict, "FilesystemName"),
+            volume_name: plist_string(dict, "VolumeName"),
+            device_identifier: plist_string(dict, "DeviceIdentifier"),
+            parent_whole_disk: plist_string(dict, "ParentWholeDisk"),
             internal: parse_optional_bool(dict, "Internal"),
             ejectable: parse_optional_bool(dict, "Ejectable"),
             removable_media: parse_optional_bool(dict, "RemovableMedia"),
@@ -106,6 +139,8 @@ impl DiskMonitor {
     /// 네트워크 마운트는 목록에 포함하지만 용량은 계산하지 않습니다.
     pub fn list_volumes(&self) -> Result<Vec<VolumeInfo>> {
         let mount_entries = list_mount_entries()?;
+        let io_registry_identities = load_io_registry_identities();
+        let usb_mass_storage_identities = load_usb_mass_storage_identities();
         let mut volumes = Vec::new();
 
         for entry in mount_entries {
@@ -118,13 +153,39 @@ impl DiskMonitor {
             let metadata = if is_network {
                 None
             } else {
-                Self::get_volume_metadata(&entry.mount_point)
+                Self::get_volume_metadata(&entry.mount_point).map(|metadata| {
+                    enrich_volume_metadata(
+                        metadata,
+                        &io_registry_identities,
+                        &usb_mass_storage_identities,
+                    )
+                })
             };
             let is_removable = is_removable_mount(&entry, is_network, metadata.as_ref());
-            let (volume_uuid, disk_uuid) = metadata
+            let (
+                volume_uuid,
+                disk_uuid,
+                device_serial,
+                media_uuid,
+                device_guid,
+                transport_serial,
+                bus_protocol,
+                filesystem_name,
+            ) = metadata
                 .as_ref()
-                .map(|m| (m.volume_uuid.clone(), m.disk_uuid.clone()))
-                .unwrap_or((None, None));
+                .map(|m| {
+                    (
+                        m.volume_uuid.clone(),
+                        m.disk_uuid.clone(),
+                        m.device_serial.clone(),
+                        m.media_uuid.clone(),
+                        m.device_guid.clone(),
+                        m.transport_serial.clone(),
+                        m.bus_protocol.clone(),
+                        m.filesystem_name.clone(),
+                    )
+                })
+                .unwrap_or((None, None, None, None, None, None, None, None));
 
             volumes.push(volume_info_from_mount(
                 &entry,
@@ -132,6 +193,12 @@ impl DiskMonitor {
                 is_removable,
                 volume_uuid,
                 disk_uuid,
+                device_serial,
+                media_uuid,
+                device_guid,
+                transport_serial,
+                bus_protocol,
+                filesystem_name,
             ));
         }
 
@@ -253,6 +320,246 @@ fn parse_optional_bool(dict: &plist::Dictionary, key: &str) -> Option<bool> {
     })
 }
 
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn first_non_empty(values: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    values.into_iter().find_map(normalize_optional_string)
+}
+
+fn plist_string(dict: &plist::Dictionary, key: &str) -> Option<String> {
+    normalize_optional_string(
+        dict.get(key)
+            .and_then(|value| value.as_string())
+            .map(|value| value.to_string()),
+    )
+}
+
+fn plist_nested_string(dict: &plist::Dictionary, path: &[&str]) -> Option<String> {
+    let mut value = plist::Value::Dictionary(dict.clone());
+    for key in path {
+        let next = value.as_dictionary()?.get(*key)?.clone();
+        value = next;
+    }
+    normalize_optional_string(value.as_string().map(|value| value.to_string()))
+}
+
+fn plist_data_or_string(dict: &plist::Dictionary, key: &str) -> Option<String> {
+    if let Some(string_value) = plist_string(dict, key) {
+        return Some(string_value);
+    }
+
+    dict.get(key)
+        .and_then(|value| value.as_data())
+        .map(|bytes| {
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect::<String>()
+        })
+        .and_then(|value| normalize_optional_string(Some(value)))
+}
+
+fn plist_children(dict: &plist::Dictionary) -> &[plist::Value] {
+    dict.get("IORegistryEntryChildren")
+        .and_then(|value| value.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn load_ioreg_plist(args: &[&str]) -> Option<plist::Value> {
+    let output = Command::new("ioreg").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    plist::from_bytes::<plist::Value>(&output.stdout).ok()
+}
+
+fn merge_io_registry_identity(current: &mut IoRegistryIdentity, next: &IoRegistryIdentity) {
+    current.device_serial = current
+        .device_serial
+        .clone()
+        .or_else(|| next.device_serial.clone());
+    current.media_uuid = current
+        .media_uuid
+        .clone()
+        .or_else(|| next.media_uuid.clone());
+    current.device_guid = current
+        .device_guid
+        .clone()
+        .or_else(|| next.device_guid.clone());
+}
+
+fn collect_io_registry_identities(
+    node: &plist::Value,
+    inherited_device_serial: Option<String>,
+    identities: &mut HashMap<String, IoRegistryIdentity>,
+) {
+    let Some(dict) = node.as_dictionary() else {
+        return;
+    };
+
+    let current_device_serial = first_non_empty([
+        inherited_device_serial,
+        plist_nested_string(dict, &["Device Characteristics", "Serial Number"]),
+        plist_string(dict, "Serial Number"),
+        plist_string(dict, "INQUIRY Unit Serial Number"),
+    ]);
+
+    if let Some(bsd_name) = plist_string(dict, "BSD Name") {
+        let next = IoRegistryIdentity {
+            device_serial: current_device_serial.clone(),
+            media_uuid: plist_string(dict, "UUID"),
+            device_guid: plist_data_or_string(dict, "DeviceGUID"),
+        };
+        let entry = identities.entry(bsd_name).or_default();
+        merge_io_registry_identity(entry, &next);
+    }
+
+    for child in plist_children(dict) {
+        collect_io_registry_identities(child, current_device_serial.clone(), identities);
+    }
+}
+
+fn load_io_registry_identities() -> HashMap<String, IoRegistryIdentity> {
+    let mut identities = HashMap::new();
+    let Some(value) = load_ioreg_plist(&["-a", "-r", "-c", "IOBlockStorageDevice", "-l"]) else {
+        return identities;
+    };
+
+    if let Some(items) = value.as_array() {
+        for item in items {
+            collect_io_registry_identities(item, None, &mut identities);
+        }
+    }
+
+    identities
+}
+
+fn merge_usb_mass_storage_identity(
+    current: &mut UsbMassStorageIdentity,
+    next: &UsbMassStorageIdentity,
+) {
+    current.device_serial = current
+        .device_serial
+        .clone()
+        .or_else(|| next.device_serial.clone());
+    current.transport_serial = current
+        .transport_serial
+        .clone()
+        .or_else(|| next.transport_serial.clone());
+}
+
+fn collect_usb_mass_storage_identities(
+    node: &plist::Value,
+    inherited_device_serial: Option<String>,
+    inherited_transport_serial: Option<String>,
+    identities: &mut HashMap<String, UsbMassStorageIdentity>,
+) {
+    let Some(dict) = node.as_dictionary() else {
+        return;
+    };
+
+    let current_device_serial = first_non_empty([
+        inherited_device_serial,
+        plist_nested_string(dict, &["Device Characteristics", "Serial Number"]),
+        plist_nested_string(dict, &["Metadata", "Serial Number"]),
+        plist_string(dict, "INQUIRY Unit Serial Number"),
+        plist_string(dict, "Serial Number"),
+    ]);
+    let current_transport_serial = first_non_empty([
+        inherited_transport_serial,
+        plist_string(dict, "USB Serial Number"),
+        plist_string(dict, "kUSBSerialNumberString"),
+        plist_nested_string(dict, &["USB Device Info", "USB Serial Number"]),
+        plist_nested_string(dict, &["USB Device Info", "kUSBSerialNumberString"]),
+        plist_nested_string(dict, &["Metadata", "Serial Number"]),
+    ]);
+
+    if let Some(bsd_name) = plist_string(dict, "BSD Name") {
+        let next = UsbMassStorageIdentity {
+            device_serial: current_device_serial.clone(),
+            transport_serial: current_transport_serial.clone(),
+        };
+        let entry = identities.entry(bsd_name).or_default();
+        merge_usb_mass_storage_identity(entry, &next);
+    }
+
+    for child in plist_children(dict) {
+        collect_usb_mass_storage_identities(
+            child,
+            current_device_serial.clone(),
+            current_transport_serial.clone(),
+            identities,
+        );
+    }
+}
+
+fn load_usb_mass_storage_identities() -> HashMap<String, UsbMassStorageIdentity> {
+    let mut identities = HashMap::new();
+    let Some(value) = load_ioreg_plist(&["-a", "-r", "-c", "IOUSBMassStorageDriverNub", "-l"])
+    else {
+        return identities;
+    };
+
+    if let Some(items) = value.as_array() {
+        for item in items {
+            collect_usb_mass_storage_identities(item, None, None, &mut identities);
+        }
+    }
+
+    identities
+}
+
+fn enrich_volume_metadata(
+    mut metadata: VolumeMetadata,
+    io_registry_identities: &HashMap<String, IoRegistryIdentity>,
+    usb_mass_storage_identities: &HashMap<String, UsbMassStorageIdentity>,
+) -> VolumeMetadata {
+    let lookup_keys = [
+        metadata.device_identifier.clone(),
+        metadata.parent_whole_disk.clone(),
+    ];
+
+    for key in lookup_keys.into_iter().flatten() {
+        if let Some(identity) = io_registry_identities.get(&key) {
+            metadata.device_serial = metadata
+                .device_serial
+                .clone()
+                .or_else(|| identity.device_serial.clone());
+            metadata.media_uuid = metadata
+                .media_uuid
+                .clone()
+                .or_else(|| identity.media_uuid.clone());
+            metadata.device_guid = metadata
+                .device_guid
+                .clone()
+                .or_else(|| identity.device_guid.clone());
+        }
+
+        if let Some(identity) = usb_mass_storage_identities.get(&key) {
+            metadata.device_serial = metadata
+                .device_serial
+                .clone()
+                .or_else(|| identity.device_serial.clone());
+            metadata.transport_serial = metadata
+                .transport_serial
+                .clone()
+                .or_else(|| identity.transport_serial.clone());
+        }
+    }
+
+    metadata
+}
+
 fn c_char_buffer_to_string(buffer: &[nix::libc::c_char]) -> String {
     let bytes: Vec<u8> = buffer
         .iter()
@@ -367,6 +674,12 @@ fn volume_info_from_mount(
     is_removable: bool,
     volume_uuid: Option<String>,
     disk_uuid: Option<String>,
+    device_serial: Option<String>,
+    media_uuid: Option<String>,
+    device_guid: Option<String>,
+    transport_serial: Option<String>,
+    bus_protocol: Option<String>,
+    filesystem_name: Option<String>,
 ) -> VolumeInfo {
     let (total_bytes, available_bytes) = if is_network {
         (None, None)
@@ -387,6 +700,12 @@ fn volume_info_from_mount(
         is_removable,
         volume_uuid,
         disk_uuid,
+        device_serial,
+        media_uuid,
+        device_guid,
+        transport_serial,
+        bus_protocol,
+        filesystem_name,
     }
 }
 
@@ -573,7 +892,9 @@ mod tests {
             blocks_available: 40,
         };
 
-        let volume = volume_info_from_mount(&entry, true, false, None, None);
+        let volume = volume_info_from_mount(
+            &entry, true, false, None, None, None, None, None, None, None, None,
+        );
 
         assert!(volume.is_network);
         assert_eq!(volume.total_bytes, None);
@@ -664,6 +985,12 @@ mod tests {
                 is_removable: true,
                 volume_uuid: None,
                 disk_uuid: None,
+                device_serial: None,
+                media_uuid: None,
+                device_guid: None,
+                transport_serial: None,
+                bus_protocol: None,
+                filesystem_name: None,
             },
             VolumeInfo {
                 name: "USB-NESTED".to_string(),
@@ -675,6 +1002,12 @@ mod tests {
                 is_removable: true,
                 volume_uuid: None,
                 disk_uuid: None,
+                device_serial: None,
+                media_uuid: None,
+                device_guid: None,
+                transport_serial: None,
+                bus_protocol: None,
+                filesystem_name: None,
             },
         ];
 

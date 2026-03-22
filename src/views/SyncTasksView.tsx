@@ -49,6 +49,7 @@ import {
   toUuidSubPath,
   type SourceUuidType,
 } from './syncTaskUuid';
+import { isUuidSourceResolutionError } from '../utils/syncTaskSourceRecommendations';
 
 /** Volume information from backend */
 interface VolumeInfo {
@@ -60,6 +61,12 @@ interface VolumeInfo {
   is_removable: boolean;
   volume_uuid?: string;
   disk_uuid?: string;
+  device_serial?: string;
+  media_uuid?: string;
+  device_guid?: string;
+  transport_serial?: string;
+  bus_protocol?: string;
+  filesystem_name?: string;
 }
 
 const WATCH_STATE_TIMEOUT_MS = 3000;
@@ -143,7 +150,17 @@ async function waitForWatchState(
  * Sync Tasks View - Manage sync tasks
  * CRUD operations with localStorage persistence
  */
-function SyncTasksView() {
+interface SyncTasksViewProps {
+  requestedEditTaskId?: string | null;
+  onRequestedEditTaskHandled?: () => void;
+  onRequestSourceRecommendationReview?: (taskId: string) => void;
+}
+
+function SyncTasksView({
+  requestedEditTaskId,
+  onRequestedEditTaskHandled,
+  onRequestSourceRecommendationReview,
+}: SyncTasksViewProps) {
   const { t } = useTranslation();
   const { tasks, addTask, updateTask, deleteTask, error, reload } =
     useSyncTasksContext();
@@ -309,6 +326,21 @@ function SyncTasksView() {
       setSourceSubPath('');
     }
   }, [editingTask, showForm]);
+
+  useEffect(() => {
+    if (!requestedEditTaskId) {
+      return;
+    }
+
+    const requestedTask =
+      tasks.find((task) => task.id === requestedEditTaskId) ?? null;
+    if (requestedTask) {
+      setSubView({ kind: 'list' });
+      setEditingTask(requestedTask);
+      setShowForm(true);
+    }
+    onRequestedEditTaskHandled?.();
+  }, [onRequestedEditTaskHandled, requestedEditTaskId, tasks]);
 
   useEffect(() => {
     if (!showForm || sourceType !== 'uuid' || !sourceUuid || sourceUuidType) {
@@ -667,12 +699,23 @@ function SyncTasksView() {
         }
       } catch (err) {
         console.error('Sync failed:', err);
-        showToast(getErrorMessage(err), 'error');
+        const errorMessage = getErrorMessage(err);
+        showToast(errorMessage, 'error');
+        if (isUuidSourceResolutionError(errorMessage)) {
+          onRequestSourceRecommendationReview?.(task.id);
+        }
       } finally {
         setSyncing(null);
       }
     },
-    [getPatternsForSets, loadConflictSessions, showToast, syncing, t],
+    [
+      getPatternsForSets,
+      loadConflictSessions,
+      onRequestSourceRecommendationReview,
+      showToast,
+      syncing,
+      t,
+    ],
   );
 
   const handleToggleWatchMode = useCallback(
@@ -788,10 +831,13 @@ function SyncTasksView() {
         return;
       }
       showToast(errorMessage, 'error');
+      if (isUuidSourceResolutionError(errorMessage)) {
+        onRequestSourceRecommendationReview?.(task.id);
+      }
     } finally {
       store.setDryRunning(task.id, false);
     }
-  }, [getPatternsForSets, openDryRunSession, showToast, t]);
+  }, [getPatternsForSets, onRequestSourceRecommendationReview, openDryRunSession, showToast, t]);
 
   const handleDryRun = useCallback(async (task: SyncTask) => {
     const taskStatus = statuses.get(task.id);

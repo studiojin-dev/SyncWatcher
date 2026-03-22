@@ -21,6 +21,7 @@ import {
     isTerminalDryRunSessionStatus,
 } from '../../types/syncEngine';
 import { listenConfigStoreChanged } from '../../utils/configStore';
+import { isUuidSourceResolutionError } from '../../utils/syncTaskSourceRecommendations';
 
 interface SyncProgressEvent {
     taskId?: string;
@@ -37,6 +38,7 @@ export type InitialRuntimeSyncState = 'idle' | 'pending' | 'success' | 'error';
 
 interface BackendRuntimeBridgeProps {
     onInitialRuntimeSyncChange?: (state: InitialRuntimeSyncState) => void;
+    onUuidSourceResolutionError?: (taskId: string) => void;
 }
 
 const QUEUED_STATUS_DEMOTION_DELAY_MS = 80;
@@ -145,7 +147,10 @@ function dryRunLogLevel(
     return 'success';
 }
 
-function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBridgeProps) {
+function BackendRuntimeBridge({
+    onInitialRuntimeSyncChange,
+    onUuidSourceResolutionError,
+}: BackendRuntimeBridgeProps) {
     const { t } = useTranslation();
     const { loaded: tasksLoaded } = useSyncTasksContext();
     const { loaded: setsLoaded } = useExclusionSetsContext();
@@ -361,6 +366,9 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
                         level: 'error',
                     });
                 }
+                if (isUuidSourceResolutionError(reason)) {
+                    onUuidSourceResolutionError?.(taskId);
+                }
             } else if (!hasExplicitAutoUnmountStatus) {
                 store.setLastLog(taskId, {
                     message: t('sync.syncComplete', { defaultValue: 'Sync complete' }),
@@ -390,7 +398,7 @@ function BackendRuntimeBridge({ onInitialRuntimeSyncChange }: BackendRuntimeBrid
             unlistenQueueState.then((fn) => fn());
             unlistenSyncState.then((fn) => fn());
         };
-    }, [autoUnmountStatusMessages, t]);
+    }, [autoUnmountStatusMessages, onUuidSourceResolutionError, t]);
 
     const syncRuntimeState = useCallback(async (options?: { initial?: boolean }) => {
         const isInitialSyncAttempt = options?.initial ?? false;

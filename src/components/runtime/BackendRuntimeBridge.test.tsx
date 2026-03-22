@@ -273,6 +273,43 @@ describe('BackendRuntimeBridge', () => {
     expect(storeState.setLastLog).toHaveBeenCalledTimes(1);
   });
 
+  it('requests source review when runtime sync ends with an unresolved UUID source', async () => {
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+
+    const onUuidSourceResolutionError = vi.fn();
+    render(
+      <BackendRuntimeBridge
+        onUuidSourceResolutionError={onUuidSourceResolutionError}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(eventHandlers.has('runtime-sync-state')).toBe(true);
+    });
+
+    const handler = eventHandlers.get('runtime-sync-state');
+    if (!handler) {
+      throw new Error('runtime-sync-state handler not found');
+    }
+
+    act(() => {
+      handler({
+        payload: {
+          taskId: 'task-1',
+          syncing: false,
+          reason: 'Volume with DISK_UUID old-disk not found (not mounted?)',
+        },
+      });
+    });
+
+    expect(onUuidSourceResolutionError).toHaveBeenCalledWith('task-1');
+  });
+
   it('stores dry-run progress and batches using the dry-run listeners', async () => {
     mockInvoke.mockResolvedValue({
       watchingTasks: [],

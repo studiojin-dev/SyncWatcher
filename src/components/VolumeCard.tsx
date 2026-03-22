@@ -10,6 +10,8 @@ interface VolumeInfo {
     available_bytes: number | null;
     is_network: boolean;
     is_removable: boolean;
+    volume_uuid?: string;
+    disk_uuid?: string;
 }
 
 interface VolumeCardProps {

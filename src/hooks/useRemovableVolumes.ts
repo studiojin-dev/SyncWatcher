@@ -9,6 +9,14 @@ export interface VolumeInfo {
     available_bytes: number | null;
     is_network: boolean;
     is_removable: boolean;
+    volume_uuid?: string;
+    disk_uuid?: string;
+    device_serial?: string;
+    media_uuid?: string;
+    device_guid?: string;
+    transport_serial?: string;
+    bus_protocol?: string;
+    filesystem_name?: string;
 }
 
 /**

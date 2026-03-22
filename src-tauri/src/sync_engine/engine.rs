@@ -132,7 +132,8 @@ impl SyncEngine {
             let mut scanned_entries = 0u64;
             let mut scanned_files = 0usize;
             let mut scanned_bytes = 0u64;
-            let mut last_emit_at = std::time::Instant::now() - std::time::Duration::from_millis(100);
+            let mut last_emit_at =
+                std::time::Instant::now() - std::time::Duration::from_millis(100);
             let emit_interval = std::time::Duration::from_millis(100);
 
             // Pattern validation constants

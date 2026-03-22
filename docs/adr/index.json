@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260322-0015-SRC",
+    "title": "SyncTask source identity snapshot and guided UUID update",
+    "tags": [
+      "sync-task",
+      "uuid",
+      "removable-media",
+      "config-store",
+      "ux",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-22",
+    "tldr": "Keep UUID source tokens as the runtime contract, persist extra removable-media identity hints beside each task, and offer conservative user-approved UUID update recommendations when a stored UUID no longer resolves.",
+    "path": "docs/adr/ADR-20260322-0015-SRC-sync-task-source-identity-snapshot-and-guided-uuid-update.md"
+  },
+  {
     "id": "ADR-20260321-0014-DRY",
     "title": "Live dry-run session reentry and terminal immutability",
     "tags": [

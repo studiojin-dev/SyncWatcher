@@ -226,6 +226,35 @@ describe('SyncTasksView action confirmations', () => {
     expect(screen.getByText('syncTasks.dryRun · Task 1')).toBeInTheDocument();
   });
 
+  it('requests source review when sync fails because the UUID source is unresolved', async () => {
+    const onRequestSourceRecommendationReview = vi.fn();
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'start_sync') {
+        throw new Error('Volume with DISK_UUID old-disk not found (not mounted?)');
+      }
+      return undefined;
+    });
+
+    render(
+      <SyncTasksView
+        onRequestSourceRecommendationReview={onRequestSourceRecommendationReview}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.startSync')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+
+    await waitFor(() => {
+      expect(onRequestSourceRecommendationReview).toHaveBeenCalledWith('task-1');
+    });
+  });
+
   it('keeps the cancel modal path when dry-run is active without a local session', async () => {
     statusState.statuses = new Map([
       ['task-1', { taskId: 'task-1', status: 'dryRunning' }],
