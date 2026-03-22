@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to build and publish"
+        required: true
+        type: string
 
 jobs:
   tag_gate:
@@ -16,8 +22,10 @@ jobs:
       - name: Classify release tag
         id: check_tag
         shell: bash
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME}"
+          tag="${TAG_NAME}"
           if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
@@ -41,8 +49,10 @@ jobs:
 
       - name: Log skip reason for non-release tag
         if: steps.check_tag.outputs.is_release == 'false'
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
-          echo "Skipping release job because tag is not release semver/beta/rc: ${GITHUB_REF_NAME}"
+          echo "Skipping release job because tag is not release semver/beta/rc: ${TAG_NAME}"
 
   release:
     needs: tag_gate
@@ -88,8 +98,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "SyncWatcher ${{ github.ref_name }}"
+          tagName: ${{ inputs.tag_name || github.ref_name }}
+          releaseName: "SyncWatcher ${{ inputs.tag_name || github.ref_name }}"
           releaseBody: "See the assets to download this version and install."
           releaseDraft: true
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
@@ -105,7 +115,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
-      TAG_NAME: ${{ github.ref_name }}
+      TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
       RELEASE_CHANNEL: ${{ needs.tag_gate.outputs.release_channel }}
       REQUESTED_COSIGN_ATTESTATION: ${{ vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
       ENABLE_COSIGN_ATTESTATION: ${{ needs.tag_gate.outputs.release_channel == 'stable' && 'true' || vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
@@ -227,7 +237,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
           IS_PRERELEASE: ${{ needs.tag_gate.outputs.is_prerelease }}
         run: |
           if [[ "$IS_PRERELEASE" == "true" ]]; then
