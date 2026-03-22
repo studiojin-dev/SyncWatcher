@@ -10,14 +10,14 @@ pub async fn generate_licenses_report(app: tauri::AppHandle) -> Result<String, S
 - serde 1.0.215 - https://serde.rs (MIT/Apache-2.0)
 - serde_yaml 0.9.34 - https://github.com/dtolnay/serde-yaml (MIT/Apache-2.0)
 - xxHash 1.6.0 - https://github.com/Cyan4973/xxHash (BSD-2)
-- notify 6.1.0 - https://github.com/notify-rs/notify (MIT)
+- notify 8.2.0 - https://github.com/notify-rs/notify (MIT)
 
 ## Frontend (TypeScript/React)
 - React 19.2.4 - https://react.dev (MIT)
 - Mantine 8.3.18 - https://mantine.dev (MIT)
 - Tabler Icons 3.22.0 - https://tabler-icons.io (MIT)
-- i18next 24.0.2 - https://www.i18next.com (MIT)
-- Framer Motion 11.11.17 - https://www.framer.com/motion (MIT)
+- i18next 25.10.4 - https://www.i18next.com (MIT)
+- Framer Motion 12.38.0 - https://www.framer.com/motion (MIT)
 - js-yaml 4.1.1 - https://github.com/nodeca/js-yaml (MIT)
 
 ## Development Tools
