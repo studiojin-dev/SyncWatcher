@@ -391,10 +391,14 @@
     },
     "update": {
       "title": "更新",
+      "checkForUpdates": "检查更新…",
       "available": "v{{version}} 可用",
       "downloading": "下载中...",
       "installing": "安装中... 请稍候",
       "error": "更新失败",
+      "noneAvailable": "当前已是最新版本。",
+      "checkingAlready": "已经在检查更新了。",
+      "checkFailed": "检查更新失败。",
       "later": "稍后",
       "updateNow": "立即更新"
     },

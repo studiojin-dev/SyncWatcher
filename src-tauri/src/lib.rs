@@ -552,6 +552,9 @@ struct CloseRequestedEvent {
     source: CloseRequestSource,
 }
 
+const APP_CHECK_FOR_UPDATES_MENU_ID: &str = "app-check-for-updates";
+const APP_CHECK_FOR_UPDATES_EVENT: &str = "app-check-for-updates-requested";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum ConflictSessionOrigin {
@@ -5780,6 +5783,52 @@ fn restore_main_window_from_tray(app: &AppHandle) {
     }
 }
 
+fn build_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
+
+    let about_metadata = AboutMetadataBuilder::new()
+        .name(Some("SyncWatcher"))
+        .version(Some(env!("CARGO_PKG_VERSION")))
+        .build();
+
+    let app_menu = SubmenuBuilder::new(app, "SyncWatcher")
+        .about(Some(about_metadata))
+        .separator()
+        .text(APP_CHECK_FOR_UPDATES_MENU_ID, "Check for Updates…")
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .fullscreen()
+        .separator()
+        .close_window()
+        .build()?;
+
+    MenuBuilder::new(app)
+        .item(&app_menu)
+        .item(&edit_menu)
+        .item(&window_menu)
+        .build()
+}
+
 fn adjust_window_if_mostly_offscreen(window: &WebviewWindow) -> tauri::Result<()> {
     let window_position = window.outer_position()?;
     let window_size = window.outer_size()?;
@@ -5872,6 +5921,10 @@ pub fn run() {
         .on_menu_event(|app, event| {
             eprintln!("[App] Menu event: {}", event.id.as_ref());
             let menu_id = event.id.as_ref().to_ascii_lowercase();
+            if event.id.as_ref() == APP_CHECK_FOR_UPDATES_MENU_ID {
+                let _ = app.emit(APP_CHECK_FOR_UPDATES_EVENT, ());
+                return;
+            }
             let looks_like_quit = menu_id == "quit"
                 || menu_id.ends_with("-quit")
                 || menu_id.ends_with("_quit")
@@ -5884,6 +5937,8 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            app.set_menu(build_app_menu(app)?)?;
+
             let autostart_arg_present = is_autostart_launch();
             let autostart_enabled = if autostart_arg_present {
                 app.autolaunch()

@@ -391,10 +391,14 @@
     },
     "update": {
       "title": "업데이트",
+      "checkForUpdates": "업데이트 확인…",
       "available": "v{{version}} 업데이트가 있습니다",
       "downloading": "다운로드 중...",
       "installing": "설치 중... 잠시만 기다려 주세요",
       "error": "업데이트 실패",
+      "noneAvailable": "이미 최신 버전입니다.",
+      "checkingAlready": "이미 업데이트를 확인하는 중입니다.",
+      "checkFailed": "업데이트 확인에 실패했습니다.",
       "later": "나중에",
       "updateNow": "지금 업데이트"
     },

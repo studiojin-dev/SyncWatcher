@@ -391,10 +391,14 @@
     },
     "update": {
       "title": "アップデート",
+      "checkForUpdates": "アップデートを確認…",
       "available": "v{{version}} が利用可能です",
       "downloading": "ダウンロード中...",
       "installing": "インストール中... しばらくお待ちください",
       "error": "アップデート失敗",
+      "noneAvailable": "すでに最新バージョンです。",
+      "checkingAlready": "すでにアップデートを確認しています。",
+      "checkFailed": "アップデートの確認に失敗しました。",
       "later": "後で",
       "updateNow": "今すぐアップデート"
     },

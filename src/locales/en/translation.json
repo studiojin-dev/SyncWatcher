@@ -388,10 +388,14 @@
     },
     "update": {
       "title": "Update",
+      "checkForUpdates": "Check for Updates…",
       "available": "v{{version}} is available",
       "downloading": "Downloading...",
       "installing": "Installing... Please wait",
       "error": "Update failed",
+      "noneAvailable": "You are up to date.",
+      "checkingAlready": "Update check already in progress.",
+      "checkFailed": "Failed to check for updates.",
       "later": "Later",
       "updateNow": "Update Now"
     },

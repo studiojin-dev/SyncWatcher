@@ -52,6 +52,7 @@ function getCurrentWindowLabel(): string {
 function AppContent() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('sync-tasks');
+  const [manualUpdateCheckNonce, setManualUpdateCheckNonce] = useState(0);
   const {
     settings,
     loaded: settingsLoaded,
@@ -435,6 +436,20 @@ function AppContent() {
   }, [requestCloseIntent]);
 
   useEffect(() => {
+    const unlistenPromise = listen('app-check-for-updates-requested', async () => {
+      setManualUpdateCheckNonce((prev) => prev + 1);
+    });
+
+    return () => {
+      void unlistenPromise
+        .then((unlisten) => unlisten())
+        .catch((err) => {
+          console.warn('[App] Failed to unlisten app-check-for-updates-requested', err);
+        });
+    };
+  }, []);
+
+  useEffect(() => {
     const unlistenPromise = listen<RuntimeAutoUnmountRequestEvent>(
       'runtime-auto-unmount-request',
       (event) => {
@@ -664,7 +679,10 @@ function AppContent() {
         initialRuntimeSync={initialRuntimeSync}
         visible={!startupComplete}
       />
-      <UpdateChecker />
+      <UpdateChecker
+        autoCheckEnabled={startupComplete}
+        manualCheckRequestNonce={manualUpdateCheckNonce}
+      />
     </>
   );
 }

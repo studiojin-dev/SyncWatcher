@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { useToast } from '../ui/Toast';
 
 /**
  * 업데이트 상태를 나타내는 타입
@@ -17,24 +18,46 @@ interface UpdateInfo {
     date: string | null;
 }
 
+interface UpdateCheckerProps {
+    autoCheckEnabled: boolean;
+    manualCheckRequestNonce: number;
+}
+
 /**
  * UpdateChecker — 앱 시작 후 자동으로 업데이트를 확인하고,
  * 업데이트 발견 시 사용자에게 알림 모달을 표시하는 컴포넌트.
  *
  * @returns JSX 또는 null (업데이트 없으면 숨김)
  */
-function UpdateChecker() {
+function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateCheckerProps) {
     const { t } = useTranslation();
+    const { showToast } = useToast();
     const [state, setState] = useState<UpdateState>('idle');
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [progress, setProgress] = useState(0);
     const [dismissed, setDismissed] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const updateRef = useRef<Awaited<ReturnType<typeof check>> | null>(null);
+    const autoCheckStartedRef = useRef(false);
+    const lastHandledManualCheckRef = useRef(0);
 
-    const checkForUpdates = useCallback(async () => {
+    const checkForUpdates = useCallback(async (mode: 'auto' | 'manual') => {
+        if (state === 'checking' || state === 'downloading' || state === 'installing') {
+            if (mode === 'manual') {
+                showToast(t('update.checkingAlready'), 'info');
+            }
+            return;
+        }
+
+        if (mode === 'manual' && updateRef.current && state === 'available') {
+            setDismissed(false);
+            return;
+        }
+
         try {
             setState('checking');
+            setErrorMessage('');
+            setProgress(0);
             const update = await check();
 
             if (update) {
@@ -44,15 +67,26 @@ function UpdateChecker() {
                     body: update.body ?? null,
                     date: update.date ?? null,
                 });
+                setDismissed(false);
                 setState('available');
             } else {
+                updateRef.current = null;
+                setUpdateInfo(null);
                 setState('idle');
+                if (mode === 'manual') {
+                    showToast(t('update.noneAvailable'), 'success');
+                }
             }
         } catch (err) {
             console.error('[UpdateChecker] Failed to check for updates:', err);
+            updateRef.current = null;
+            setUpdateInfo(null);
             setState('idle');
+            if (mode === 'manual') {
+                showToast(t('update.checkFailed'), 'error');
+            }
         }
-    }, []);
+    }, [showToast, state, t]);
 
     const handleUpdate = useCallback(async () => {
         const update = updateRef.current;
@@ -89,12 +123,22 @@ function UpdateChecker() {
     }, []);
 
     useEffect(() => {
-        const timer = setTimeout(() => {
-            void checkForUpdates();
-        }, 5000);
+        if (!autoCheckEnabled || autoCheckStartedRef.current) {
+            return;
+        }
 
-        return () => clearTimeout(timer);
-    }, [checkForUpdates]);
+        autoCheckStartedRef.current = true;
+        void checkForUpdates('auto');
+    }, [autoCheckEnabled, checkForUpdates]);
+
+    useEffect(() => {
+        if (manualCheckRequestNonce === 0 || lastHandledManualCheckRef.current === manualCheckRequestNonce) {
+            return;
+        }
+
+        lastHandledManualCheckRef.current = manualCheckRequestNonce;
+        void checkForUpdates('manual');
+    }, [checkForUpdates, manualCheckRequestNonce]);
 
     if (dismissed || state === 'idle' || state === 'checking') {
         return null;

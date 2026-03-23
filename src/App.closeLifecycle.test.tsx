@@ -26,10 +26,16 @@ const runtimeState: MockRuntimeState = {
 };
 
 const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
-const { setLastLogMock, setQueuedMock, setLaunchAtLoginMock } = vi.hoisted(() => ({
+const {
+  setLastLogMock,
+  setQueuedMock,
+  setLaunchAtLoginMock,
+  updateCheckerPropsMock,
+} = vi.hoisted(() => ({
   setLastLogMock: vi.fn(),
   setQueuedMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
+  updateCheckerPropsMock: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -149,7 +155,10 @@ vi.mock('./components/ui/AutoUnmountConfirmModal', () => ({
 }));
 
 vi.mock('./components/features/UpdateChecker', () => ({
-  default: () => null,
+  default: (props: { autoCheckEnabled: boolean; manualCheckRequestNonce: number }) => {
+    updateCheckerPropsMock(props);
+    return <div data-testid="update-checker">{props.manualCheckRequestNonce}</div>;
+  },
 }));
 
 vi.mock('./components/ui/Animations', () => ({
@@ -218,6 +227,7 @@ describe('App close lifecycle', () => {
     setLastLogMock.mockReset();
     setQueuedMock.mockReset();
     setLaunchAtLoginMock.mockReset();
+    updateCheckerPropsMock.mockReset();
     setLaunchAtLoginMock.mockResolvedValue(true);
     runtimeState.settingsLoaded = true;
     runtimeState.tasksLoaded = true;
@@ -509,6 +519,29 @@ describe('App close lifecycle', () => {
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'hide_to_background'),
     ).toBe(false);
+  });
+
+  it('forwards app update menu events to UpdateChecker as manual check requests', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('app-check-for-updates-requested')).toBe(true);
+    });
+
+    expect(screen.getByTestId('update-checker')).toHaveTextContent('0');
+
+    await emitEvent('app-check-for-updates-requested');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('update-checker')).toHaveTextContent('1');
+    });
+
+    expect(updateCheckerPropsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        autoCheckEnabled: false,
+        manualCheckRequestNonce: 1,
+      }),
+    );
   });
 
   it('prevents duplicate dialogs on repeated cmd+q close events', async () => {

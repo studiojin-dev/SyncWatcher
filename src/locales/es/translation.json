@@ -391,10 +391,14 @@
     },
     "update": {
       "title": "Actualización",
+      "checkForUpdates": "Buscar actualizaciones…",
       "available": "v{{version}} está disponible",
       "downloading": "Descargando...",
       "installing": "Instalando... Por favor espere",
       "error": "Error de actualización",
+      "noneAvailable": "Ya tienes la versión más reciente.",
+      "checkingAlready": "Ya se está comprobando si hay actualizaciones.",
+      "checkFailed": "No se pudieron comprobar las actualizaciones.",
       "later": "Más tarde",
       "updateNow": "Actualizar ahora"
     },
