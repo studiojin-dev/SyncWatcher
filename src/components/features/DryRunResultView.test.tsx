@@ -1,5 +1,4 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DryRunResult as DryRunResultModel } from '../../types/syncEngine';
 import DryRunResultView from './DryRunResultView';
@@ -39,25 +38,6 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('react-virtuoso', () => ({
-  Virtuoso: ({
-    data,
-    itemContent,
-  }: {
-    data: DryRunResultModel['diffs'];
-    itemContent: (
-      index: number,
-      item: DryRunResultModel['diffs'][number],
-    ) => ReactNode;
-  }) => (
-    <div data-testid="virtuoso-list">
-      {data.map((item, index) => (
-        <div key={index}>{itemContent(index, item)}</div>
-      ))}
-    </div>
-  ),
-}));
-
 describe('DryRunResultView', () => {
   beforeEach(() => {
     sessionState.current = undefined;
@@ -91,7 +71,7 @@ describe('DryRunResultView', () => {
     expect(screen.getByText('dryRun.noChanges')).toBeInTheDocument();
   });
 
-  it('renders diff rows', () => {
+  it('renders diffs as a directory tree and keeps file labels on leaf nodes', () => {
     sessionState.current = {
       taskId: 'task-1',
       taskName: 'Task A',
@@ -99,7 +79,7 @@ describe('DryRunResultView', () => {
       result: {
         diffs: [
           {
-            path: 'a.txt',
+            path: 'dir/a.txt',
             kind: 'New',
             source_size: 1024,
             target_size: null,
@@ -107,18 +87,26 @@ describe('DryRunResultView', () => {
             checksum_target: null,
           },
           {
-            path: 'b.txt',
+            path: 'dir/sub/b.txt',
             kind: 'Modified',
             source_size: 2048,
             target_size: 1024,
             checksum_source: null,
             checksum_target: null,
           },
+          {
+            path: 'root.txt',
+            kind: 'New',
+            source_size: 512,
+            target_size: null,
+            checksum_source: null,
+            checksum_target: null,
+          },
         ],
-        total_files: 2,
-        files_to_copy: 2,
+        total_files: 3,
+        files_to_copy: 3,
         files_modified: 1,
-        bytes_to_copy: 3072,
+        bytes_to_copy: 3584,
         targetPreflight: null,
       },
     };
@@ -131,9 +119,12 @@ describe('DryRunResultView', () => {
       />,
     );
 
+    expect(screen.getByText('dir')).toBeInTheDocument();
+    expect(screen.getByText('sub')).toBeInTheDocument();
     expect(screen.getByText('a.txt')).toBeInTheDocument();
     expect(screen.getByText('b.txt')).toBeInTheDocument();
-    expect(screen.getByText('dryRun.newFile')).toBeInTheDocument();
+    expect(screen.getByText('root.txt')).toBeInTheDocument();
+    expect(screen.getAllByText('dryRun.newFile')).toHaveLength(2);
     expect(screen.getByText('dryRun.modifiedFile')).toBeInTheDocument();
   });
 
