@@ -1,141 +1,118 @@
 # SyncWatcher (Source-Available)
 
-macOS-native file synchronization utility with automatic SD card/USB detection and real-time backup capabilities.
+[![English](https://img.shields.io/badge/README-English-111111?style=for-the-badge&logo=readme&logoColor=white)](./README.md)
+[![Korean](https://img.shields.io/badge/README-%ED%95%9C%EA%B5%AD%EC%96%B4-0F766E?style=for-the-badge&logo=readme&logoColor=white)](./README.ko.md)
 [![GitHub release](https://img.shields.io/github/v/release/studiojin-dev/SyncWatcher)](https://github.com/studiojin-dev/SyncWatcher/releases)
 [![GitHub downloads](https://img.shields.io/github/downloads/studiojin-dev/SyncWatcher/latest/total)](https://github.com/studiojin-dev/SyncWatcher/releases/latest)
 
-## Overview
+SyncWatcher keeps SD cards, USB drives, and working folders backed up on macOS without turning every copy job into a manual routine.
 
-SyncWatcher is a high-performance, native-feeling macOS file synchronization application that:
+It is built for people who move files constantly and want a backup flow that feels native, fast, and predictable.
 
-- **Detects SD cards and USB drives** automatically when inserted
-- **Performs real-time directory watching** for instant backup
-- **Supports one-way sync** (Source → Target) with rsync-like efficiency
-- **Features a modern Neo-Brutalism UI** for a bold, high-contrast user experience to verify sync logic independently of GUI
+## Why People Use It
 
-## Features
+- **Plug in and go**: Detect removable media as soon as it mounts.
+- **Turn repeat work into one task**: Save a SyncTask once and reuse it whenever needed.
+- **Stay safe before and after copy**: Preview changes with `dry-run`, verify with checksum mode, and inspect target-only files before deletion.
+- **Keep folders current automatically**: Let `watchmode` react to file changes in the background.
 
-### 🎨 Modern User Interface
+## Product In Action
 
-- **Neo-Brutalism Design**: Bold borders, high contrast, and hard shadows for a distinct look.
-- **Responsive Dashboard**: Bento grid layout displaying real-time stats and storage info.
-- **Dark Mode**: Fully supported with system theme synchronization.
-- **Custom Components**: Styled Volume Cards, Activity Logs, and Settings controls.
+### Main Dashboard
 
-### 🌍 Localization
+![SyncWatcher dashboard](./manual/SCR-20260324-1.png)
 
-- **Multi-language Support**: Fully translated into English, Korean (한국어), Spanish (Español), Chinese (中文), and Japanese (日本語).
-- **Instant Switching**: Change languages on the fly via Settings.
+The main dashboard keeps task state, progress, and quick actions visible so backup jobs stay easy to understand.
 
-### ⚡ Core Sync Engine
+### Create A SyncTask
 
-- **One-way sync** (Source → Target)
-- **Dry-run mode** - Preview changes before executing
-- **Checksum comparison** - xxHash64 for accuracy
-- **Orphan inspector** - Review/delete target-only files with explicit confirmation
-- **Progress tracking** - Real-time feedback
+![SyncTask setup demo](./manual/synctask-setup.gif)
 
-### 🖥️ System Integration
+Choose a Source, pick a Target, and shape the task around your workflow instead of repeating the same copy setup every time.
 
-- **Disk monitoring** - Detects mounted volumes on macOS
-- **Volume detection** - Identifies removable media (USB, SD cards)
-- **Space calculation** - Total and available disk space
-- **Folder watching** - Real-time file system events via notify
+### Automate Backup Behavior
 
-### � Compliance & Metadata
+![SyncTask automation demo](./manual/synctask-automation.gif)
 
-- **About/License UI**: Built-in viewer for licenses and registration status.
-- **Build-time Collection**: Automated generation of `oss-licenses.json` for compliance.
+SyncWatcher supports removable storage targets, automatic watching, verification options, and exclusion rules so the task can match the way you actually work.
 
-## Tech Stack
+Detailed walkthroughs:
 
-### Core (Rust)
+- [SyncTask Guide (English)](./docs/synctask.md)
+- [SyncTask Guide (Korean)](./docs/synctask.ko.md)
 
-- **Tauri v2** - macOS app bundle
-- **Tokio** - Async runtime for high-performance I/O
-- **notify** - File system event monitoring
-- **xxHash** - Fast checksum-based comparison
+## Feature Highlights
 
-### Frontend (React + TypeScript)
+### Backup Workflow
 
-- **Vite** - Build tool and dev server
-- **Tailwind CSS v4** - Styling & layout (configured via CSS variables)
-- **Mantine** - UI component library structure
-- **i18next** - Internationalization framework
+- **One-way sync** from Source to Target
+- **Dry-run mode** for previewing changes before execution
+- **Checksum validation** with xxHash64 when copy verification matters
+- **Target-only file review** before cleanup
+- **Reusable SyncTask presets** for recurring jobs
+
+### System Integration
+
+- **SD card and USB detection**
+- **Mounted volume monitoring** on macOS
+- **Folder watching** powered by `notify`
+- **Disk space visibility** for total and available capacity
+
+### Desktop Experience
+
+- **macOS-native app** built with Tauri
+- **Bold high-contrast UI** designed for quick scanning
+- **Dark mode support**
+- **Localized interface** in English, Korean, Spanish, Chinese, and Japanese
 
 ## Getting Started
 
-### Prerequisites
+### Requirements
 
-- **Rust** 1.70+ - For CLI and backend
-- **Node.js** `^20.19.0 || >=22.12.0` - For frontend development
-- **pnpm** 10+ - Canonical package manager for this repository
-- **macOS** 11+ - Target platform
+- **Rust** 1.70+
+- **Node.js** `^20.19.0 || >=22.12.0`
+- **pnpm** 10+
+- **macOS** 11+
 
 ### Development
 
 ```bash
-# Install dependencies
 pnpm install
-
-# Run development server (Tauri + Vite)
 pnpm dev
-
-# Build for production
 pnpm build
-
-# Build Tauri bundle
 pnpm tauri build
 ```
 
-### macOS Installation
+### Install On macOS
 
-1. Download the macOS installer package from GitHub Releases.
-2. Open the downloaded file (`.dmg`) and move `SyncWatcher.app` to `Applications`.
-   - The DMG may show a Gatekeeper message depending on your macOS settings.
-3. Run `SyncWatcher`.
+1. Download the latest macOS release from GitHub Releases.
+2. Open the `.dmg`.
+3. Move `SyncWatcher.app` to `Applications`.
+4. Launch the app.
 
-### macOS Latest Installer (curl script)
+Depending on your macOS settings, Gatekeeper may show a warning for the DMG.
 
-Use this one-liner to install the latest build directly from GitHub Releases:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/studiojin-dev/SyncWatcher/main/scripts/install-macos-latest.sh)"
-```
-
-This is the currently recommended installation method while the app is usable and before paid Apple Developer Program membership is enabled, because signed/notarized installer distribution is not yet available.
-
-If you still see `curl: (56)` or `404` during download, it usually means the downloaded script is not matching the latest release asset names (common when release asset naming changed across versions). Re-run the same command again; the latest script always resolves the `.dmg` filename from release metadata before download.
-
-The script will:
-
-1. Read the latest release tag from GitHub
-2. Pick the matching architecture (`aarch64` / `x86_64`) DMG
-3. Download the DMG and same-tag checksum manifest
-4. Verify the DMG SHA-256 against the release checksum manifest
-5. Install `Sync Watcher.app` into `/Applications`
-
-If you want, use tar format in your release assets and the same flow still works with a small script change.
-
-### macOS 설치(스크립트)
-
-#### 1) curl + sh로 최신 버전 자동 설치
+### Latest Installer Script
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/studiojin-dev/SyncWatcher/main/scripts/install-macos-latest.sh)"
 ```
 
-이 스크립트는 최신 stable 태그를 대상으로 checksum manifest만 확인한 뒤 설치를 진행합니다. cryptographic provenance 검증은 별도 helper(`scripts/release/verify-release-asset.sh`)로 수행합니다.
+This installer script:
 
-### CLI Usage
+1. Reads the latest GitHub release tag
+2. Selects the matching `aarch64` or `x86_64` DMG
+3. Downloads the DMG and checksum manifest
+4. Verifies the DMG SHA-256
+5. Installs `Sync Watcher.app` into `/Applications`
 
-The CLI can be run independently of the GUI for testing and verification:
+If you see `curl: (56)` or `404`, run the same command again so the latest release metadata is re-resolved before download.
+
+### CLI Preview
 
 ```bash
-# Build CLI
 cd src-tauri && cargo build --release --bin sync-cli
 
-# Preview sync (dry-run)
 ./src-tauri/target/release/sync-cli \
   --source /Volumes/SD_Card \
   --target ~/Backups/SD \
@@ -144,29 +121,16 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 ## License
 
-This project is **Source-Available** software:
+This project is **Source-Available** software.
 
-| Component            | License                                                                                 |
-| -------------------- | --------------------------------------------------------------------------------------- |
+| Component | License |
+| --- | --- |
 | [Source Code](./LICENSE) | [Polyform Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) |
-| Binary Distribution  | Proprietary EULA (Free Use, Optional Support License)                                   |
+| Binary Distribution | Proprietary EULA (Free Use, Optional Support License) |
 
-### Free Use Policy
+The official app is free to use, including commercial and internal company use. Buying a license is optional and works as project support.
 
-The official SyncWatcher app is free to use, including commercial/internal company use.
-
-Buying a license is optional for everyone. It is a support purchase to help ongoing development.
-
-### Why Polyform Noncommercial?
-
-The source code is published under Polyform Noncommercial 1.0.0 mainly to prevent third-party fork-and-resell monetization of this project.
-
-### Optional Support Links
+## Support
 
 - License support purchase: [studiojin.dev](https://studiojin.dev)
-- Additional tip after purchase: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
-
-## Acknowledgments
-
-- Tauri Team for the amazing framework
-- Studio Jin for design and development
+- Additional tip: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
