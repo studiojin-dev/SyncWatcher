@@ -1,15 +1,16 @@
+import { type ReactElement, useMemo } from 'react';
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconFolder,
   IconFilePlus,
   IconFileCode,
   IconPlayerStop,
 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
-import { Virtuoso } from 'react-virtuoso';
 import { useSettings } from '../../hooks/useSettings';
 import { useDryRunSession } from '../../hooks/useSyncTaskStatus';
-import type { DryRunSessionState } from '../../types/syncEngine';
+import type { DryRunSessionState, FileDiff } from '../../types/syncEngine';
 import { formatBytes } from '../../utils/formatBytes';
 
 interface DryRunResultViewProps {
@@ -18,6 +19,132 @@ interface DryRunResultViewProps {
   onBack: () => void;
   onRequestCancel?: () => void;
   onRequestRerun?: () => void;
+}
+
+interface DryRunTreeNode {
+  name: string;
+  fullPath: string;
+  isDir: boolean;
+  children: DryRunTreeNode[];
+  diff?: FileDiff;
+}
+
+function buildDiffTree(diffs: FileDiff[]): DryRunTreeNode[] {
+  interface InternalNode extends DryRunTreeNode {
+    childrenMap: Map<string, InternalNode>;
+  }
+
+  const root = new Map<string, InternalNode>();
+
+  for (const diff of diffs) {
+    const parts = diff.path.split('/').filter(Boolean);
+    let current = root;
+    let accum = '';
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      accum = accum ? `${accum}/${part}` : part;
+      const isLast = index === parts.length - 1;
+      const existing = current.get(part);
+      const node: InternalNode = existing ?? {
+        name: part,
+        fullPath: accum,
+        isDir: !isLast,
+        children: [],
+        childrenMap: new Map<string, InternalNode>(),
+      };
+
+      if (isLast) {
+        node.isDir = false;
+        node.diff = diff;
+      }
+
+      if (!existing) {
+        current.set(part, node);
+      }
+
+      current = node.childrenMap;
+    }
+  }
+
+  const sortNodes = (nodes: InternalNode[]): DryRunTreeNode[] =>
+    [...nodes]
+      .sort((left, right) => {
+        if (left.isDir !== right.isDir) {
+          return left.isDir ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name);
+      })
+      .map((node) => {
+        const { childrenMap, ...rest } = node;
+        return {
+          ...rest,
+          children: sortNodes(Array.from(childrenMap.values())),
+        };
+      });
+
+  return sortNodes(Array.from(root.values()));
+}
+
+function renderTree(
+  nodes: DryRunTreeNode[],
+  depth: number,
+  unitSystem: 'binary' | 'decimal',
+  t: (key: string, options?: Record<string, unknown>) => string,
+): ReactElement[] {
+  const rows: ReactElement[] = [];
+
+  for (const node of nodes) {
+    const diff = node.diff;
+    const isFile = !node.isDir && diff !== undefined;
+    rows.push(
+      <div key={node.fullPath}>
+        <div
+          className="flex items-start justify-between gap-3 py-2 text-xs font-mono border-b border-dashed border-[var(--border-main)]"
+          style={{ paddingLeft: `${depth * 16}px` }}
+        >
+          <div className="min-w-0 flex items-start gap-2">
+            {node.isDir ? (
+              <IconFolder size={14} className="mt-0.5 shrink-0" />
+            ) : diff?.kind === 'New' ? (
+              <IconFilePlus size={14} className="mt-0.5 shrink-0" />
+            ) : (
+              <IconFileCode size={14} className="mt-0.5 shrink-0" />
+            )}
+            <div className="min-w-0">
+              <div className="break-all">{node.name}</div>
+              {isFile ? (
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-secondary)] uppercase">
+                  <span>
+                    {diff.kind === 'New'
+                      ? t('dryRun.newFile')
+                      : t('dryRun.modifiedFile')}
+                  </span>
+                  <span>
+                    {t('dryRun.colSourceSize', { defaultValue: 'Source Size' })}:{' '}
+                    {diff.source_size === null
+                      ? '-'
+                      : formatBytes(diff.source_size, unitSystem)}
+                  </span>
+                  <span>
+                    {t('dryRun.colTargetSize', { defaultValue: 'Target Size' })}:{' '}
+                    {diff.target_size === null
+                      ? '-'
+                      : formatBytes(diff.target_size, unitSystem)}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        {node.children.length > 0
+          ? renderTree(node.children, depth + 1, unitSystem, t)
+          : null}
+      </div>,
+    );
+  }
+
+  return rows;
 }
 
 function getStatusLabel(
@@ -79,6 +206,7 @@ export default function DryRunResultView({
   const isRunning = status === 'running';
   const isFinished = status === 'completed' || status === 'cancelled' || status === 'failed';
   const showEmptyState = result.diffs.length === 0 && !isRunning;
+  const diffTree = useMemo(() => buildDiffTree(result.diffs), [result.diffs]);
 
   const overallPercent =
     progress?.totalBytes && progress.totalBytes > 0
@@ -223,18 +351,7 @@ export default function DryRunResultView({
         </div>
       ) : null}
 
-      <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] overflow-hidden">
-        <div className="grid grid-cols-[minmax(0,1fr)_140px_130px_130px] gap-2 px-3 py-2 border-b-2 border-[var(--border-main)] text-[10px] font-mono uppercase bg-[var(--bg-tertiary)]">
-          <span>{t('dryRun.colPath', { defaultValue: 'Path' })}</span>
-          <span>{t('dryRun.colType', { defaultValue: 'Type' })}</span>
-          <span>
-            {t('dryRun.colSourceSize', { defaultValue: 'Source Size' })}
-          </span>
-          <span>
-            {t('dryRun.colTargetSize', { defaultValue: 'Target Size' })}
-          </span>
-        </div>
-
+      <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] overflow-auto max-h-[420px]">
         {showEmptyState ? (
           <div className="p-4 text-sm font-mono text-[var(--text-secondary)]">
             {t('dryRun.noChanges')}
@@ -246,35 +363,7 @@ export default function DryRunResultView({
               : t('dryRun.noChanges')}
           </div>
         ) : (
-          <Virtuoso
-            style={{ height: 420 }}
-            data={result.diffs}
-            itemContent={(_index, diff) => (
-              <div className="grid grid-cols-[minmax(0,1fr)_140px_130px_130px] gap-2 px-3 py-2 border-b border-dashed border-[var(--border-main)] text-xs font-mono">
-                <span className="break-all">{diff.path}</span>
-                <span className="inline-flex items-center gap-1">
-                  {diff.kind === 'New' ? (
-                    <IconFilePlus size={14} />
-                  ) : (
-                    <IconFileCode size={14} />
-                  )}
-                  {diff.kind === 'New'
-                    ? t('dryRun.newFile')
-                    : t('dryRun.modifiedFile')}
-                </span>
-                <span>
-                  {diff.source_size === null
-                    ? '-'
-                    : formatBytes(diff.source_size, settings.dataUnitSystem)}
-                </span>
-                <span>
-                  {diff.target_size === null
-                    ? '-'
-                    : formatBytes(diff.target_size, settings.dataUnitSystem)}
-                </span>
-              </div>
-            )}
-          />
+          <div className="p-2">{renderTree(diffTree, 0, settings.dataUnitSystem, t)}</div>
         )}
       </div>
     </div>
