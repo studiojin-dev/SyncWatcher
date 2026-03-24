@@ -90,13 +90,31 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Validate Lemon Squeezy build configuration
+        env:
+          SYNCWATCHER_LEMON_SQUEEZY_STORE_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_STORE_ID }}
+          SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID }}
+        run: |
+          test -n "$SYNCWATCHER_LEMON_SQUEEZY_STORE_ID" || {
+            echo "Missing repo variable: SYNCWATCHER_LEMON_SQUEEZY_STORE_ID"
+            exit 1
+          }
+          test -n "$SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID" || {
+            echo "Missing repo variable: SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID"
+            exit 1
+          }
+
       - name: Build and release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNCWATCHER_LEMON_SQUEEZY_STORE_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_STORE_ID }}
+          SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID }}
+          SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+          VITE_LEMON_SQUEEZY_CHECKOUT_URL: ${{ vars.VITE_LEMON_SQUEEZY_CHECKOUT_URL }}
         with:
           tagName: ${{ inputs.tag_name || github.ref_name }}
           releaseName: "SyncWatcher ${{ inputs.tag_name || github.ref_name }}"

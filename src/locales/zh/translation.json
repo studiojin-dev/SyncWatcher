@@ -193,6 +193,7 @@
       "sectionDisplay": "显示",
       "sectionSystem": "系统",
       "sectionBehavior": "行为",
+      "sectionLicense": "许可支持",
       "stateLocation": "状态存储位置",
       "stateLocationPlaceholder": "默认: Tauri AppData",
       "maxLogLines": "最大日志行数",
@@ -340,12 +341,13 @@
       "thankYou": "感谢你给开发者续命！",
       "supportTitle": "能赏一枚硬币吗？",
       "supportHint": "商用使用也免费。购买许可证完全自愿，主要是支持开发者。",
-      "supportButton": "卑微求赏按钮",
+      "supportButton": "卑微求赏",
       "supportModalTitle": "鞠躬求赏模式",
       "supportModalMessage": "你已经通过购买许可证支持了这个项目。如果还想再帮一把，也可以在 Buy Me a Coffee 再打赏一次。",
       "supportModalConfirm": "去 Buy Me a Coffee 打赏",
       "supportModalCancel": "下次一定",
       "purchaseLicense": "可选支持：购买许可证",
+      "supportStatus": "支持状态",
       "licenseType": "Polyform NC 1.0.0"
     },
     "common": {
@@ -410,7 +412,14 @@
       "activating": "激活中...",
       "activated": "许可证已激活！",
       "invalid": "无效的许可证密钥。",
-      "enterLicense": "输入许可证"
+      "enterLicense": "输入许可证",
+      "manage": "管理许可证",
+      "manageDescription": "此设备已启用支持者许可证。迁移到另一台设备前，可以先在这里移除。",
+      "currentKey": "当前密钥",
+      "remove": "移除许可证",
+      "removing": "移除中...",
+      "removed": "许可证已移除。",
+      "removeFailed": "移除许可证失败。"
     }
   }
 }

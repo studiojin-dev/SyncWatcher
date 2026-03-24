@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch, Select } from '@mantine/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
 import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DataUnitSystem } from '../utils/formatBytes';
+import LicenseActivation from '../components/features/LicenseActivation';
+import { lemonSqueezyCheckoutUrl } from '../config/appLinks';
 
 const languages = [
     { value: 'en', label: 'English' },
@@ -21,6 +24,7 @@ const languages = [
 function SettingsView() {
     const { t } = useTranslation();
     const { settings, updateSettings, setLaunchAtLogin, resetSettings, loaded } = useSettings();
+    const [showLicenseModal, setShowLicenseModal] = useState(false);
     const themes = [
         { value: 'system', label: t('settings.themeSystem') },
         { value: 'light', label: t('settings.themeLight') },
@@ -287,6 +291,43 @@ function SettingsView() {
                     </div>
                 </section>
 
+                <section>
+                    <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-error)]">
+                        {t('settings.sectionLicense')}
+                    </h2>
+                    <div className="neo-box p-6 space-y-4">
+                        <div className="flex items-center justify-between gap-4 border-b border-dashed border-[var(--border-main)] pb-4">
+                            <div>
+                                <div className="font-bold">{t('about.supportStatus')}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">
+                                    {settings.isRegistered ? t('about.thankYou') : t('about.supportHint')}
+                                </div>
+                            </div>
+                            <span className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] px-3 py-1 text-xs font-black uppercase tracking-wider">
+                                {settings.isRegistered ? t('about.registered') : t('about.unregistered')}
+                            </span>
+                        </div>
+
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                            <a
+                                href={lemonSqueezyCheckoutUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center border-3 border-[var(--border-main)] bg-black px-4 py-3 text-xs font-bold uppercase tracking-wider text-[var(--accent-warning)] shadow-[4px_4px_0_0_var(--shadow-color)] transition-all hover:opacity-90"
+                            >
+                                {t('about.purchaseLicense')}
+                            </a>
+                            <button
+                                type="button"
+                                onClick={() => setShowLicenseModal(true)}
+                                className="border-3 border-[var(--border-main)] bg-[var(--bg-primary)] px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-[var(--bg-secondary)]"
+                            >
+                                {settings.isRegistered ? t('license.manage') : t('license.enterLicense')}
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
                 {/* Danger Zone */}
                 <div className="mt-8 pt-8 border-t-3 border-[var(--border-main)] border-dashed">
                     <button
@@ -297,6 +338,7 @@ function SettingsView() {
                     </button>
                 </div>
             </div>
+            <LicenseActivation open={showLicenseModal} onClose={() => setShowLicenseModal(false)} />
         </div>
     );
 }

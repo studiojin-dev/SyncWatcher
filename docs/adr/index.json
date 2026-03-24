@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260324-0016-LIC",
+    "title": "Lemon Squeezy handles supporter licensing while GitHub Releases remain the distribution origin for v1",
+    "tags": [
+      "licensing",
+      "release",
+      "distribution",
+      "updater",
+      "lemonsqueezy",
+      "github"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-24",
+    "tldr": "Use Lemon Squeezy for optional supporter purchases and license-key lifecycle, but keep GitHub Releases as the source of install files and Tauri updater metadata in v1.",
+    "path": "docs/adr/ADR-20260324-0016-LIC-lemon-squeezy-licensing-and-github-release-distribution.md"
+  },
+  {
     "id": "ADR-20260322-0015-SRC",
     "title": "SyncTask source identity snapshot and guided UUID update",
     "tags": [

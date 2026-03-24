@@ -193,6 +193,7 @@
       "sectionDisplay": "顯示",
       "sectionSystem": "系統",
       "sectionBehavior": "行為",
+      "sectionLicense": "授權支持",
       "stateLocation": "狀態儲存位置",
       "stateLocationPlaceholder": "預設: Tauri AppData",
       "maxLogLines": "最大日誌行數",
@@ -340,12 +341,13 @@
       "thankYou": "感謝你幫開發者續命！",
       "supportTitle": "可以賞一枚硬幣嗎？",
       "supportHint": "商用使用也免費。購買授權完全自願，主要是支持開發者。",
-      "supportButton": "卑微討賞按鈕",
+      "supportButton": "卑微討賞",
       "supportModalTitle": "鞠躬討賞模式",
       "supportModalMessage": "你已經透過購買授權支持了這個專案。如果還想再幫一把，也可以在 Buy Me a Coffee 再贊助一次。",
       "supportModalConfirm": "去 Buy Me a Coffee 贊助",
       "supportModalCancel": "下次一定",
       "purchaseLicense": "可選支持：購買授權",
+      "supportStatus": "支持狀態",
       "licenseType": "Polyform NC 1.0.0"
     },
     "common": {
@@ -410,7 +412,14 @@
       "activating": "啟動中...",
       "activated": "授權已啟動！",
       "invalid": "無效的授權金鑰。",
-      "enterLicense": "輸入授權金鑰"
+      "enterLicense": "輸入授權金鑰",
+      "manage": "管理授權",
+      "manageDescription": "這台裝置已啟用支持者授權。移轉到其他機器前，可以先在這裡移除。",
+      "currentKey": "目前金鑰",
+      "remove": "移除授權",
+      "removing": "移除中...",
+      "removed": "授權已移除。",
+      "removeFailed": "移除授權失敗。"
     }
   }
 }

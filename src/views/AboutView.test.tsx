@@ -8,6 +8,14 @@ vi.mock('@tauri-apps/api/app', () => ({
   getVersion: vi.fn(),
 }));
 
+vi.mock('../hooks/useSettings', () => ({
+  useSettings: () => ({
+    settings: {
+      isRegistered: false,
+    },
+  }),
+}));
+
 const mockGetVersion = vi.mocked(getVersion);
 
 // Mock i18n
@@ -20,6 +28,8 @@ vi.mock('react-i18next', () => ({
         'about.license': 'License',
         'about.licenseType': 'Polyform NC 1.0.0',
         'about.viewOnGithub': 'View on GitHub',
+        'about.supportStatus': 'Support Status',
+        'about.unregistered': 'Free Use (Personal & Commercial)',
         'about.openSourceLibraries': 'Open Source Libraries',
         'about.openSourceDescription': 'SyncWatcher includes open source libraries. Use the button below to view their license information.',
         'about.viewLicenses': 'View Licenses',
@@ -88,7 +98,7 @@ describe('AboutView', () => {
 
     const githubLink = await screen.findByRole('link', { name: /github/i });
     expect(githubLink).toBeInTheDocument();
-    expect(githubLink).toHaveAttribute('href', 'https://github.com/kimjj81/SyncWatcher');
+    expect(githubLink).toHaveAttribute('href', 'https://github.com/studiojin-dev/SyncWatcher');
   });
 
   it('should fetch licenses when button clicked', async () => {
@@ -160,6 +170,7 @@ describe('AboutView', () => {
       /Version/,
       'Developer',
       'License',
+      'Support Status',
     ];
 
     sections.forEach(section => {

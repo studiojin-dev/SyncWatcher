@@ -23,12 +23,8 @@ const mockState = vi.hoisted(() => ({
     'license.enterLicense': 'Enter License',
     'about.supportTitle': 'One more pizza bite?',
     'about.supportHint': 'I am bowing dramatically.',
-    'about.supportButton': 'Sponsor Another Slice',
-    'about.supportModalTitle': 'Maximum Gratitude Mode',
-    'about.supportModalMessage': 'Thank you for purchasing a license.',
-    'about.supportModalConfirm': 'Yes, I Will Support',
-    'about.supportModalCancel': 'Maybe Later',
-    'common.close': 'Close',
+    'about.supportButton': 'Bow-and-Beg',
+    'license.manage': 'Manage License',
   } as Record<string, string>,
 }));
 
@@ -78,40 +74,21 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('license-activation-modal')).toBeInTheDocument();
   });
 
-  it('shows support CTA and support modal for registered users', async () => {
+  it('shows a direct Buy Me a Coffee link for registered users', async () => {
     mockState.isRegistered = true;
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
     await screen.findByText('v1.2.0-beta');
 
-    expect(screen.getByText('One more pizza bite?')).toBeInTheDocument();
-    expect(screen.getByText('I am bowing dramatically.')).toBeInTheDocument();
-    expect(screen.getByTestId('pizza-bite-animation')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Sponsor Another Slice' }));
-
-    expect(screen.getByRole('heading', { name: 'Maximum Gratitude Mode' })).toBeInTheDocument();
-    expect(screen.getByText('Thank you for purchasing a license.')).toBeInTheDocument();
-
-    const supportLink = screen.getByRole('link', { name: 'Yes, I Will Support' });
+    expect(screen.queryByText('One more pizza bite?')).not.toBeInTheDocument();
+    expect(screen.queryByText('I am bowing dramatically.')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pizza-bite-animation')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage License' })).toBeInTheDocument();
+    const supportLink = screen.getByRole('link', { name: 'Bow-and-Beg' });
+    expect(supportLink).toHaveTextContent('Bow-and-Beg');
+    expect(supportLink).toHaveTextContent('🍕');
     expect(supportLink).toHaveAttribute('href', 'https://buymeacoffee.com/studiojin_dev');
     expect(supportLink).toHaveAttribute('target', '_blank');
     expect(supportLink).toHaveAttribute('rel', 'noopener noreferrer');
-  });
-
-  it('closes support modal on cancel button and overlay click', async () => {
-    mockState.isRegistered = true;
-    render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
-    await screen.findByText('v1.2.0-beta');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Sponsor Another Slice' }));
-    expect(screen.getByRole('heading', { name: 'Maximum Gratitude Mode' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Maybe Later' }));
-    expect(screen.queryByRole('heading', { name: 'Maximum Gratitude Mode' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Sponsor Another Slice' }));
-    fireEvent.click(screen.getByTestId('support-modal-overlay'));
-    expect(screen.queryByRole('heading', { name: 'Maximum Gratitude Mode' })).not.toBeInTheDocument();
   });
 
   it('renders the runtime app version in the footer', async () => {

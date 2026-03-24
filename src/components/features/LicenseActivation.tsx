@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../../hooks/useSettings';
@@ -6,7 +6,12 @@ import { useSettings } from '../../hooks/useSettings';
 /**
  * 라이선스 활성화 상태
  */
-type ActivationState = 'idle' | 'activating' | 'success' | 'error';
+type ActivationState = 'idle' | 'loading' | 'activating' | 'deactivating' | 'success' | 'error';
+
+interface LicenseStatus {
+    isRegistered: boolean;
+    licenseKey: string | null;
+}
 
 /**
  * LicenseActivation — 라이선스 키 입력 및 활성화 모달 컴포넌트.
@@ -22,6 +27,37 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
     const [licenseKey, setLicenseKey] = useState('');
     const [state, setState] = useState<ActivationState>('idle');
     const [errorMessage, setErrorMessage] = useState('');
+    const [status, setStatus] = useState<LicenseStatus | null>(null);
+    const [lastAction, setLastAction] = useState<'activate' | 'deactivate' | null>(null);
+
+    const loadLicenseStatus = useCallback(async (options?: { silent?: boolean }) => {
+        if (!options?.silent) {
+            setState('loading');
+            setErrorMessage('');
+        }
+        try {
+            const result = await invoke<LicenseStatus>('get_license_status');
+            setStatus(result);
+            updateSettings({ isRegistered: result.isRegistered });
+            if (!options?.silent) {
+                setState('idle');
+            }
+        } catch (err) {
+            console.error('[LicenseActivation] Failed to load status:', err);
+            setStatus({ isRegistered: false, licenseKey: null });
+            updateSettings({ isRegistered: false });
+            setState('error');
+            setErrorMessage(String(err));
+        }
+    }, [updateSettings]);
+
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        void loadLicenseStatus();
+    }, [loadLicenseStatus, open]);
 
     const handleActivate = useCallback(async () => {
         if (!licenseKey.trim()) return;
@@ -29,13 +65,16 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
         try {
             setState('activating');
             setErrorMessage('');
+            setLastAction(null);
 
             const result = await invoke<{ valid: boolean; error: string | null }>('activate_license_key', {
                 licenseKey: licenseKey.trim(),
             });
 
             if (result.valid) {
+                await loadLicenseStatus({ silent: true });
                 setState('success');
+                setLastAction('activate');
                 updateSettings({ isRegistered: true });
             } else {
                 setState('error');
@@ -46,12 +85,38 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             setState('error');
             setErrorMessage(String(err));
         }
-    }, [licenseKey, t, updateSettings]);
+    }, [licenseKey, loadLicenseStatus, t, updateSettings]);
+
+    const handleDeactivate = useCallback(async () => {
+        try {
+            setState('deactivating');
+            setErrorMessage('');
+            setLastAction(null);
+
+            const result = await invoke<{ success: boolean; error: string | null }>('deactivate_license_key');
+
+            if (result.success) {
+                setState('success');
+                setLastAction('deactivate');
+                setStatus({ isRegistered: false, licenseKey: null });
+                updateSettings({ isRegistered: false });
+            } else {
+                setState('error');
+                setErrorMessage(result.error ?? t('license.removeFailed'));
+            }
+        } catch (err) {
+            console.error('[LicenseActivation] Deactivation failed:', err);
+            setState('error');
+            setErrorMessage(String(err));
+        }
+    }, [t, updateSettings]);
 
     const handleClose = useCallback(() => {
         setState('idle');
         setLicenseKey('');
         setErrorMessage('');
+        setStatus(null);
+        setLastAction(null);
         onClose();
     }, [onClose]);
 
@@ -75,13 +140,38 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
 
                 {/* Body */}
                 <div className="space-y-4 p-5">
-                    {state === 'success' ? (
+                    {state === 'loading' ? (
+                        <p className="text-sm font-bold text-[var(--text-primary)]">
+                            {t('common.loading')}
+                        </p>
+                    ) : state === 'success' ? (
                         <div className="flex flex-col items-center gap-3 py-4">
                             <div className="text-4xl">✨</div>
                             <p className="text-sm font-bold text-[var(--accent-success)]">
-                                {t('license.activated')}
+                                {lastAction === 'deactivate' ? t('license.removed') : t('license.activated')}
                             </p>
                         </div>
+                    ) : status?.isRegistered ? (
+                        <>
+                            <p className="text-xs text-[var(--text-secondary)]">
+                                {t('license.manageDescription')}
+                            </p>
+                            <div className="border-3 border-[var(--border-main)] bg-[var(--bg-secondary)] px-4 py-3">
+                                <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-secondary)]">
+                                    {t('license.currentKey')}
+                                </div>
+                                <div className="mt-2 font-mono text-sm font-bold text-[var(--text-primary)]">
+                                    {status.licenseKey ?? '****'}
+                                </div>
+                            </div>
+                            {state === 'error' && errorMessage && (
+                                <div className="border-2 border-[var(--accent-error)] bg-[var(--accent-error)]/10 p-3">
+                                    <p className="text-xs font-bold text-[var(--accent-error)]">
+                                        {errorMessage}
+                                    </p>
+                                </div>
+                            )}
+                        </>
                     ) : (
                         <>
                             <p className="text-xs text-[var(--text-secondary)]">
@@ -122,18 +212,28 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
                         <>
                             <button
                                 onClick={handleClose}
-                                disabled={state === 'activating'}
+                                disabled={state === 'activating' || state === 'deactivating' || state === 'loading'}
                                 className="border-2 border-[var(--border-main)] px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
                             >
                                 {t('common.cancel')}
                             </button>
-                            <button
-                                onClick={() => void handleActivate()}
-                                disabled={state === 'activating' || !licenseKey.trim()}
-                                className="border-2 border-[var(--border-main)] bg-black px-4 py-2 text-xs font-bold uppercase tracking-wider text-[var(--accent-warning)] shadow-[3px_3px_0_0_var(--shadow-color)] hover:opacity-90 transition-all disabled:opacity-50"
-                            >
-                                {state === 'activating' ? t('license.activating') : t('license.activate')}
-                            </button>
+                            {status?.isRegistered ? (
+                                <button
+                                    onClick={() => void handleDeactivate()}
+                                    disabled={state === 'deactivating' || state === 'loading'}
+                                    className="border-2 border-[var(--border-main)] bg-[var(--accent-error)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-[3px_3px_0_0_var(--shadow-color)] hover:opacity-90 transition-all disabled:opacity-50"
+                                >
+                                    {state === 'deactivating' ? t('license.removing') : t('license.remove')}
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={() => void handleActivate()}
+                                    disabled={state === 'activating' || state === 'loading' || !licenseKey.trim()}
+                                    className="border-2 border-[var(--border-main)] bg-black px-4 py-2 text-xs font-bold uppercase tracking-wider text-[var(--accent-warning)] shadow-[3px_3px_0_0_var(--shadow-color)] hover:opacity-90 transition-all disabled:opacity-50"
+                                >
+                                    {state === 'activating' ? t('license.activating') : t('license.activate')}
+                                </button>
+                            )}
                         </>
                     )}
                 </div>

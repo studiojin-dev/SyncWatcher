@@ -77,6 +77,12 @@ Detailed walkthroughs:
 ### Development
 
 ```bash
+export SYNCWATCHER_LEMON_SQUEEZY_STORE_ID=your_store_id
+export SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID=your_product_id
+# optional when you want to lock validation to a single variant
+export SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID=your_variant_id
+export VITE_LEMON_SQUEEZY_CHECKOUT_URL=https://studiojin.lemonsqueezy.com/checkout/buy/1301030
+
 pnpm install
 pnpm dev
 pnpm build
@@ -89,6 +95,10 @@ pnpm tauri build
 2. Open the `.dmg`.
 3. Move `SyncWatcher.app` to `Applications`.
 4. Launch the app.
+
+Optional license support purchases run through Lemon Squeezy, but app downloads and in-app updates continue to use GitHub Releases.
+
+After purchase, Lemon Squeezy sends the license key by receipt email and exposes it on the customer order page. In SyncWatcher, open the license dialog from the sidebar or Settings and paste the key there.
 
 Depending on your macOS settings, Gatekeeper may show a warning for the DMG.
 
@@ -132,5 +142,5 @@ The official app is free to use, including commercial and internal company use. 
 
 ## Support
 
-- License support purchase: [studiojin.dev](https://studiojin.dev)
+- License support purchase: [Lemon Squeezy checkout](https://studiojin.lemonsqueezy.com/checkout/buy/1301030)
 - Additional tip: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)

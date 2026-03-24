@@ -3,11 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { IconLicense, IconBrandGithub } from '@tabler/icons-react';
 import { LicenseCard, LicenseData } from '../components/ui/LicenseCard';
 import { useAppVersion } from '../hooks/useAppVersion';
+import { useSettings } from '../hooks/useSettings';
+import { githubRepositoryUrl } from '../config/appLinks';
 
 function AboutView() {
   const { t } = useTranslation();
   const [showLicenses, setShowLicenses] = useState(false);
   const appVersion = useAppVersion();
+  const { settings } = useSettings();
   const [licenseData, setLicenseData] = useState<LicenseData[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
 
@@ -62,11 +65,20 @@ function AboutView() {
 
             <div className="flex justify-between items-center">
               <span className="font-bold text-[var(--text-secondary)]">{t('about.license')}</span>
+              <span className="font-mono font-bold">{t('about.licenseType')}</span>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <span className="font-bold text-[var(--text-secondary)]">{t('about.supportStatus')}</span>
+              <span className="font-mono font-bold">
+                {settings.isRegistered ? t('about.registered') : t('about.unregistered')}
+              </span>
             </div>
 
             <a
-              href="https://github.com/kimjj81/SyncWatcher"
+              href={githubRepositoryUrl}
               target="_blank"
+              rel="noopener noreferrer"
               className="mt-4 flex items-center justify-center gap-2 w-full py-3 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
             >
               <IconBrandGithub size={20} />

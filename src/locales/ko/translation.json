@@ -193,6 +193,7 @@
       "sectionDisplay": "화면",
       "sectionSystem": "시스템",
       "sectionBehavior": "동작",
+      "sectionLicense": "라이선스 후원",
       "stateLocation": "상태 저장 위치",
       "stateLocationPlaceholder": "기본값: Tauri AppData",
       "maxLogLines": "최대 로그 라인 수",
@@ -340,12 +341,13 @@
       "thankYou": "개발자 밥값을 지켜주셔서 감사합니다!",
       "supportTitle": "한푼만... 가능하실까요?",
       "supportHint": "상용 사용도 무료입니다. 라이선스 구매는 완전 선택이며 개발자 후원 성격입니다.",
-      "supportButton": "한푼 줍쇼 버튼",
+      "supportButton": "한푼 줍쇼",
       "supportModalTitle": "굽실굽실 동전컵 모드",
       "supportModalMessage": "이미 라이선스 구매로 프로젝트를 크게 도와주셨습니다. 한 번 더 거들어주신다면 Buy Me a Coffee 후원도 열려 있습니다.",
       "supportModalConfirm": "Buy Me a Coffee로 후원",
       "supportModalCancel": "다음에 굽실할게요",
       "purchaseLicense": "선택 후원: 라이선스 구매",
+      "supportStatus": "후원 상태",
       "licenseType": "Polyform NC 1.0.0"
     },
     "common": {
@@ -410,7 +412,14 @@
       "activating": "활성화 중...",
       "activated": "라이선스가 활성화되었습니다!",
       "invalid": "유효하지 않은 라이선스 키입니다.",
-      "enterLicense": "라이선스 입력"
+      "enterLicense": "라이선스 입력",
+      "manage": "라이선스 관리",
+      "manageDescription": "이 기기에는 이미 후원 라이선스가 활성화되어 있습니다. 다른 기기로 옮기기 전에 여기서 제거할 수 있습니다.",
+      "currentKey": "현재 키",
+      "remove": "라이선스 제거",
+      "removing": "제거 중...",
+      "removed": "라이선스가 제거되었습니다.",
+      "removeFailed": "라이선스 제거에 실패했습니다."
     }
   }
 }

@@ -6303,6 +6303,7 @@ pub fn run() {
             get_task_logs,
             generate_licenses_report,
             license_validation::activate_license_key,
+            license_validation::deactivate_license_key,
             license_validation::validate_license_key,
             license_validation::get_license_status,
         ]);

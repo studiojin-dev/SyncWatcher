@@ -193,6 +193,7 @@
       "sectionDisplay": "Pantalla",
       "sectionSystem": "Sistema",
       "sectionBehavior": "Comportamiento",
+      "sectionLicense": "Soporte de licencia",
       "stateLocation": "Ubicación del estado",
       "stateLocationPlaceholder": "Predeterminado: Tauri AppData",
       "maxLogLines": "Líneas máximas de registro",
@@ -340,12 +341,13 @@
       "thankYou": "¡Gracias por mantener vivo este proyecto!",
       "supportTitle": "¿Me regalas una monedita?",
       "supportHint": "El uso comercial también es gratis. Comprar licencia es completamente opcional y sirve para apoyar al desarrollador.",
-      "supportButton": "Botón de \"una monedita\"",
+      "supportButton": "\"Una monedita\"",
       "supportModalTitle": "Modo Súplica Humilde",
       "supportModalMessage": "Ya apoyaste este proyecto comprando una licencia. Si quieres ayudar una vez más, también puedes dejar propina en Buy Me a Coffee.",
       "supportModalConfirm": "Dar propina en Buy Me a Coffee",
       "supportModalCancel": "Quizá luego",
       "purchaseLicense": "Apoyo opcional: comprar licencia",
+      "supportStatus": "Estado del apoyo",
       "licenseType": "Polyform NC 1.0.0"
     },
     "common": {
@@ -410,7 +412,14 @@
       "activating": "Activando...",
       "activated": "¡Licencia activada!",
       "invalid": "Clave de licencia no válida.",
-      "enterLicense": "Introducir licencia"
+      "enterLicense": "Introducir licencia",
+      "manage": "Gestionar licencia",
+      "manageDescription": "Este dispositivo ya tiene una licencia de apoyo activa. Puedes quitarla aquí antes de moverla a otra máquina.",
+      "currentKey": "Clave actual",
+      "remove": "Quitar licencia",
+      "removing": "Quitando...",
+      "removed": "Licencia eliminada.",
+      "removeFailed": "No se pudo eliminar la licencia."
     }
   }
 }

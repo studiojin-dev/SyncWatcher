@@ -48,6 +48,10 @@ vi.mock('../components/settings/ExclusionSetsManager', () => ({
   ExclusionSetsManager: () => <div>exclusion-sets</div>,
 }));
 
+vi.mock('../components/features/LicenseActivation', () => ({
+  default: ({ open }: { open: boolean }) => (open ? <div>license-modal</div> : null),
+}));
+
 function renderWithMantine() {
   return render(
     <MantineProvider>
@@ -75,5 +79,14 @@ describe('SettingsView', () => {
     fireEvent.click(checkbox);
 
     expect(setLaunchAtLoginMock).toHaveBeenCalledWith(true);
+  });
+
+  it('shows the license support section and opens the license modal', () => {
+    renderWithMantine();
+
+    expect(screen.getByText('settings.sectionLicense')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'license.enterLicense' }));
+
+    expect(screen.getByText('license-modal')).toBeInTheDocument();
   });
 });

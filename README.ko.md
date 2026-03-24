@@ -77,6 +77,12 @@ Source와 Target을 고르고, 반복되는 백업 흐름에 맞게 태스크를
 ### 개발
 
 ```bash
+export SYNCWATCHER_LEMON_SQUEEZY_STORE_ID=your_store_id
+export SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID=your_product_id
+# 특정 variant에만 검증을 고정하고 싶을 때만 사용
+export SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID=your_variant_id
+export VITE_LEMON_SQUEEZY_CHECKOUT_URL=https://studiojin.lemonsqueezy.com/checkout/buy/1301030
+
 pnpm install
 pnpm dev
 pnpm build
@@ -89,6 +95,10 @@ pnpm tauri build
 2. `.dmg`를 엽니다.
 3. `SyncWatcher.app`을 `Applications`로 이동합니다.
 4. 앱을 실행합니다.
+
+선택 후원 라이선스 구매는 Lemon Squeezy에서 처리하지만, 앱 다운로드와 앱 내 자동업데이트 원본은 계속 GitHub Releases를 사용합니다.
+
+구매 후에는 Lemon Squeezy 영수증 메일과 주문 페이지에서 라이선스 키를 확인할 수 있습니다. SyncWatcher에서는 사이드바나 Settings의 라이선스 관리 화면에서 키를 붙여 넣으면 됩니다.
 
 macOS 설정에 따라 Gatekeeper 경고가 표시될 수 있습니다.
 
@@ -132,5 +142,5 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 ## 후원
 
-- 라이선스 후원 구매: [studiojin.dev](https://studiojin.dev)
+- 라이선스 후원 구매: [Lemon Squeezy checkout](https://studiojin.lemonsqueezy.com/checkout/buy/1301030)
 - 추가 후원: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
