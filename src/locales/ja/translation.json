@@ -1,6 +1,10 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "common": {
+      "expandDirectory": "{{name}} を展開",
+      "collapseDirectory": "{{name}} を折りたたむ"
+    },
     "app": {
       "quitConfirmTitle": "終了の確認",
       "quitConfirmMessage": "Watch Mode が有効なタスク、または同期中のタスクがあります。終了してもよろしいですか？",

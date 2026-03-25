@@ -71,7 +71,7 @@ describe('DryRunResultView', () => {
     expect(screen.getByText('dryRun.noChanges')).toBeInTheDocument();
   });
 
-  it('renders diffs as a directory tree and keeps file labels on leaf nodes', () => {
+  it('renders diffs in a four-column tree table', () => {
     sessionState.current = {
       taskId: 'task-1',
       taskName: 'Task A',
@@ -119,6 +119,10 @@ describe('DryRunResultView', () => {
       />,
     );
 
+    expect(screen.getByText('dryRun.colPath')).toBeInTheDocument();
+    expect(screen.getByText('dryRun.colType')).toBeInTheDocument();
+    expect(screen.getByText('dryRun.colSourceSize')).toBeInTheDocument();
+    expect(screen.getByText('dryRun.colTargetSize')).toBeInTheDocument();
     expect(screen.getByText('dir')).toBeInTheDocument();
     expect(screen.getByText('sub')).toBeInTheDocument();
     expect(screen.getByText('a.txt')).toBeInTheDocument();
@@ -126,6 +130,57 @@ describe('DryRunResultView', () => {
     expect(screen.getByText('root.txt')).toBeInTheDocument();
     expect(screen.getAllByText('dryRun.newFile')).toHaveLength(2);
     expect(screen.getByText('dryRun.modifiedFile')).toBeInTheDocument();
+    expect(screen.getAllByText('1 KiB').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('2 KiB').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('collapses and expands directory rows', () => {
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'completed',
+      result: {
+        diffs: [
+          {
+            path: 'dir/a.txt',
+            kind: 'New',
+            source_size: 1024,
+            target_size: null,
+            checksum_source: null,
+            checksum_target: null,
+          },
+          {
+            path: 'dir/sub/b.txt',
+            kind: 'Modified',
+            source_size: 2048,
+            target_size: 1024,
+            checksum_source: null,
+            checksum_target: null,
+          },
+        ],
+        total_files: 2,
+        files_to_copy: 2,
+        files_modified: 1,
+        bytes_to_copy: 3072,
+        targetPreflight: null,
+      },
+    };
+
+    render(
+      <DryRunResultView
+        taskId="task-1"
+        taskName="Task A"
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByLabelText('common.collapseDirectory')[0]);
+    expect(screen.queryByText('a.txt')).not.toBeInTheDocument();
+    expect(screen.queryByText('sub')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByLabelText('common.expandDirectory')[0]);
+    expect(screen.getByText('a.txt')).toBeInTheDocument();
+    expect(screen.getByText('sub')).toBeInTheDocument();
   });
 
   it('renders a banner when target directory will be created later', () => {

@@ -1,6 +1,10 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "common": {
+      "expandDirectory": "Expandir {{name}}",
+      "collapseDirectory": "Contraer {{name}}"
+    },
     "app": {
       "quitConfirmTitle": "Confirmar salida",
       "quitConfirmMessage": "Hay tareas con Watch Mode activo o sincronizaciones en curso. ¿Seguro que quieres salir?",

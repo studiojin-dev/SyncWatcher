@@ -1,6 +1,10 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "common": {
+      "expandDirectory": "展开 {{name}}",
+      "collapseDirectory": "折叠 {{name}}"
+    },
     "app": {
       "quitConfirmTitle": "确认退出",
       "quitConfirmMessage": "存在已启用 Watch Mode 的任务或正在同步的任务。确定要退出吗？",

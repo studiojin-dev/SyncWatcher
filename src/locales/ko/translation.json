@@ -1,6 +1,10 @@
 {
   "translation": {
     "appName": "SyncWatcher",
+    "common": {
+      "expandDirectory": "{{name}} 펼치기",
+      "collapseDirectory": "{{name}} 접기"
+    },
     "app": {
       "quitConfirmTitle": "종료 확인",
       "quitConfirmMessage": "Watch Mode가 켜진 작업 또는 동기화 중인 작업이 있습니다. 정말 종료하시겠습니까?",

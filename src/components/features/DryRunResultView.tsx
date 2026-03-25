@@ -1,7 +1,9 @@
-import { type ReactElement, useMemo } from 'react';
+import { type ReactElement, useEffect, useMemo, useState } from 'react';
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconChevronDown,
+  IconChevronRight,
   IconFolder,
   IconFilePlus,
   IconFileCode,
@@ -89,6 +91,8 @@ function buildDiffTree(diffs: FileDiff[]): DryRunTreeNode[] {
 function renderTree(
   nodes: DryRunTreeNode[],
   depth: number,
+  collapsedPaths: Set<string>,
+  toggleNode: (path: string) => void,
   unitSystem: 'binary' | 'decimal',
   t: (key: string, options?: Record<string, unknown>) => string,
 ): ReactElement[] {
@@ -97,13 +101,35 @@ function renderTree(
   for (const node of nodes) {
     const diff = node.diff;
     const isFile = !node.isDir && diff !== undefined;
+    const isCollapsed = node.isDir && collapsedPaths.has(node.fullPath);
+
     rows.push(
       <div key={node.fullPath}>
-        <div
-          className="flex items-start justify-between gap-3 py-2 text-xs font-mono border-b border-dashed border-[var(--border-main)]"
-          style={{ paddingLeft: `${depth * 16}px` }}
-        >
-          <div className="min-w-0 flex items-start gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_90px_120px_120px] gap-2 px-3 py-2 text-xs font-mono border-b border-dashed border-[var(--border-main)]">
+          <div
+            className={`min-w-0 flex items-center gap-2 ${node.isDir ? 'cursor-pointer' : ''}`}
+            style={{ paddingLeft: `${depth * 16}px` }}
+            onClick={node.isDir ? () => toggleNode(node.fullPath) : undefined}
+          >
+            {node.isDir ? (
+              <button
+                type="button"
+                aria-label={t(isCollapsed ? 'common.expandDirectory' : 'common.collapseDirectory', { name: node.name, defaultValue: isCollapsed ? 'Expand {{name}}' : 'Collapse {{name}}' })}
+                className="shrink-0"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleNode(node.fullPath);
+                }}
+              >
+                {isCollapsed ? (
+                  <IconChevronRight size={14} className="mt-0.5" />
+                ) : (
+                  <IconChevronDown size={14} className="mt-0.5" />
+                )}
+              </button>
+            ) : (
+              <span className="w-[14px] shrink-0" />
+            )}
             {node.isDir ? (
               <IconFolder size={14} className="mt-0.5 shrink-0" />
             ) : diff?.kind === 'New' ? (
@@ -111,34 +137,35 @@ function renderTree(
             ) : (
               <IconFileCode size={14} className="mt-0.5 shrink-0" />
             )}
-            <div className="min-w-0">
-              <div className="break-all">{node.name}</div>
-              {isFile ? (
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--text-secondary)] uppercase">
-                  <span>
-                    {diff.kind === 'New'
-                      ? t('dryRun.newFile')
-                      : t('dryRun.modifiedFile')}
-                  </span>
-                  <span>
-                    {t('dryRun.colSourceSize', { defaultValue: 'Source Size' })}:{' '}
-                    {diff.source_size === null
-                      ? '-'
-                      : formatBytes(diff.source_size, unitSystem)}
-                  </span>
-                  <span>
-                    {t('dryRun.colTargetSize', { defaultValue: 'Target Size' })}:{' '}
-                    {diff.target_size === null
-                      ? '-'
-                      : formatBytes(diff.target_size, unitSystem)}
-                  </span>
-                </div>
-              ) : null}
-            </div>
+            <span className="break-all">{node.name}</span>
+          </div>
+          <div className="truncate text-[var(--text-secondary)]">
+            {isFile
+              ? diff.kind === 'New'
+                ? t('dryRun.newFile')
+                : t('dryRun.modifiedFile')
+              : '-'}
+          </div>
+          <div className="truncate text-[var(--text-secondary)]">
+            {isFile && diff.source_size !== null
+              ? formatBytes(diff.source_size, unitSystem)
+              : '-'}
+          </div>
+          <div className="truncate text-[var(--text-secondary)]">
+            {isFile && diff.target_size !== null
+              ? formatBytes(diff.target_size, unitSystem)
+              : '-'}
           </div>
         </div>
-        {node.children.length > 0
-          ? renderTree(node.children, depth + 1, unitSystem, t)
+        {node.children.length > 0 && !isCollapsed
+          ? renderTree(
+              node.children,
+              depth + 1,
+              collapsedPaths,
+              toggleNode,
+              unitSystem,
+              t,
+            )
           : null}
       </div>,
     );
@@ -204,9 +231,27 @@ export default function DryRunResultView({
   const showTargetPreviewWarning =
     result.targetPreflight?.kind === 'willCreateDirectory';
   const isRunning = status === 'running';
-  const isFinished = status === 'completed' || status === 'cancelled' || status === 'failed';
+  const isFinished =
+    status === 'completed' || status === 'cancelled' || status === 'failed';
   const showEmptyState = result.diffs.length === 0 && !isRunning;
   const diffTree = useMemo(() => buildDiffTree(result.diffs), [result.diffs]);
+  const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setCollapsedPaths(new Set());
+  }, [result.diffs]);
+
+  const toggleNode = (path: string) => {
+    setCollapsedPaths((previous) => {
+      const next = new Set(previous);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
 
   const overallPercent =
     progress?.totalBytes && progress.totalBytes > 0
@@ -335,7 +380,11 @@ export default function DryRunResultView({
         <div className="space-y-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3">
           <div className="flex items-center justify-between gap-3 text-xs font-mono text-[var(--text-secondary)]">
             <span>{getPhaseLabel(progress.phase, t)}</span>
-            <span>{overallPercent !== null ? `${overallPercent}%` : t('dryRun.statusRunning', { defaultValue: 'Running' })}</span>
+            <span>
+              {overallPercent !== null
+                ? `${overallPercent}%`
+                : t('dryRun.statusRunning', { defaultValue: 'Running' })}
+            </span>
           </div>
           <div className="h-2 border border-[var(--border-main)] bg-[var(--bg-primary)] overflow-hidden">
             <div
@@ -363,7 +412,22 @@ export default function DryRunResultView({
               : t('dryRun.noChanges')}
           </div>
         ) : (
-          <div className="p-2">{renderTree(diffTree, 0, settings.dataUnitSystem, t)}</div>
+          <div>
+            <div className="grid grid-cols-[minmax(0,1fr)_90px_120px_120px] gap-2 px-3 py-2 border-b-2 border-[var(--border-main)] text-[10px] font-mono uppercase bg-[var(--bg-tertiary)]">
+              <span>{t('dryRun.colPath', { defaultValue: 'Path' })}</span>
+              <span>{t('dryRun.colType', { defaultValue: 'Type' })}</span>
+              <span>{t('dryRun.colSourceSize', { defaultValue: 'Source Size' })}</span>
+              <span>{t('dryRun.colTargetSize', { defaultValue: 'Target Size' })}</span>
+            </div>
+            {renderTree(
+              diffTree,
+              0,
+              collapsedPaths,
+              toggleNode,
+              settings.dataUnitSystem,
+              t,
+            )}
+          </div>
         )}
       </div>
     </div>
