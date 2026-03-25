@@ -1437,9 +1437,7 @@ function SyncTasksView({
                             : t('syncTasks.dryRun')
                         }
                       >
-                        {hasDryRunSession ? (
-                          <IconEye size={20} stroke={2} />
-                        ) : isDryRunning ? (
+                        {isDryRunning ? (
                           <IconPlayerStop size={20} stroke={2} />
                         ) : (
                           <IconFlask size={20} stroke={2} />

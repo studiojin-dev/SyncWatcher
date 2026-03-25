@@ -226,6 +226,45 @@ describe('SyncTasksView action confirmations', () => {
     expect(screen.getByText('syncTasks.dryRun · Task 1')).toBeInTheDocument();
   });
 
+  it('keeps the dry-run icon distinct from the watch icon when a dry-run session exists', async () => {
+    statusState.dryRunSessions = new Map([
+      [
+        'task-1',
+        {
+          taskId: 'task-1',
+          taskName: 'Task 1',
+          status: 'completed',
+          result: {
+            diffs: [],
+            total_files: 0,
+            files_to_copy: 0,
+            files_modified: 0,
+            bytes_to_copy: 0,
+            targetPreflight: null,
+          },
+        },
+      ],
+    ]);
+
+    render(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+      expect(screen.getByTitle('syncTasks.watchToggleOff')).toBeInTheDocument();
+    });
+
+    const dryRunIcon = screen
+      .getByTitle('syncTasks.dryRun')
+      .querySelector('svg');
+    const watchIcon = screen
+      .getByTitle('syncTasks.watchToggleOff')
+      .querySelector('svg');
+
+    expect(dryRunIcon).not.toBeNull();
+    expect(watchIcon).not.toBeNull();
+    expect(dryRunIcon?.innerHTML).not.toEqual(watchIcon?.innerHTML);
+  });
+
   it('requests source review when sync fails because the UUID source is unresolved', async () => {
     const onRequestSourceRecommendationReview = vi.fn();
     invokeMock.mockImplementation(async (command: string) => {
