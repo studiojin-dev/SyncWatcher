@@ -13,6 +13,7 @@ interface MockRuntimeState {
   setsLoaded: boolean;
   closeAction: 'quit' | 'background';
   notifications: boolean;
+  isRegistered: boolean;
   tasks: SyncTask[];
 }
 
@@ -22,6 +23,7 @@ const runtimeState: MockRuntimeState = {
   setsLoaded: true,
   closeAction: 'quit',
   notifications: true,
+  isRegistered: false,
   tasks: [],
 };
 
@@ -30,11 +32,13 @@ const {
   setLastLogMock,
   setQueuedMock,
   setLaunchAtLoginMock,
+  updateSettingsMock,
   updateCheckerPropsMock,
 } = vi.hoisted(() => ({
   setLastLogMock: vi.fn(),
   setQueuedMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
+  updateSettingsMock: vi.fn(),
   updateCheckerPropsMock: vi.fn(),
 }));
 
@@ -75,10 +79,11 @@ vi.mock('./hooks/useSettings', () => ({
       stateLocation: '',
       maxLogLines: 10000,
       closeAction: runtimeState.closeAction,
+      isRegistered: runtimeState.isRegistered,
       launchAtLogin: false,
     },
     loaded: runtimeState.settingsLoaded,
-    updateSettings: vi.fn(),
+    updateSettings: updateSettingsMock,
     setLaunchAtLogin: setLaunchAtLoginMock,
     resetSettings: vi.fn(),
   }),
@@ -234,6 +239,7 @@ describe('App close lifecycle', () => {
     runtimeState.setsLoaded = true;
     runtimeState.closeAction = 'quit';
     runtimeState.notifications = true;
+    runtimeState.isRegistered = false;
     runtimeState.tasks = [];
     localStorage.clear();
     localStorage.setItem('syncwatcher_bg_intro_shown', '1');
@@ -268,6 +274,129 @@ describe('App close lifecycle', () => {
 
     askMock.mockResolvedValue(true);
     messageMock.mockResolvedValue('Cancel');
+    updateSettingsMock.mockReset();
+  });
+
+  it('skips startup license validation when stored status is unregistered', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('sync-tasks')).toBeInTheDocument();
+    });
+
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'validate_license_key'),
+    ).toBe(false);
+  });
+
+  it('keeps registered state while startup validation is pending or succeeds', async () => {
+    runtimeState.isRegistered = true;
+    const deferred = createDeferred<{ valid: boolean; error: string | null }>();
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'validate_license_key') {
+        return deferred.promise;
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('validate_license_key');
+    });
+
+    expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
+
+    deferred.resolve({ valid: true, error: null });
+
+    await waitFor(() => {
+      expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
+    });
+  });
+
+  it('keeps registered state when startup validation throws', async () => {
+    runtimeState.isRegistered = true;
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'validate_license_key') {
+        throw new Error('network down');
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('validate_license_key');
+    });
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        '[App] License validation failed:',
+        expect.any(Error),
+      );
+    });
+    expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
+
+    consoleError.mockRestore();
+  });
+
+  it('marks the app unregistered when startup validation returns invalid', async () => {
+    runtimeState.isRegistered = true;
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'validate_license_key') {
+        return { valid: false, error: 'License invalid' };
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: false });
+    });
   });
 
   it('shows the first-run intro modal only when no intro keys exist', async () => {

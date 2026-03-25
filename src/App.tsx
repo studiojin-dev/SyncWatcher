@@ -75,6 +75,7 @@ function AppContent() {
   const activeCloseIntentRef = useRef<CloseIntent | null>(null);
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
   const recentCmdQAtRef = useRef(0);
+  const didRunStartupLicenseValidationRef = useRef(false);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
   const setTaskLastLog = useCallback((
     taskId: string,
@@ -102,20 +103,34 @@ function AppContent() {
 
   // 앱 시작 시 라이선스 검증
   useEffect(() => {
-    if (!settingsLoaded) return;
+    if (!settingsLoaded || didRunStartupLicenseValidationRef.current) {
+      return;
+    }
+
+    didRunStartupLicenseValidationRef.current = true;
+    if (!settings.isRegistered) {
+      return;
+    }
+
+    let cancelled = false;
 
     const validateLicense = async () => {
       try {
         const result = await invoke<{ valid: boolean; error: string | null }>('validate_license_key');
-        updateSettings({ isRegistered: result?.valid === true });
+        if (!cancelled && result?.valid === false) {
+          updateSettings({ isRegistered: false });
+        }
       } catch (err) {
         console.error('[App] License validation failed:', err);
-        updateSettings({ isRegistered: false });
       }
     };
 
     void validateLicense();
-  }, [settingsLoaded, updateSettings]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.isRegistered, settingsLoaded, updateSettings]);
 
   const markFirstRunIntroSeen = useCallback(() => {
     try {
