@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260325-0017-REL",
+    "title": "ARM-first release orchestration with draft reuse and published-tag fail-fast",
+    "tags": [
+      "release",
+      "ci",
+      "github-actions",
+      "tauri",
+      "updater",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-25",
+    "tldr": "Create or reuse one draft release per tag, let the ARM build author the canonical updater metadata first, append x64 assets afterward, and fail fast when a tag already has a published release.",
+    "path": "docs/adr/ADR-20260325-0017-REL-release-arm-first-draft-reuse-and-published-tag-fail-fast.md"
+  },
+  {
     "id": "ADR-20260324-0016-LIC",
     "title": "Lemon Squeezy handles supporter licensing while GitHub Releases remain the distribution origin for v1",
     "tags": [

@@ -54,21 +54,55 @@ jobs:
         run: |
           echo "Skipping release job because tag is not release semver/beta/rc: ${TAG_NAME}"
 
-  release:
+  prepare_release:
     needs: tag_gate
     if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
-          - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+    outputs:
+      release_id: ${{ steps.ensure_release.outputs.release_id }}
+    steps:
+      - name: Ensure draft release exists
+        id: ensure_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+          IS_PRERELEASE: ${{ needs.tag_gate.outputs.is_prerelease }}
+        run: |
+          set -euo pipefail
 
-    runs-on: ${{ matrix.platform }}
+          release_json="$(gh release view "$TAG_NAME" --json id,isDraft,url 2>/dev/null || true)"
+          if [[ -n "$release_json" ]]; then
+            release_id="$(jq -r '.id' <<<"$release_json")"
+            is_draft="$(jq -r '.isDraft' <<<"$release_json")"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Release ${TAG_NAME} is already published."
+              echo "Create and push a new patch tag before re-running the release workflow."
+              exit 1
+            fi
+
+            echo "Reusing existing draft release ${TAG_NAME} (${release_id})."
+          else
+            release_args=(--draft --title "SyncWatcher ${TAG_NAME}" --notes "See the assets to download this version and install.")
+            if [[ "$IS_PRERELEASE" == "true" ]]; then
+              release_args+=(--prerelease)
+            fi
+
+            gh release create "$TAG_NAME" "${release_args[@]}" >/dev/null
+            release_id="$(gh release view "$TAG_NAME" --json id --jq '.id')"
+            echo "Created draft release ${TAG_NAME} (${release_id})."
+          fi
+
+          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+
+  release_aarch64:
+    needs: [tag_gate, prepare_release]
+    if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -116,15 +150,146 @@ jobs:
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
           VITE_LEMON_SQUEEZY_CHECKOUT_URL: ${{ vars.VITE_LEMON_SQUEEZY_CHECKOUT_URL }}
         with:
+          releaseId: ${{ needs.prepare_release.outputs.release_id }}
           tagName: ${{ inputs.tag_name || github.ref_name }}
-          releaseName: "SyncWatcher ${{ inputs.tag_name || github.ref_name }}"
-          releaseBody: "See the assets to download this version and install."
           releaseDraft: true
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
-          args: ${{ matrix.args }}
+          args: --target aarch64-apple-darwin
+
+  release_x64:
+    needs: [tag_gate, prepare_release, release_aarch64]
+    if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Validate Lemon Squeezy build configuration
+        env:
+          SYNCWATCHER_LEMON_SQUEEZY_STORE_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_STORE_ID }}
+          SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID }}
+        run: |
+          test -n "$SYNCWATCHER_LEMON_SQUEEZY_STORE_ID" || {
+            echo "Missing repo variable: SYNCWATCHER_LEMON_SQUEEZY_STORE_ID"
+            exit 1
+          }
+          test -n "$SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID" || {
+            echo "Missing repo variable: SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID"
+            exit 1
+          }
+
+      - name: Build and upload x64 release assets
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNCWATCHER_LEMON_SQUEEZY_STORE_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_STORE_ID }}
+          SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID }}
+          SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+          VITE_LEMON_SQUEEZY_CHECKOUT_URL: ${{ vars.VITE_LEMON_SQUEEZY_CHECKOUT_URL }}
+        with:
+          releaseId: ${{ needs.prepare_release.outputs.release_id }}
+          tagName: ${{ inputs.tag_name || github.ref_name }}
+          releaseDraft: true
+          prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
+          uploadUpdaterJson: false
+          args: --target x86_64-apple-darwin
+
+  merge_latest_json:
+    needs: [tag_gate, prepare_release, release_aarch64, release_x64]
+    if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rebuild updater metadata from release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p latest-json-assets
+          gh release download "$TAG_NAME" \
+            --pattern "*.app.tar.gz" \
+            --pattern "*.app.tar.gz.sig" \
+            --dir latest-json-assets
+
+          aarch64_bundle="$(find latest-json-assets -maxdepth 1 -type f -name '*aarch64.app.tar.gz' | head -n 1)"
+          x64_bundle="$(find latest-json-assets -maxdepth 1 -type f -name '*x64.app.tar.gz' | head -n 1)"
+          aarch64_sig="$(find latest-json-assets -maxdepth 1 -type f -name '*aarch64.app.tar.gz.sig' | head -n 1)"
+          x64_sig="$(find latest-json-assets -maxdepth 1 -type f -name '*x64.app.tar.gz.sig' | head -n 1)"
+
+          test -n "$aarch64_bundle" && test -n "$x64_bundle" && test -n "$aarch64_sig" && test -n "$x64_sig" || {
+            echo "Missing updater bundle or signature assets for one or more macOS architectures."
+            exit 1
+          }
+
+          aarch64_bundle_name="$(basename "$aarch64_bundle")"
+          x64_bundle_name="$(basename "$x64_bundle")"
+          aarch64_signature="$(tr -d '\n' < "$aarch64_sig")"
+          x64_signature="$(tr -d '\n' < "$x64_sig")"
+          release_url="https://github.com/${GH_REPO}/releases/download/${TAG_NAME}"
+          now_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          jq -n \
+            --arg version "${TAG_NAME#v}" \
+            --arg notes "See the assets to download this version and install." \
+            --arg pub_date "$now_utc" \
+            --arg aarch64_bundle_name "$aarch64_bundle_name" \
+            --arg x64_bundle_name "$x64_bundle_name" \
+            --arg aarch64_signature "$aarch64_signature" \
+            --arg x64_signature "$x64_signature" \
+            --arg release_url "$release_url" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": {
+                  signature: $aarch64_signature,
+                  url: ($release_url + "/" + $aarch64_bundle_name)
+                },
+                "darwin-aarch64-app": {
+                  signature: $aarch64_signature,
+                  url: ($release_url + "/" + $aarch64_bundle_name)
+                },
+                "darwin-x86_64": {
+                  signature: $x64_signature,
+                  url: ($release_url + "/" + $x64_bundle_name)
+                },
+                "darwin-x86_64-app": {
+                  signature: $x64_signature,
+                  url: ($release_url + "/" + $x64_bundle_name)
+                }
+              }
+            }' > latest.json
+
+          gh release upload "$TAG_NAME" latest.json --clobber
 
   sbom_and_attest:
-    needs: [tag_gate, release]
+    needs: [tag_gate, prepare_release, release_aarch64, release_x64, merge_latest_json]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -245,7 +410,7 @@ jobs:
           gh release upload "$TAG_NAME" attestation-*.bundle.json --clobber
 
   publish_release:
-    needs: [tag_gate, release, sbom_and_attest]
+    needs: [tag_gate, prepare_release, release_aarch64, release_x64, merge_latest_json, sbom_and_attest]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:

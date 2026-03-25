@@ -21,6 +21,8 @@ This runbook is for release rehearsal (for example `v1.2.3-rc1`) after enabling 
 4. Confirm target tag format:
 - Stable: `vX.Y.Z`
 - Pre-release: `vX.Y.Z-beta.N` or `vX.Y.Z-rcN`
+5. Confirm the target tag does not already have a published GitHub Release.
+- If the tag is already published, cut a new patch version tag instead of retrying the workflow against the published tag.
 
 ## 2) Rehearsal execution checklist
 
@@ -33,12 +35,17 @@ git push origin vX.Y.Z-rc1
 
 2. Wait for `Release` workflow completion:
 - `tag_gate`: success
-- `release` (macOS aarch64 + x86_64 matrix): success
+- `prepare_release`: success
+- `release_aarch64`: success
+- `release_x64`: success
+- `merge_latest_json`: success
 - `sbom_and_attest`: success
 - `publish_release`: success
 
 3. Confirm release assets include:
 - app bundles (`.dmg` and/or `.app.tar.gz`)
+- both `aarch64` and `x64` macOS artifacts
+- `latest.json` regenerated after both macOS builds and containing both `darwin-aarch64` and `darwin-x86_64`
 - `sbom-vX.Y.Z-rc1.cdx.json`
 - `sbom-vX.Y.Z-rc1.spdx.json`
 - `attestation-*.bundle.json` (required for stable tags, optional for prerelease tags when `ENABLE_COSIGN_ATTESTATION=true`)
@@ -102,3 +109,6 @@ cosign verify-blob-attestation \
 - check bundle/artifact filename pairing (`attestation-<artifact>.bundle.json`)
 - check certificate identity points to exact workflow/tag
 - confirm issuer is `https://token.actions.githubusercontent.com`
+4. Workflow stops before build because a release already exists:
+- check whether the tag already has a published GitHub Release
+- if yes, cut a new patch version tag and rerun with the new tag instead of mutating the published release
