@@ -103,4 +103,29 @@ describe('LicenseActivation', () => {
     });
     expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: false });
   });
+
+  it('reloads registered status when the modal is reopened', async () => {
+    invokeMock.mockImplementation(async (command) => {
+      switch (command) {
+        case 'get_license_status':
+          return { isRegistered: true, licenseKey: 'abcd…1234' };
+        default:
+          throw new Error(`Unexpected command: ${command}`);
+      }
+    });
+
+    const { rerender } = render(<LicenseActivation open onClose={vi.fn()} />);
+
+    expect(await screen.findByText('Manage your supporter license.')).toBeInTheDocument();
+    expect(screen.getByText('abcd…1234')).toBeInTheDocument();
+
+    rerender(<LicenseActivation open={false} onClose={vi.fn()} />);
+    rerender(<LicenseActivation open onClose={vi.fn()} />);
+
+    expect(await screen.findByText('Manage your supporter license.')).toBeInTheDocument();
+    expect(screen.getByText('abcd…1234')).toBeInTheDocument();
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === 'get_license_status'),
+    ).toHaveLength(2);
+  });
 });
