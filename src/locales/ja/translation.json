@@ -104,10 +104,26 @@
         "sourceEqualsTarget": "ソースとターゲットのパスは重複できません。",
         "targetIsSubdirOfSource": "ターゲットをソース配下に設定できません。",
         "duplicateTarget": "ターゲットが他のタスクのターゲットと競合しています。",
-        "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。"
+        "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。",
+        "watchCycle": "watch タスクで cycle は作れません。",
+        "invalidInput": "タスク設定が不正です。"
+      },
+      "validationModal": {
+        "title": "検証エラー",
+        "affectedTasks": "影響を受けるタスク",
+        "source": "ソース",
+        "target": "ターゲット",
+        "close": "閉じる",
+        "ruleDescriptions": {
+          "sourceTargetOverlap": "1つのタスク内で source と target を同一路径または親子関係のパスにすることはできません。",
+          "duplicateTarget": "複数タスクで同じターゲットディレクトリを共有すると所有権とクリーンアップ基準が曖昧になるため許可されません。",
+          "targetSubdirConflict": "異なるタスクのターゲットは入れ子にできません。親子のターゲットツリーが互いを上書きしたり隠したりする可能性があります。",
+          "watchCycle": "watch 有効タスクは一方向である必要があります。cycle があると無限同期ループを引き起こすため拒否されます。",
+          "invalidInput": "タスク設定を検証できませんでした。選択した source と target を確認してから再試行してください。"
+        }
       },
       "warnings": {
-        "targetInWatchedSource": "ターゲットが他の監視ソースと重複し、同期ループの原因になる可能性があります。"
+        "targetInWatchedSource": "このタスクは watch chain に参加しています。下流の同期は上流タスクの完了後に開始されます。"
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -275,7 +291,7 @@
           "description": "タスク保存時にランタイム検証で危険なパス構成を拒否します。",
           "withinTaskOverlap": "1つのタスク内で source/target の重複は不可です（同一、親子関係を含む）。",
           "targetUniqueness": "複数タスク間で target は重複不可で、親子関係にもできません。",
-          "watchLoopRisk": "watch source が他タスクの target と重なる構成は、同期ループ防止のため拒否されます。"
+          "watchLoopRisk": "watch タスクは一方向の chain を構成できますが、watch cycle を作る構成は拒否されます。"
         },
         "conflictOrphan": {
           "title": "競合 / クリーンアップ手順",

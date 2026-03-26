@@ -316,8 +316,10 @@ pub struct AppState {
     runtime_pending_sync_tasks: Arc<RwLock<HashSet<String>>>,
     /// 런타임 큐 디스패처 실행 여부
     runtime_dispatcher_running: Arc<Mutex<bool>>,
-    /// 런타임 동기화 슬롯 해제 알림
-    runtime_sync_slot_released: Arc<Notify>,
+    /// 런타임 큐 디스패처 재평가 알림
+    runtime_dispatcher_wakeup: Arc<Notify>,
+    /// task별 chain settle deadline
+    runtime_chain_settle_until: Arc<RwLock<HashMap<String, Instant>>>,
     /// 초기 watchMode 일괄 동기화 실행 여부
     runtime_initial_watch_bootstrapped: Arc<AtomicBool>,
     /// runtime config 적용 직렬화 락 (last-write-wins 보장)
@@ -346,6 +348,7 @@ struct AppExitControl {
 }
 
 const AUTOSTART_ARG: &str = "--autostart";
+const WATCH_CHAIN_SETTLE_WINDOW: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AutostartLaunchDecision {
@@ -2108,16 +2111,287 @@ fn resolved_path_key(path: &str) -> Result<String, String> {
     }
 }
 
-fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
-    struct ValidatedTask {
-        id: String,
-        name: String,
-        source_key: String,
-        target_key: String,
-        watch_mode: bool,
+#[derive(Debug, Clone)]
+struct ValidatedRuntimeTask {
+    id: String,
+    name: String,
+    source_key: String,
+    target_key: String,
+    watch_mode: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum RuntimeTaskValidationCode {
+    SourceTargetOverlap,
+    DuplicateTarget,
+    TargetSubdirConflict,
+    WatchCycle,
+    InvalidInput,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeTaskValidationIssue {
+    code: RuntimeTaskValidationCode,
+    task_id: Option<String>,
+    task_name: Option<String>,
+    conflicting_task_ids: Vec<String>,
+    conflicting_task_names: Vec<String>,
+    source: Option<String>,
+    target: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeTaskValidationResult {
+    ok: bool,
+    issue: Option<RuntimeTaskValidationIssue>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RuntimeWatchTopology {
+    upstreams: HashMap<String, Vec<String>>,
+    downstreams: HashMap<String, Vec<String>>,
+}
+
+impl RuntimeTaskValidationIssue {
+    fn invalid_input(task: Option<&RuntimeSyncTask>) -> Self {
+        Self {
+            code: RuntimeTaskValidationCode::InvalidInput,
+            task_id: task.map(|item| item.id.clone()),
+            task_name: task.map(|item| item.name.clone()),
+            conflicting_task_ids: Vec::new(),
+            conflicting_task_names: Vec::new(),
+            source: task.map(|item| item.source.clone()),
+            target: task.map(|item| item.target.clone()),
+        }
+    }
+}
+
+fn runtime_validation_issue_task_ids(issue: &RuntimeTaskValidationIssue) -> Vec<String> {
+    let mut task_ids = Vec::new();
+    if let Some(task_id) = &issue.task_id {
+        task_ids.push(task_id.clone());
+    }
+    task_ids.extend(issue.conflicting_task_ids.iter().cloned());
+    task_ids.sort();
+    task_ids.dedup();
+    task_ids
+}
+
+fn runtime_validation_issue_display_names(issue: &RuntimeTaskValidationIssue) -> Vec<String> {
+    let mut names = Vec::new();
+
+    if let Some(task_name) = issue.task_name.as_ref().filter(|name| !name.is_empty()) {
+        names.push(task_name.clone());
+    } else if let Some(task_id) = &issue.task_id {
+        names.push(task_id.clone());
     }
 
-    let mut validated_tasks: Vec<ValidatedTask> = Vec::with_capacity(tasks.len());
+    let related_count = issue
+        .conflicting_task_ids
+        .len()
+        .max(issue.conflicting_task_names.len());
+
+    for index in 0..related_count {
+        if let Some(task_name) = issue
+            .conflicting_task_names
+            .get(index)
+            .filter(|name| !name.is_empty())
+        {
+            names.push(task_name.clone());
+        } else if let Some(task_id) = issue.conflicting_task_ids.get(index) {
+            names.push(task_id.clone());
+        }
+    }
+
+    names
+}
+
+fn runtime_validation_issue_log_message(issue: &RuntimeTaskValidationIssue) -> String {
+    match issue.code {
+        RuntimeTaskValidationCode::SourceTargetOverlap => format!(
+            "Validation blocked saving sync task '{}' because source and target overlap.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"))
+        ),
+        RuntimeTaskValidationCode::DuplicateTarget => format!(
+            "Validation blocked saving sync tasks '{}' and '{}' because target paths conflict.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown")),
+            issue
+                .conflicting_task_names
+                .first()
+                .map(String::as_str)
+                .or_else(|| issue.conflicting_task_ids.first().map(String::as_str))
+                .unwrap_or("unknown"),
+        ),
+        RuntimeTaskValidationCode::TargetSubdirConflict => format!(
+            "Validation blocked saving sync tasks '{}' and '{}' because target paths cannot be parent/child.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown")),
+            issue
+                .conflicting_task_names
+                .first()
+                .map(String::as_str)
+                .or_else(|| issue.conflicting_task_ids.first().map(String::as_str))
+                .unwrap_or("unknown"),
+        ),
+        RuntimeTaskValidationCode::WatchCycle => {
+            let cycle_names = runtime_validation_issue_display_names(issue);
+            format!(
+                "Validation blocked saving watch tasks because a cycle was detected: {}.",
+                cycle_names
+                    .iter()
+                    .map(|name| format!("'{name}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        RuntimeTaskValidationCode::InvalidInput => format!(
+            "Validation blocked saving sync task '{}' because its configuration is invalid.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"))
+        ),
+    }
+}
+
+fn record_runtime_validation_issue(
+    issue: &RuntimeTaskValidationIssue,
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+) {
+    let message = runtime_validation_issue_log_message(issue);
+    state.log_manager.log_with_category_and_event(
+        "error",
+        &message,
+        None,
+        LogCategory::ValidationError,
+        app,
+    );
+
+    for task_id in runtime_validation_issue_task_ids(issue) {
+        state.log_manager.log_with_category_and_event(
+            "error",
+            &message,
+            Some(task_id),
+            LogCategory::ValidationError,
+            app,
+        );
+    }
+}
+
+fn find_runtime_task_validation_issue(
+    tasks: &[RuntimeSyncTask],
+) -> Option<RuntimeTaskValidationIssue> {
+    let mut validated_tasks: Vec<ValidatedRuntimeTask> = Vec::with_capacity(tasks.len());
+
+    for task in tasks {
+        if input_validation::validate_task_id(&task.id).is_err()
+            || input_validation::validate_path_argument(&task.source).is_err()
+            || input_validation::validate_path_argument(&task.target).is_err()
+        {
+            return Some(RuntimeTaskValidationIssue::invalid_input(Some(task)));
+        }
+
+        let source_key = match resolved_path_key(&task.source) {
+            Ok(value) => value,
+            Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
+        };
+        let target_key = match resolved_path_key(&task.target) {
+            Ok(value) => value,
+            Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
+        };
+
+        if is_path_overlap(&source_key, &target_key) {
+            return Some(RuntimeTaskValidationIssue {
+                code: RuntimeTaskValidationCode::SourceTargetOverlap,
+                task_id: Some(task.id.clone()),
+                task_name: Some(task.name.clone()),
+                conflicting_task_ids: Vec::new(),
+                conflicting_task_names: Vec::new(),
+                source: Some(task.source.clone()),
+                target: Some(task.target.clone()),
+            });
+        }
+
+        validated_tasks.push(ValidatedRuntimeTask {
+            id: task.id.clone(),
+            name: task.name.clone(),
+            source_key,
+            target_key,
+            watch_mode: task.watch_mode,
+        });
+    }
+
+    for left_index in 0..validated_tasks.len() {
+        for right_index in (left_index + 1)..validated_tasks.len() {
+            let left = &validated_tasks[left_index];
+            let right = &validated_tasks[right_index];
+
+            if is_path_overlap(&left.target_key, &right.target_key) {
+                let code = if left.target_key == right.target_key {
+                    RuntimeTaskValidationCode::DuplicateTarget
+                } else {
+                    RuntimeTaskValidationCode::TargetSubdirConflict
+                };
+
+                return Some(RuntimeTaskValidationIssue {
+                    code,
+                    task_id: Some(left.id.clone()),
+                    task_name: Some(left.name.clone()),
+                    conflicting_task_ids: vec![right.id.clone()],
+                    conflicting_task_names: vec![right.name.clone()],
+                    source: None,
+                    target: Some(tasks[left_index].target.clone()),
+                });
+            }
+        }
+    }
+
+    let topology = build_runtime_watch_topology(&validated_tasks);
+    if let Some(cycle_ids) = runtime_watch_cycle_task_ids(&validated_tasks, &topology) {
+        let names_by_id: HashMap<&str, &str> = validated_tasks
+            .iter()
+            .map(|task| (task.id.as_str(), task.name.as_str()))
+            .collect();
+        let cycle_names: Vec<String> = cycle_ids
+            .iter()
+            .map(|task_id| {
+                names_by_id
+                    .get(task_id.as_str())
+                    .copied()
+                    .unwrap_or(task_id.as_str())
+                    .to_string()
+            })
+            .collect();
+        return Some(RuntimeTaskValidationIssue {
+            code: RuntimeTaskValidationCode::WatchCycle,
+            task_id: cycle_ids.first().cloned(),
+            task_name: cycle_names.first().cloned(),
+            conflicting_task_ids: cycle_ids.iter().skip(1).cloned().collect(),
+            conflicting_task_names: cycle_names.iter().skip(1).cloned().collect(),
+            source: None,
+            target: None,
+        });
+    }
+
+    None
+}
+
+fn collect_validated_runtime_tasks(
+    tasks: &[RuntimeSyncTask],
+) -> Result<Vec<ValidatedRuntimeTask>, String> {
+    let mut validated_tasks: Vec<ValidatedRuntimeTask> = Vec::with_capacity(tasks.len());
 
     for task in tasks {
         input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
@@ -2134,7 +2408,7 @@ fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
             ));
         }
 
-        validated_tasks.push(ValidatedTask {
+        validated_tasks.push(ValidatedRuntimeTask {
             id: task.id.clone(),
             name: task.name.clone(),
             source_key,
@@ -2142,6 +2416,93 @@ fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
             watch_mode: task.watch_mode,
         });
     }
+
+    Ok(validated_tasks)
+}
+
+fn build_runtime_watch_topology(validated_tasks: &[ValidatedRuntimeTask]) -> RuntimeWatchTopology {
+    let mut topology = RuntimeWatchTopology::default();
+    let watch_tasks: Vec<&ValidatedRuntimeTask> = validated_tasks
+        .iter()
+        .filter(|task| task.watch_mode)
+        .collect();
+
+    for upstream in &watch_tasks {
+        for downstream in &watch_tasks {
+            if upstream.id == downstream.id {
+                continue;
+            }
+
+            if is_path_overlap(&upstream.target_key, &downstream.source_key) {
+                topology
+                    .downstreams
+                    .entry(upstream.id.clone())
+                    .or_default()
+                    .push(downstream.id.clone());
+                topology
+                    .upstreams
+                    .entry(downstream.id.clone())
+                    .or_default()
+                    .push(upstream.id.clone());
+            }
+        }
+    }
+
+    topology
+}
+
+fn runtime_watch_cycle_task_ids(
+    validated_tasks: &[ValidatedRuntimeTask],
+    topology: &RuntimeWatchTopology,
+) -> Option<Vec<String>> {
+    let watch_task_ids: Vec<String> = validated_tasks
+        .iter()
+        .filter(|task| task.watch_mode)
+        .map(|task| task.id.clone())
+        .collect();
+
+    let mut indegree: HashMap<String, usize> = watch_task_ids
+        .iter()
+        .map(|task_id| {
+            (
+                task_id.clone(),
+                topology.upstreams.get(task_id).map_or(0, Vec::len),
+            )
+        })
+        .collect();
+    let mut queue: VecDeque<String> = indegree
+        .iter()
+        .filter_map(|(task_id, degree)| (*degree == 0).then_some(task_id.clone()))
+        .collect();
+    let mut visited = 0usize;
+
+    while let Some(task_id) = queue.pop_front() {
+        visited += 1;
+        for downstream in topology.downstreams.get(&task_id).into_iter().flatten() {
+            if let Some(degree) = indegree.get_mut(downstream) {
+                *degree = degree.saturating_sub(1);
+                if *degree == 0 {
+                    queue.push_back(downstream.clone());
+                }
+            }
+        }
+    }
+
+    if visited == watch_task_ids.len() {
+        return None;
+    }
+
+    let mut cycle_ids: Vec<String> = indegree
+        .into_iter()
+        .filter_map(|(task_id, degree)| (degree > 0).then_some(task_id))
+        .collect();
+    cycle_ids.sort();
+    cycle_ids.dedup();
+    Some(cycle_ids)
+}
+
+fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
+    let validated_tasks = collect_validated_runtime_tasks(tasks)?;
 
     for left_index in 0..validated_tasks.len() {
         for right_index in (left_index + 1)..validated_tasks.len() {
@@ -2157,19 +2518,28 @@ fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
         }
     }
 
-    for watch_task in validated_tasks.iter().filter(|task| task.watch_mode) {
-        for other in &validated_tasks {
-            if other.id == watch_task.id {
-                continue;
-            }
-
-            if is_path_overlap(&other.target_key, &watch_task.source_key) {
-                return Err(format!(
-                    "Watch loop risk: target of '{}' overlaps watch source of '{}'.",
-                    other.name, watch_task.name
-                ));
-            }
-        }
+    let topology = build_runtime_watch_topology(&validated_tasks);
+    if let Some(cycle_task_ids) = runtime_watch_cycle_task_ids(&validated_tasks, &topology) {
+        let names_by_id: HashMap<&str, &str> = validated_tasks
+            .iter()
+            .map(|task| (task.id.as_str(), task.name.as_str()))
+            .collect();
+        return Err(format!(
+            "Watch cycle detected among tasks: {}.",
+            cycle_task_ids
+                .into_iter()
+                .map(|task_id| {
+                    format!(
+                        "'{}'",
+                        names_by_id
+                            .get(task_id.as_str())
+                            .copied()
+                            .unwrap_or(task_id.as_str())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
 
     Ok(())
@@ -2181,6 +2551,86 @@ fn runtime_desired_watch_sources(tasks: &[RuntimeSyncTask]) -> HashMap<String, S
         .filter(|task| task.watch_mode)
         .map(|task| (task.id.clone(), task.source.clone()))
         .collect()
+}
+
+fn runtime_watch_topology_from_tasks(
+    tasks: &[RuntimeSyncTask],
+) -> Result<RuntimeWatchTopology, String> {
+    Ok(build_runtime_watch_topology(&collect_validated_runtime_tasks(tasks)?))
+}
+
+fn runtime_watch_upstreams_for_task<'a>(
+    topology: &'a RuntimeWatchTopology,
+    task_id: &'a str,
+) -> impl Iterator<Item = &'a String> {
+    topology
+        .upstreams
+        .get(task_id)
+        .into_iter()
+        .flat_map(|upstreams| upstreams.iter())
+}
+
+fn mark_runtime_chain_settle_deadlines(
+    topology: &RuntimeWatchTopology,
+    settle_until: &mut HashMap<String, Instant>,
+    task_id: &str,
+    now: Instant,
+) {
+    let deadline = now + WATCH_CHAIN_SETTLE_WINDOW;
+    for downstream in topology.downstreams.get(task_id).into_iter().flatten() {
+        let entry = settle_until.entry(downstream.clone()).or_insert(deadline);
+        if *entry < deadline {
+            *entry = deadline;
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeDispatchSelection {
+    task_id: Option<String>,
+    next_ready_in: Option<Duration>,
+}
+
+fn select_runtime_dispatch_candidate(
+    queue: &VecDeque<String>,
+    queued: &HashSet<String>,
+    syncing: &HashSet<String>,
+    settle_until: &HashMap<String, Instant>,
+    runtime_config: &RuntimeConfigPayload,
+    now: Instant,
+) -> Result<RuntimeDispatchSelection, String> {
+    let topology = runtime_watch_topology_from_tasks(&runtime_config.tasks)?;
+    let mut next_ready_in: Option<Duration> = None;
+
+    for task_id in queue {
+        let has_active_upstream = runtime_watch_upstreams_for_task(&topology, task_id).any(|upstream| {
+            syncing.contains(upstream) || queued.contains(upstream)
+        });
+        if has_active_upstream {
+            continue;
+        }
+
+        if let Some(deadline) = settle_until.get(task_id) {
+            if *deadline > now {
+                let remaining = deadline.saturating_duration_since(now);
+                next_ready_in = Some(match next_ready_in {
+                    Some(current) => current.min(remaining),
+                    None => remaining,
+                });
+                continue;
+            }
+        }
+
+        return Ok(RuntimeDispatchSelection {
+            task_id: Some(task_id.clone()),
+            next_ready_in,
+        });
+    }
+
+    Ok(RuntimeDispatchSelection {
+        task_id: None,
+        next_ready_in,
+    })
 }
 
 fn runtime_find_watch_task<'a>(
@@ -2247,7 +2697,7 @@ async fn release_sync_slot(task_id: &str, state: &AppState) {
     };
 
     if removed {
-        state.runtime_sync_slot_released.notify_one();
+        state.runtime_dispatcher_wakeup.notify_waiters();
     }
 }
 
@@ -2273,6 +2723,7 @@ async fn enqueue_runtime_sync_task_internal(
     let mut queue = state.runtime_sync_queue.write().await;
     queue.push_back(task_id.to_string());
 
+    state.runtime_dispatcher_wakeup.notify_waiters();
     RuntimeSyncEnqueueResult::Enqueued
 }
 
@@ -2289,6 +2740,7 @@ async fn enqueue_runtime_sync_task(
     enqueue_result
 }
 
+#[cfg(test)]
 async fn dequeue_runtime_sync_task(state: &AppState) -> Option<String> {
     let mut queued_set = state.queued_sync_tasks.write().await;
     let mut queue = state.runtime_sync_queue.write().await;
@@ -2297,6 +2749,15 @@ async fn dequeue_runtime_sync_task(state: &AppState) -> Option<String> {
         queued_set.remove(task_id);
     }
     next
+}
+
+async fn take_specific_runtime_sync_task(task_id: &str, state: &AppState) -> Option<String> {
+    let mut queued_set = state.queued_sync_tasks.write().await;
+    let mut queue = state.runtime_sync_queue.write().await;
+    let position = queue.iter().position(|queued_task_id| queued_task_id == task_id)?;
+    let removed = queue.remove(position)?;
+    queued_set.remove(&removed);
+    Some(removed)
 }
 
 async fn take_runtime_pending_sync_task(task_id: &str, state: &AppState) -> bool {
@@ -2314,6 +2775,12 @@ async fn remove_runtime_sync_task_state(task_id: &str, state: &AppState) {
     let mut queue = state.runtime_sync_queue.write().await;
     queued.remove(task_id);
     queue.retain(|queued_task_id| queued_task_id != task_id);
+    drop(queue);
+    drop(queued);
+
+    let mut settle_until = state.runtime_chain_settle_until.write().await;
+    settle_until.remove(task_id);
+    state.runtime_dispatcher_wakeup.notify_waiters();
 }
 
 fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
@@ -2343,18 +2810,68 @@ fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
                 !queue.is_empty()
             };
 
-            if should_wait_for_runtime_slot(has_queued, current_syncing) {
-                state.runtime_sync_slot_released.notified().await;
-                continue;
-            }
-
             if !has_queued {
                 break;
             }
 
-            let Some(task_id) = dequeue_runtime_sync_task(&state).await else {
-                break;
+            let queued = {
+                let queued = state.queued_sync_tasks.read().await;
+                queued.clone()
             };
+            let syncing = {
+                let syncing = state.syncing_tasks.read().await;
+                syncing.clone()
+            };
+            let settle_until = {
+                let settle_until = state.runtime_chain_settle_until.read().await;
+                settle_until.clone()
+            };
+            let runtime_config = {
+                let config = state.runtime_config.read().await;
+                config.clone()
+            };
+            let selection = match select_runtime_dispatch_candidate(
+                &{
+                    let queue = state.runtime_sync_queue.read().await;
+                    queue.clone()
+                },
+                &queued,
+                &syncing,
+                &settle_until,
+                &runtime_config,
+                Instant::now(),
+            ) {
+                Ok(selection) => selection,
+                Err(_) => break,
+            };
+
+            if selection.task_id.is_none() || should_wait_for_runtime_slot(has_queued, current_syncing) {
+                match selection.next_ready_in {
+                    Some(wait) => {
+                        tokio::select! {
+                            _ = state.runtime_dispatcher_wakeup.notified() => {}
+                            _ = tokio::time::sleep(wait) => {}
+                        }
+                    }
+                    None => {
+                        state.runtime_dispatcher_wakeup.notified().await;
+                    }
+                }
+                continue;
+            }
+
+            let Some(task_id) = selection.task_id else {
+                continue;
+            };
+
+            let Some(task_id) = take_specific_runtime_sync_task(&task_id, &state).await else {
+                continue;
+            };
+
+            {
+                let mut settle_until = state.runtime_chain_settle_until.write().await;
+                settle_until.remove(&task_id);
+            }
 
             emit_runtime_sync_queue_state(&app, &task_id, false, None);
 
@@ -3120,6 +3637,18 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
 
     let reason = result.err();
     emit_runtime_sync_state(&app, &task.id, false, reason);
+
+    {
+        let runtime_config = {
+            let config = state.runtime_config.read().await;
+            config.clone()
+        };
+        if let Ok(topology) = runtime_watch_topology_from_tasks(&runtime_config.tasks) {
+            let mut settle_until = state.runtime_chain_settle_until.write().await;
+            mark_runtime_chain_settle_deadlines(&topology, &mut settle_until, &task.id, Instant::now());
+        }
+    }
+    state.runtime_dispatcher_wakeup.notify_waiters();
 
     let should_replay = take_runtime_pending_sync_task(&task.id, &state).await;
     if should_replay && is_runtime_watch_task_active(&task.id, &state).await {
@@ -4942,6 +5471,7 @@ async fn runtime_set_config(
         let mut config = state.runtime_config.write().await;
         *config = payload;
     }
+    state.runtime_dispatcher_wakeup.notify_waiters();
     prune_auto_unmount_session_disabled_tasks(&valid_task_ids, state.inner()).await;
 
     reconcile_runtime_watchers(app.clone(), state.inner().clone()).await?;
@@ -4958,8 +5488,23 @@ async fn runtime_set_config(
 }
 
 #[tauri::command]
-async fn runtime_validate_tasks(tasks: Vec<RuntimeSyncTask>) -> Result<(), String> {
-    validate_runtime_tasks(&tasks)
+async fn runtime_validate_tasks(
+    tasks: Vec<RuntimeSyncTask>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<RuntimeTaskValidationResult, String> {
+    if let Some(issue) = find_runtime_task_validation_issue(&tasks) {
+        record_runtime_validation_issue(&issue, Some(&app), state.inner());
+        return Ok(RuntimeTaskValidationResult {
+            ok: false,
+            issue: Some(issue),
+        });
+    }
+
+    Ok(RuntimeTaskValidationResult {
+        ok: true,
+        issue: None,
+    })
 }
 
 #[tauri::command]
@@ -6232,7 +6777,8 @@ pub fn run() {
             queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_pending_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_dispatcher_running: Arc::new(Mutex::new(false)),
-            runtime_sync_slot_released: Arc::new(Notify::new()),
+            runtime_dispatcher_wakeup: Arc::new(Notify::new()),
+            runtime_chain_settle_until: Arc::new(RwLock::new(HashMap::new())),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),

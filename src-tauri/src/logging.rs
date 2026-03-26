@@ -29,6 +29,7 @@ pub enum LogCategory {
     VolumeUnmounted,
     FileCopied,
     FileDeleted,
+    ValidationError,
     #[default]
     Other,
 }
@@ -44,6 +45,7 @@ impl LogCategory {
                 | LogCategory::WatchStopped
                 | LogCategory::VolumeMounted
                 | LogCategory::VolumeUnmounted
+                | LogCategory::ValidationError
         )
     }
 
@@ -57,6 +59,7 @@ impl LogCategory {
                 | LogCategory::WatchStopped
                 | LogCategory::FileCopied
                 | LogCategory::FileDeleted
+                | LogCategory::ValidationError
         )
     }
 }
@@ -218,6 +221,9 @@ impl LogManager {
         let logs = self.system_logs.lock().unwrap();
         logs.iter()
             .filter(|entry| entry.category.is_activity_visible())
+            .filter(|entry| {
+                !(entry.category == LogCategory::ValidationError && entry.task_id.is_some())
+            })
             .cloned()
             .collect()
     }
@@ -370,9 +376,15 @@ mod tests {
             Some("task1".to_string()),
             LogCategory::Other,
         );
+        manager.log_with_category(
+            "error",
+            "validation",
+            Some("task1".to_string()),
+            LogCategory::ValidationError,
+        );
 
         let activity_logs = manager.get_activity_logs();
-        assert_eq!(activity_logs.len(), 2);
+        assert_eq!(activity_logs.len(), 3);
         assert!(activity_logs
             .iter()
             .all(|entry| entry.category.is_activity_visible()));
@@ -407,6 +419,12 @@ mod tests {
             LogCategory::Other,
         );
         manager.log_with_category(
+            "error",
+            "validation",
+            Some("task1".to_string()),
+            LogCategory::ValidationError,
+        );
+        manager.log_with_category(
             "info",
             "copy-b",
             Some("task2".to_string()),
@@ -415,7 +433,7 @@ mod tests {
         manager.log_with_category("info", "mounted", None, LogCategory::VolumeMounted);
 
         let task_logs = manager.get_task_logs_filtered("task1");
-        assert_eq!(task_logs.len(), 3);
+        assert_eq!(task_logs.len(), 4);
         assert!(task_logs
             .iter()
             .all(|entry| entry.task_id.as_deref() == Some("task1")));
@@ -436,6 +454,7 @@ mod tests {
             LogCategory::VolumeUnmounted,
             LogCategory::FileCopied,
             LogCategory::FileDeleted,
+            LogCategory::ValidationError,
             LogCategory::Other,
         ];
 
@@ -460,6 +479,7 @@ mod tests {
                 LogCategory::WatchStopped,
                 LogCategory::VolumeMounted,
                 LogCategory::VolumeUnmounted,
+                LogCategory::ValidationError,
             ]
         );
 
@@ -473,6 +493,7 @@ mod tests {
                 LogCategory::WatchStopped,
                 LogCategory::FileCopied,
                 LogCategory::FileDeleted,
+                LogCategory::ValidationError,
             ]
         );
     }

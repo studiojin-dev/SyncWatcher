@@ -104,10 +104,26 @@
         "sourceEqualsTarget": "La ruta de origen y destino no pueden superponerse.",
         "targetIsSubdirOfSource": "El destino no puede estar dentro del origen.",
         "duplicateTarget": "El destino entra en conflicto con otro destino de tarea.",
-        "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea."
+        "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea.",
+        "watchCycle": "Las tareas watch no pueden formar un ciclo.",
+        "invalidInput": "La configuración de la tarea no es válida."
+      },
+      "validationModal": {
+        "title": "Error de validación",
+        "affectedTasks": "Tareas afectadas",
+        "source": "Origen",
+        "target": "Destino",
+        "close": "Cerrar",
+        "ruleDescriptions": {
+          "sourceTargetOverlap": "Dentro de una misma tarea, source y target no pueden apuntar a la misma ruta ni a rutas padre/hijo.",
+          "duplicateTarget": "Las tareas distintas no pueden compartir el mismo directorio de destino porque la propiedad y la limpieza se vuelven ambiguas.",
+          "targetSubdirConflict": "Los destinos de distintas tareas no pueden estar anidados porque los árboles padre/hijo pueden sobrescribirse u ocultarse entre sí.",
+          "watchCycle": "Las tareas con watch deben mantenerse en un solo sentido. Los ciclos se rechazan porque pueden provocar bucles infinitos de sincronización.",
+          "invalidInput": "No se pudo validar la configuración de la tarea. Revisa los valores seleccionados de origen y destino e inténtalo de nuevo."
+        }
       },
       "warnings": {
-        "targetInWatchedSource": "El destino se superpone con otro origen vigilado y puede causar bucles."
+        "targetInWatchedSource": "Esta tarea forma parte de una cadena watch. La sincronización descendente espera a que termine la tarea ascendente."
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -275,7 +291,7 @@
           "description": "La validación runtime bloquea configuraciones de rutas inseguras.",
           "withinTaskOverlap": "Dentro de una tarea, source y target no pueden solaparse (misma ruta o relación padre/hijo).",
           "targetUniqueness": "Entre tareas, los targets deben ser únicos y no pueden ser padre/hijo entre sí.",
-          "watchLoopRisk": "Si un watch source se solapa con el target de otra tarea, la configuración se rechaza para evitar bucles."
+          "watchLoopRisk": "Las tareas watch pueden formar cadenas de una sola dirección, pero se rechazan las configuraciones que crean un ciclo watch."
         },
         "conflictOrphan": {
           "title": "Flujo de Conflicto / Limpieza",

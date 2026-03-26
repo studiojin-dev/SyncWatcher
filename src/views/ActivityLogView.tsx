@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { IconRefresh } from '@tabler/icons-react';
-import { isActivityVisibleCategory } from '../types/logCategories';
+import { isActivityVisibleEntry } from '../types/logCategories';
 
 interface LogEntry {
   id: string;
@@ -22,9 +22,10 @@ function ActivityLogView() {
     setLoading(true);
     try {
       const result = await invoke<LogEntry[]>('get_system_logs');
-      // 최신 로그가 상단에 오도록 정렬
+      // Activity Log is currently fetch/refresh only; keep visibility
+      // filtering centralized so any future live listener can reuse it.
       setLogs(result
-        .filter((entry) => isActivityVisibleCategory(entry.category))
+        .filter((entry) => isActivityVisibleEntry(entry))
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
     } catch (error) {
       console.error('Failed to load logs:', error);

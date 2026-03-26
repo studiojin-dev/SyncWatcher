@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260326-0018-CHN",
+    "title": "Watch chain cycle gating and downstream settle window",
+    "tags": [
+      "sync-task",
+      "watch-mode",
+      "runtime",
+      "scheduling",
+      "reliability",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-26",
+    "tldr": "Allow acyclic watch chains, reject only true watch cycles, and delay downstream watch sync until upstream sync completes plus a short settle window.",
+    "path": "docs/adr/ADR-20260326-0018-CHN-watch-chain-cycle-gating-and-settle-window.md"
+  },
+  {
     "id": "ADR-20260325-0017-REL",
     "title": "ARM-first release orchestration with draft reuse and published-tag fail-fast",
     "tags": [

@@ -104,10 +104,26 @@
         "sourceEqualsTarget": "원본과 대상 경로는 겹칠 수 없습니다.",
         "targetIsSubdirOfSource": "대상은 원본 경로 내부에 둘 수 없습니다.",
         "duplicateTarget": "다른 작업과 대상 경로가 충돌합니다.",
-        "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다."
+        "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다.",
+        "watchCycle": "watch 작업은 cycle을 만들 수 없습니다.",
+        "invalidInput": "작업 구성이 올바르지 않습니다."
+      },
+      "validationModal": {
+        "title": "검증 오류",
+        "affectedTasks": "영향받는 작업",
+        "source": "원본",
+        "target": "대상",
+        "close": "닫기",
+        "ruleDescriptions": {
+          "sourceTargetOverlap": "단일 작업 안에서 원본과 대상은 동일 경로나 상위/하위 관계가 될 수 없습니다.",
+          "duplicateTarget": "여러 작업이 같은 대상 디렉터리를 공유하면 소유권과 정리 기준이 모호해지므로 허용되지 않습니다.",
+          "targetSubdirConflict": "여러 작업의 대상 경로는 서로 중첩될 수 없습니다. 상위/하위 대상 트리가 서로 덮어쓰거나 숨길 수 있기 때문입니다.",
+          "watchCycle": "watch 작업은 단방향이어야 합니다. cycle이 생기면 무한 동기화 루프를 유발할 수 있어 거부됩니다.",
+          "invalidInput": "작업 구성을 검증할 수 없습니다. 선택한 원본과 대상 값을 다시 확인하세요."
+        }
       },
       "warnings": {
-        "targetInWatchedSource": "대상이 다른 감시 작업의 원본과 겹쳐 루프가 발생할 수 있습니다."
+        "targetInWatchedSource": "이 작업은 watch chain에 참여합니다. 후속 동기화는 선행 작업 완료 후 시작됩니다."
       },
       "autoUnmountPendingStatus": "Unmount 확인 대기",
       "autoUnmountCancelledStatus": "Unmount 취소(마운트 유지)",
@@ -275,7 +291,7 @@
           "description": "작업 저장 시 런타임 검증으로 위험한 경로 구성을 차단합니다.",
           "withinTaskOverlap": "단일 작업 안에서 원본/대상 경로는 겹칠 수 없습니다(동일 경로 또는 상위/하위).",
           "targetUniqueness": "여러 작업 간 대상 경로는 서로 겹치거나 상위/하위 관계가 될 수 없습니다.",
-          "watchLoopRisk": "watch 원본이 다른 작업 대상과 겹치면 sync loop 위험 때문에 구성이 거부됩니다."
+          "watchLoopRisk": "watch 작업은 일방향 chain을 이룰 수 있지만, watch cycle을 만드는 구성은 거부됩니다."
         },
         "conflictOrphan": {
           "title": "충돌 / 정리 워크플로우",

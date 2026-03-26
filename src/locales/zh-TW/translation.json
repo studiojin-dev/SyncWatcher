@@ -104,10 +104,26 @@
         "sourceEqualsTarget": "來源路徑與目標路徑不能重疊。",
         "targetIsSubdirOfSource": "目標不能位於來源目錄內部。",
         "duplicateTarget": "目標與其他任務目標路徑衝突。",
-        "targetSubdirConflict": "目標不能成為其他任務目標的父/子路徑。"
+        "targetSubdirConflict": "目標不能成為其他任務目標的父/子路徑。",
+        "watchCycle": "watch 任務不能形成 cycle。",
+        "invalidInput": "任務設定無效。"
+      },
+      "validationModal": {
+        "title": "驗證錯誤",
+        "affectedTasks": "受影響的任務",
+        "source": "來源",
+        "target": "目標",
+        "close": "關閉",
+        "ruleDescriptions": {
+          "sourceTargetOverlap": "單一任務內，source 與 target 不能指向同一路徑，也不能形成父子關係。",
+          "duplicateTarget": "不同任務不能共用同一個目標目錄，否則所有權與清理邊界會變得模糊。",
+          "targetSubdirConflict": "不同任務的目標路徑不能巢狀，因為父子目標樹可能互相覆寫或遮蔽。",
+          "watchCycle": "啟用 watch 的任務必須保持單向。出現 cycle 會導致無限同步迴圈，因此會被拒絕。",
+          "invalidInput": "無法驗證任務設定。請檢查所選的 source 與 target 後再試一次。"
+        }
       },
       "warnings": {
-        "targetInWatchedSource": "目標與其他監控任務的來源路徑重疊，可能導致同步迴圈。"
+        "targetInWatchedSource": "此任務參與 watch chain。下游同步會在上游任務完成後才開始。"
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -275,7 +291,7 @@
           "description": "儲存任務時會進行執行階段校驗並阻止不安全路徑組合。",
           "withinTaskOverlap": "單個任務內 source 與 target 不能重疊（同一路徑或父子關係）。",
           "targetUniqueness": "多個任務之間 target 必須唯一，且不能是父子關係。",
-          "watchLoopRisk": "若某個 watch source 與其他任務 target 重疊，將拒絕該配置以避免同步迴圈。"
+          "watchLoopRisk": "watch 任務可以形成單向 chain，但會拒絕形成 watch cycle 的配置。"
         },
         "conflictOrphan": {
           "title": "衝突 / 清理工作流程",
