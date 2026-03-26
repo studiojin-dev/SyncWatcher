@@ -1,9 +1,8 @@
-# ADR-20260228-0007: Exclusion template expansion and exclusion-pattern limit increase
-
-- Status: Accepted
-- Date: 2026-02-28
-- Tags: sync-task, exclusion, templates, reliability, performance, macos, tauri
-- TL;DR: Expand default exclusion templates across major ecosystems, merge missing defaults for existing users once, and raise exclusion-pattern limit from 100 to 300 with runtime deduplication.
+# ADR-20260228-0007-EXC: Exclusion template expansion and exclusion-pattern limit increase
+Status: Accepted
+Date: 2026-02-28
+Tags: sync-task, exclusion, templates, reliability, performance, macos, tauri
+TL;DR: Expand default exclusion templates across major ecosystems, merge missing defaults for existing users once, and raise exclusion-pattern limit from 100 to 300 with runtime deduplication.
 
 ## Context
 

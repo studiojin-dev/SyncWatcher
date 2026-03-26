@@ -1,9 +1,8 @@
-# ADR-20260305-0009: Release SBOMs, checksum manifests, stable cosign attestation, and separate local verification
-
-- Status: Accepted
-- Date: 2026-03-05
-- Tags: release, security, sbom, attestation, ci, supply-chain
-- TL;DR: Generate SBOMs and checksum manifests for every tagged release, force keyless cosign attestations for stable tags, keep prerelease attestation opt-in via a repo variable, and keep local cosign verification separate from the latest installer.
+# ADR-20260305-0009-RLS: Release SBOMs, checksum manifests, stable cosign attestation, and separate local verification
+Status: Accepted
+Date: 2026-03-05
+Tags: release, security, sbom, attestation, ci, supply-chain
+TL;DR: Generate SBOMs and checksum manifests for every tagged release, force keyless cosign attestations for stable tags, keep prerelease attestation opt-in via a repo variable, and keep local cosign verification separate from the latest installer.
 
 ## Context
 

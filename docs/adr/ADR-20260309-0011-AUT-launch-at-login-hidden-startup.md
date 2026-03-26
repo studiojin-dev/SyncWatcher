@@ -1,8 +1,8 @@
 # ADR-20260309-0011-AUT: Launch-at-login autostart with hidden startup
-- Status: Accepted
-- Date: 2026-03-09
-- Tags: lifecycle, autostart, macos, tauri, settings, ux
-- TL;DR: Use Tauri's autostart plugin on macOS, keep login-item state as the OS-owned source of truth, and start hidden only when both the autostart argument and OS login-item state confirm a real login launch.
+Status: Accepted
+Date: 2026-03-09
+Tags: lifecycle, autostart, macos, tauri, settings, ux
+TL;DR: Use Tauri's autostart plugin on macOS, keep login-item state as the OS-owned source of truth, and start hidden only when both the autostart argument and OS login-item state confirm a real login launch.
 
 ## Context
 

@@ -107,7 +107,7 @@
         "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다."
       },
       "warnings": {
-        "targetInWatchedSource": "대상이 다른 감시 작업의 원본과 겹쳐 루프가 발생할 수 있습니다."
+        "targetInWatchedSource": "순환이 없는 watch chain은 허용되지만, 겹치는 쓰기 작업이 성공적으로 끝난 뒤에만 downstream watch sync가 시작됩니다."
       },
       "autoUnmountPendingStatus": "Unmount 확인 대기",
       "autoUnmountCancelledStatus": "Unmount 취소(마운트 유지)",
@@ -275,7 +275,7 @@
           "description": "작업 저장 시 런타임 검증으로 위험한 경로 구성을 차단합니다.",
           "withinTaskOverlap": "단일 작업 안에서 원본/대상 경로는 겹칠 수 없습니다(동일 경로 또는 상위/하위).",
           "targetUniqueness": "여러 작업 간 대상 경로는 서로 겹치거나 상위/하위 관계가 될 수 없습니다.",
-          "watchLoopRisk": "watch 원본이 다른 작업 대상과 겹치면 sync loop 위험 때문에 구성이 거부됩니다."
+          "watchLoopRisk": "실제 watch cycle만 거부됩니다. 일방향 chain은 허용되며, downstream watch sync는 선행 쓰기 작업이 성공하고 짧은 settle window가 지난 뒤에 시작됩니다."
         },
         "conflictOrphan": {
           "title": "충돌 / 정리 워크플로우",

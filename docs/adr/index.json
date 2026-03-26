@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260326-0018-RTG",
+    "title": "Producer completion gate for safe downstream watch sync",
+    "tags": [
+      "runtime",
+      "watch-mode",
+      "sync-task",
+      "reliability",
+      "tauri",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-26",
+    "tldr": "Allow acyclic watch chains, but delay downstream watch sync until every overlapping writer succeeds and a short settle window has elapsed.",
+    "path": "docs/adr/ADR-20260326-0018-RTG-producer-completion-gate-for-safe-downstream-watch-sync.md"
+  },
+  {
     "id": "ADR-20260325-0017-REL",
     "title": "ARM-first release orchestration with draft reuse and published-tag fail-fast",
     "tags": [
@@ -131,7 +147,7 @@
     "path": "docs/adr/ADR-20260306-0010-MCP-enabled-running-app-control-plane.md"
   },
   {
-    "id": "ADR-20260305-0009",
+    "id": "ADR-20260305-0009-RLS",
     "title": "Release SBOMs, checksum manifests, stable cosign attestation, and separate local verification",
     "tags": [
       "release",
@@ -147,7 +163,7 @@
     "path": "docs/adr/ADR-20260305-0009-release-sbom-and-optional-cosign-attestation.md"
   },
   {
-    "id": "ADR-20260301-0008",
+    "id": "ADR-20260301-0008-AUM",
     "title": "watchMode zero-copy auto-unmount deferred confirmation",
     "tags": [
       "watch-mode",
@@ -163,7 +179,7 @@
     "path": "docs/adr/ADR-20260301-0008-watchmode-zero-copy-auto-unmount-deferred-confirm.md"
   },
   {
-    "id": "ADR-20260228-0007",
+    "id": "ADR-20260228-0007-EXC",
     "title": "Exclusion template expansion and exclusion-pattern limit increase",
     "tags": [
       "sync-task",
@@ -180,7 +196,7 @@
     "path": "docs/adr/ADR-20260228-0007-exclusion-template-expansion-and-pattern-limit.md"
   },
   {
-    "id": "ADR-20260227-0006",
+    "id": "ADR-20260227-0006-CHE",
     "title": "Target-newer conflict hash-equivalence exception",
     "tags": [
       "sync-task",
@@ -196,7 +212,7 @@
     "path": "docs/adr/ADR-20260227-0006-target-newer-conflict-hash-equivalence-exception.md"
   },
   {
-    "id": "ADR-20260219-0005",
+    "id": "ADR-20260219-0005-CRW",
     "title": "Target-newer conflict deferred review in dedicated window",
     "tags": [
       "sync-task",
@@ -213,7 +229,7 @@
     "path": "docs/adr/ADR-20260219-0005-target-newer-conflict-review-window.md"
   },
   {
-    "id": "ADR-20260215-0004",
+    "id": "ADR-20260215-0004-RTQ",
     "title": "Runtime watch-mode initial sync queue and concurrency limit",
     "tags": [
       "sync-task",
@@ -229,7 +245,7 @@
     "path": "docs/adr/ADR-20260215-0004-runtime-watch-sync-queue-and-concurrency.md"
   },
   {
-    "id": "ADR-20260211-0003",
+    "id": "ADR-20260211-0003-STG",
     "title": "Sync task target conflict policy, UUID runtime validation, and orphan cleanup workflow",
     "tags": [
       "sync-task",
@@ -244,7 +260,7 @@
     "path": "docs/adr/ADR-20260211-0003-sync-task-target-conflict-and-orphan-cleanup.md"
   },
   {
-    "id": "ADR-20260210-0002",
+    "id": "ADR-20260210-0002-LIF",
     "title": "App lifecycle (quit vs background)",
     "tags": [
       "lifecycle",
@@ -259,7 +275,7 @@
     "path": "docs/adr/ADR-20260210-0002-app-lifecycle-background-tray.md"
   },
   {
-    "id": "ADR-20260209-0001",
+    "id": "ADR-20260209-0001-VFS",
     "title": "Dashboard volume source of truth",
     "tags": [
       "dashboard",

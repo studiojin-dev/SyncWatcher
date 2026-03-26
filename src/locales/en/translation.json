@@ -104,7 +104,7 @@
         "targetSubdirConflict": "Target cannot be parent/child of another task target."
       },
       "warnings": {
-        "targetInWatchedSource": "Target overlaps another watch source and may cause sync loops."
+        "targetInWatchedSource": "Acyclic watch chains are allowed, but downstream watch sync waits until overlapping writes complete successfully."
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -272,7 +272,7 @@
           "description": "Task sets are validated and unsafe path layouts are blocked.",
           "withinTaskOverlap": "Within one task, source and target cannot overlap (same path or parent/child).",
           "targetUniqueness": "Across tasks, targets must be unique and cannot be parent/child of each other.",
-          "watchLoopRisk": "If a watch source overlaps another task target, the config is rejected to prevent sync loops."
+          "watchLoopRisk": "Only real watch cycles are rejected. One-way chains are allowed, and downstream watch sync starts after the upstream write succeeds and a short settle window passes."
         },
         "conflictOrphan": {
           "title": "Conflict / Cleanup Workflow",

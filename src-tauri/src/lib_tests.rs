@@ -25,8 +25,11 @@ mod integration_tests {
         runtime_get_state_internal, set_auto_unmount_session_disabled_internal,
         sync_dry_run_internal, take_runtime_pending_sync_task, validate_runtime_tasks,
         volume_watch_next_tick_delay, AppState, CancelOperationType, DataUnitSystem,
-        DryRunLiveState, RuntimeAutoUnmountDecision, RuntimeExclusionSet, RuntimeSyncEnqueueResult,
-        RuntimeSyncTask, VolumeEmitDebounceState,
+        DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision,
+        RuntimeExclusionSet, RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask,
+        VolumeEmitDebounceState, build_runtime_watch_upstreams, build_validated_runtime_tasks,
+        find_runtime_watch_cycle, mark_downstream_watch_tasks_settle_for_target,
+        select_runtime_dispatch_candidate,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
@@ -169,7 +172,10 @@ mod integration_tests {
             queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_pending_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_dispatcher_running: Arc::new(Mutex::new(false)),
+            runtime_dispatcher_wakeup: Arc::new(Notify::new()),
             runtime_sync_slot_released: Arc::new(Notify::new()),
+            runtime_chain_settle_until: Arc::new(RwLock::new(HashMap::new())),
+            runtime_active_producers: Arc::new(RwLock::new(HashMap::new())),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),
@@ -600,19 +606,37 @@ mod integration_tests {
     }
 
     #[test]
-    fn test_validate_runtime_tasks_rejects_watch_loop_risk() {
+    fn test_validate_runtime_tasks_allows_one_way_watch_chain() {
         let tasks = vec![
-            build_runtime_task_with_paths("a", "/src/a", "/loop/target", true),
-            build_runtime_task_with_paths("b", "/loop/target/inbound", "/dst/b", true),
+            build_runtime_task_with_paths("a", "/sdcard", "/camera/a7cr", true),
+            build_runtime_task_with_paths("b", "/camera", "/nas/camera", true),
+        ];
+
+        assert!(validate_runtime_tasks(&tasks).is_ok());
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_watch_cycle() {
+        let tasks = vec![
+            build_runtime_task_with_paths(
+                "a",
+                "/watch/a",
+                "/watch/b/import",
+                true,
+            ),
+            build_runtime_task_with_paths("b", "/watch/b", "/watch/a/export", true),
         ];
 
         let result = validate_runtime_tasks(&tasks);
         assert!(result.is_err());
-        assert!(result.err().unwrap_or_default().contains("Watch loop risk"));
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Watch cycle detected"));
     }
 
     #[test]
-    fn test_validate_runtime_tasks_rejects_non_watch_target_overlapping_watch_source() {
+    fn test_validate_runtime_tasks_allows_manual_target_inside_watched_source() {
         let tasks = vec![
             build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
             build_runtime_task_with_paths(
@@ -623,9 +647,7 @@ mod integration_tests {
             ),
         ];
 
-        let result = validate_runtime_tasks(&tasks);
-        assert!(result.is_err());
-        assert!(result.err().unwrap_or_default().contains("Watch loop risk"));
+        assert!(validate_runtime_tasks(&tasks).is_ok());
     }
 
     #[test]
@@ -675,6 +697,175 @@ mod integration_tests {
 
         assert!(parse_uuid_source_path("[DISK_UUID:abc/without-bracket").is_none());
         assert!(parse_uuid_source_path("[CUSTOM_UUID:abc]/DCIM").is_none());
+    }
+
+    #[test]
+    fn test_find_runtime_watch_cycle_detects_longer_cycle() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/watch/a", "/watch/b/in", true),
+            build_runtime_task_with_paths("b", "/watch/b", "/watch/c/in", true),
+            build_runtime_task_with_paths("c", "/watch/c", "/watch/a/in", true),
+        ];
+
+        let validated = build_validated_runtime_tasks(&tasks).unwrap();
+        let cycle = find_runtime_watch_cycle(&validated);
+        assert!(cycle.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_mark_downstream_watch_tasks_settle_for_manual_target_overlap() {
+        let state = build_app_state();
+        {
+            let mut runtime_config = state.runtime_config.write().await;
+            runtime_config.tasks = vec![
+                build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+                build_runtime_task_with_paths(
+                    "manual-b",
+                    "/src/manual",
+                    "/media/incoming/export",
+                    false,
+                ),
+            ];
+        }
+
+        mark_downstream_watch_tasks_settle_for_target("/media/incoming/export", &state).await;
+
+        let settle = state.runtime_chain_settle_until.read().await;
+        assert!(settle.get("watch-a").is_some());
+    }
+
+    #[test]
+    fn test_select_runtime_dispatch_candidate_blocks_active_manual_producer() {
+        let queue = VecDeque::from([String::from("watch-a")]);
+        let queued_set = HashSet::from([String::from("watch-a")]);
+        let syncing = HashSet::new();
+        let watch_upstreams = HashMap::new();
+        let source_keys = HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
+        let active_producers = HashMap::from([(
+            String::from("sync:manual:task-b"),
+            RuntimeActiveProducer {
+                producer_id: String::from("sync:manual:task-b"),
+                kind: RuntimeProducerKind::ManualSync,
+                target_key: String::from("/media/incoming/export"),
+            },
+        )]);
+        let settle_until = HashMap::new();
+
+        let selection = select_runtime_dispatch_candidate(
+            &queue,
+            &queued_set,
+            &syncing,
+            &watch_upstreams,
+            &source_keys,
+            &active_producers,
+            &settle_until,
+            Instant::now(),
+        );
+
+        assert!(selection.candidate_task_id.is_none());
+        assert!(selection.next_deadline.is_none());
+    }
+
+    #[test]
+    fn test_select_runtime_dispatch_candidate_blocks_active_conflict_producer() {
+        let queue = VecDeque::from([String::from("watch-a")]);
+        let queued_set = HashSet::from([String::from("watch-a")]);
+        let syncing = HashSet::new();
+        let watch_upstreams = HashMap::new();
+        let source_keys = HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
+        let active_producers = HashMap::from([(
+            String::from("conflict:force-copy:session-1:item-1"),
+            RuntimeActiveProducer {
+                producer_id: String::from("conflict:force-copy:session-1:item-1"),
+                kind: RuntimeProducerKind::ConflictForceCopy,
+                target_key: String::from("/media/incoming/export/file.jpg"),
+            },
+        )]);
+
+        let selection = select_runtime_dispatch_candidate(
+            &queue,
+            &queued_set,
+            &syncing,
+            &watch_upstreams,
+            &source_keys,
+            &active_producers,
+            &HashMap::new(),
+            Instant::now(),
+        );
+
+        assert!(selection.candidate_task_id.is_none());
+    }
+
+    #[test]
+    fn test_select_runtime_dispatch_candidate_waits_for_settle_then_runs() {
+        let queue = VecDeque::from([String::from("watch-a"), String::from("watch-b")]);
+        let queued_set = HashSet::from([String::from("watch-a"), String::from("watch-b")]);
+        let syncing = HashSet::new();
+        let watch_upstreams = HashMap::new();
+        let source_keys = HashMap::from([
+            (String::from("watch-a"), String::from("/media/incoming")),
+            (String::from("watch-b"), String::from("/other/source")),
+        ]);
+        let active_producers = HashMap::new();
+        let future_deadline = Instant::now() + Duration::from_millis(200);
+        let settle_until = HashMap::from([(String::from("watch-a"), future_deadline)]);
+
+        let selection = select_runtime_dispatch_candidate(
+            &queue,
+            &queued_set,
+            &syncing,
+            &watch_upstreams,
+            &source_keys,
+            &active_producers,
+            &settle_until,
+            Instant::now(),
+        );
+
+        assert_eq!(selection.candidate_task_id.as_deref(), Some("watch-b"));
+        assert_eq!(selection.next_deadline, Some(future_deadline));
+
+        let selection_after = select_runtime_dispatch_candidate(
+            &VecDeque::from([String::from("watch-a")]),
+            &HashSet::from([String::from("watch-a")]),
+            &HashSet::new(),
+            &HashMap::new(),
+            &HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]),
+            &HashMap::new(),
+            &HashMap::from([(String::from("watch-a"), Instant::now() - Duration::from_millis(1))]),
+            Instant::now(),
+        );
+
+        assert_eq!(selection_after.candidate_task_id.as_deref(), Some("watch-a"));
+    }
+
+    #[test]
+    fn test_select_runtime_dispatch_candidate_blocks_queued_watch_upstream() {
+        let tasks = vec![
+            build_runtime_task_with_paths("watch-a", "/sdcard", "/camera/a7cr", true),
+            build_runtime_task_with_paths("watch-b", "/camera", "/nas/camera", true),
+        ];
+        let validated = build_validated_runtime_tasks(&tasks).unwrap();
+        let upstreams = build_runtime_watch_upstreams(&validated);
+        let queue = VecDeque::from([String::from("watch-b"), String::from("watch-a")]);
+        let queued_set = HashSet::from([String::from("watch-b"), String::from("watch-a")]);
+        let syncing = HashSet::new();
+        let source_keys = HashMap::from([
+            (String::from("watch-a"), String::from("/sdcard")),
+            (String::from("watch-b"), String::from("/camera")),
+        ]);
+
+        let selection = select_runtime_dispatch_candidate(
+            &queue,
+            &queued_set,
+            &syncing,
+            &upstreams,
+            &source_keys,
+            &HashMap::new(),
+            &HashMap::new(),
+            Instant::now(),
+        );
+
+        assert_eq!(selection.candidate_task_id.as_deref(), Some("watch-a"));
     }
 
     #[test]

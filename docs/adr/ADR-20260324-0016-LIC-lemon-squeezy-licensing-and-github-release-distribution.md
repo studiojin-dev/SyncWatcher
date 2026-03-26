@@ -1,9 +1,8 @@
 # ADR-20260324-0016-LIC: Lemon Squeezy handles supporter licensing while GitHub Releases remain the distribution origin for v1
-
-- Status: Accepted
-- Date: 2026-03-24
-- Tags: licensing, release, distribution, updater, lemonsqueezy, github
-- TL;DR: Use Lemon Squeezy for optional supporter purchases and license-key lifecycle, but keep GitHub Releases as the source of install files and Tauri updater metadata in v1.
+Status: Accepted
+Date: 2026-03-24
+Tags: licensing, release, distribution, updater, lemonsqueezy, github
+TL;DR: Use Lemon Squeezy for optional supporter purchases and license-key lifecycle, but keep GitHub Releases as the source of install files and Tauri updater metadata in v1.
 
 ## Context
 

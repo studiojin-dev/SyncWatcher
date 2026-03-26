@@ -316,8 +316,14 @@ pub struct AppState {
     runtime_pending_sync_tasks: Arc<RwLock<HashSet<String>>>,
     /// 런타임 큐 디스패처 실행 여부
     runtime_dispatcher_running: Arc<Mutex<bool>>,
+    /// 런타임 큐 디스패처 재평가 알림
+    runtime_dispatcher_wakeup: Arc<Notify>,
     /// 런타임 동기화 슬롯 해제 알림
     runtime_sync_slot_released: Arc<Notify>,
+    /// watched source downstream release settle deadline
+    runtime_chain_settle_until: Arc<RwLock<HashMap<String, Instant>>>,
+    /// 현재 target path에 write 중인 producer 집합
+    runtime_active_producers: Arc<RwLock<HashMap<String, RuntimeActiveProducer>>>,
     /// 초기 watchMode 일괄 동기화 실행 여부
     runtime_initial_watch_bootstrapped: Arc<AtomicBool>,
     /// runtime config 적용 직렬화 락 (last-write-wins 보장)
@@ -706,6 +712,36 @@ struct SyncExecutionResult {
     target_preflight: Option<TargetPreflightInfo>,
 }
 
+#[derive(Debug, Clone)]
+struct ValidatedRuntimeTask {
+    id: String,
+    name: String,
+    source_key: String,
+    target_key: String,
+    watch_mode: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProducerKind {
+    WatchSync,
+    ManualSync,
+    ConflictForceCopy,
+    ConflictRenameThenCopy,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeActiveProducer {
+    producer_id: String,
+    kind: RuntimeProducerKind,
+    target_key: String,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeDispatchSelection {
+    candidate_task_id: Option<String>,
+    next_deadline: Option<Instant>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConflictPreviewPayload {
@@ -717,6 +753,7 @@ struct ConflictPreviewPayload {
 }
 
 const RUNTIME_SYNC_MAX_CONCURRENCY: usize = 2;
+const RUNTIME_DOWNSTREAM_SETTLE_WINDOW: Duration = Duration::from_millis(500);
 
 fn default_verify_after_copy() -> bool {
     true
@@ -2108,16 +2145,8 @@ fn resolved_path_key(path: &str) -> Result<String, String> {
     }
 }
 
-fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
-    struct ValidatedTask {
-        id: String,
-        name: String,
-        source_key: String,
-        target_key: String,
-        watch_mode: bool,
-    }
-
-    let mut validated_tasks: Vec<ValidatedTask> = Vec::with_capacity(tasks.len());
+fn build_validated_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<Vec<ValidatedRuntimeTask>, String> {
+    let mut validated_tasks: Vec<ValidatedRuntimeTask> = Vec::with_capacity(tasks.len());
 
     for task in tasks {
         input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
@@ -2134,7 +2163,7 @@ fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
             ));
         }
 
-        validated_tasks.push(ValidatedTask {
+        validated_tasks.push(ValidatedRuntimeTask {
             id: task.id.clone(),
             name: task.name.clone(),
             source_key,
@@ -2142,6 +2171,79 @@ fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
             watch_mode: task.watch_mode,
         });
     }
+
+    Ok(validated_tasks)
+}
+
+fn build_runtime_watch_upstreams(
+    validated_tasks: &[ValidatedRuntimeTask],
+) -> HashMap<String, HashSet<String>> {
+    let mut upstreams: HashMap<String, HashSet<String>> = HashMap::new();
+
+    for downstream in validated_tasks.iter().filter(|task| task.watch_mode) {
+        let entry = upstreams.entry(downstream.id.clone()).or_default();
+        for upstream in validated_tasks.iter().filter(|task| task.watch_mode) {
+            if upstream.id == downstream.id {
+                continue;
+            }
+
+            if is_path_overlap(&upstream.target_key, &downstream.source_key) {
+                entry.insert(upstream.id.clone());
+            }
+        }
+    }
+
+    upstreams
+}
+
+fn find_runtime_watch_cycle(
+    validated_tasks: &[ValidatedRuntimeTask],
+) -> Option<Vec<String>> {
+    fn visit(
+        task_id: &str,
+        upstreams: &HashMap<String, HashSet<String>>,
+        visiting: &mut Vec<String>,
+        visited: &mut HashSet<String>,
+    ) -> Option<Vec<String>> {
+        if let Some(index) = visiting.iter().position(|candidate| candidate == task_id) {
+            let mut cycle = visiting[index..].to_vec();
+            cycle.push(task_id.to_string());
+            return Some(cycle);
+        }
+
+        if !visited.insert(task_id.to_string()) {
+            return None;
+        }
+
+        visiting.push(task_id.to_string());
+
+        if let Some(task_upstreams) = upstreams.get(task_id) {
+            for upstream_id in task_upstreams {
+                if let Some(cycle) = visit(upstream_id, upstreams, visiting, visited) {
+                    return Some(cycle);
+                }
+            }
+        }
+
+        visiting.pop();
+        None
+    }
+
+    let upstreams = build_runtime_watch_upstreams(validated_tasks);
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut visiting: Vec<String> = Vec::new();
+
+    for task in validated_tasks.iter().filter(|task| task.watch_mode) {
+        if let Some(cycle) = visit(&task.id, &upstreams, &mut visiting, &mut visited) {
+            return Some(cycle);
+        }
+    }
+
+    None
+}
+
+fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
+    let validated_tasks = build_validated_runtime_tasks(tasks)?;
 
     for left_index in 0..validated_tasks.len() {
         for right_index in (left_index + 1)..validated_tasks.len() {
@@ -2157,19 +2259,20 @@ fn validate_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<(), String> {
         }
     }
 
-    for watch_task in validated_tasks.iter().filter(|task| task.watch_mode) {
-        for other in &validated_tasks {
-            if other.id == watch_task.id {
-                continue;
-            }
-
-            if is_path_overlap(&other.target_key, &watch_task.source_key) {
-                return Err(format!(
-                    "Watch loop risk: target of '{}' overlaps watch source of '{}'.",
-                    other.name, watch_task.name
-                ));
-            }
-        }
+    if let Some(cycle) = find_runtime_watch_cycle(&validated_tasks) {
+        let cycle_names = cycle
+            .iter()
+            .map(|task_id| {
+                validated_tasks
+                    .iter()
+                    .find(|task| &task.id == task_id)
+                    .map(|task| task.name.as_str())
+                    .unwrap_or(task_id.as_str())
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        return Err(format!("Watch cycle detected: {cycle_names}"));
     }
 
     Ok(())
@@ -2247,8 +2350,174 @@ async fn release_sync_slot(task_id: &str, state: &AppState) {
     };
 
     if removed {
+        state.runtime_dispatcher_wakeup.notify_waiters();
         state.runtime_sync_slot_released.notify_one();
     }
+}
+
+fn runtime_sync_origin_producer_kind(sync_origin: SyncOrigin) -> RuntimeProducerKind {
+    match sync_origin {
+        SyncOrigin::Manual => RuntimeProducerKind::ManualSync,
+        SyncOrigin::Watch => RuntimeProducerKind::WatchSync,
+    }
+}
+
+fn runtime_sync_producer_id(task_id: &str, sync_origin: SyncOrigin) -> String {
+    let scope = match sync_origin {
+        SyncOrigin::Manual => "manual",
+        SyncOrigin::Watch => "watch",
+    };
+    format!("sync:{scope}:{task_id}")
+}
+
+fn runtime_conflict_producer_id(
+    session_id: &str,
+    item_id: &str,
+    kind: RuntimeProducerKind,
+) -> String {
+    let scope = match kind {
+        RuntimeProducerKind::ConflictForceCopy => "force-copy",
+        RuntimeProducerKind::ConflictRenameThenCopy => "rename-then-copy",
+        RuntimeProducerKind::WatchSync => "watch-sync",
+        RuntimeProducerKind::ManualSync => "manual-sync",
+    };
+    format!("conflict:{scope}:{session_id}:{item_id}")
+}
+
+async fn register_runtime_producer(
+    producer_id: String,
+    kind: RuntimeProducerKind,
+    target_key: String,
+    state: &AppState,
+) {
+    let producer = RuntimeActiveProducer {
+        producer_id: producer_id.clone(),
+        kind,
+        target_key,
+    };
+    let mut producers = state.runtime_active_producers.write().await;
+    producers.insert(producer_id, producer);
+}
+
+fn downstream_watch_task_ids_for_target(
+    validated_tasks: &[ValidatedRuntimeTask],
+    target_key: &str,
+) -> Vec<String> {
+    validated_tasks
+        .iter()
+        .filter(|task| task.watch_mode && is_path_overlap(target_key, &task.source_key))
+        .map(|task| task.id.clone())
+        .collect()
+}
+
+async fn remove_queued_runtime_watch_task(
+    task_id: &str,
+    app: &tauri::AppHandle,
+    state: &AppState,
+    reason: &str,
+) {
+    let queued_removed = {
+        let mut queued = state.queued_sync_tasks.write().await;
+        if !queued.remove(task_id) {
+            false
+        } else {
+            let mut queue = state.runtime_sync_queue.write().await;
+            queue.retain(|queued_task_id| queued_task_id != task_id);
+            true
+        }
+    };
+
+    if queued_removed {
+        emit_runtime_sync_queue_state(app, task_id, false, Some(reason.to_string()));
+    }
+}
+
+async fn block_downstream_watch_tasks_for_target(
+    target_key: &str,
+    app: &tauri::AppHandle,
+    state: &AppState,
+    reason: &str,
+) {
+    let runtime_config = {
+        let config = state.runtime_config.read().await;
+        config.clone()
+    };
+    let Ok(validated_tasks) = build_validated_runtime_tasks(&runtime_config.tasks) else {
+        return;
+    };
+    let overlapping_watch_task_ids = downstream_watch_task_ids_for_target(&validated_tasks, target_key);
+
+    {
+        let mut settle = state.runtime_chain_settle_until.write().await;
+        for task_id in &overlapping_watch_task_ids {
+            settle.remove(task_id);
+        }
+    }
+
+    for task_id in &overlapping_watch_task_ids {
+        {
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.remove(task_id);
+        }
+        remove_queued_runtime_watch_task(task_id, app, state, reason).await;
+    }
+}
+
+async fn mark_downstream_watch_tasks_settle_for_target(
+    target_key: &str,
+    state: &AppState,
+) {
+    let runtime_config = {
+        let config = state.runtime_config.read().await;
+        config.clone()
+    };
+    let Ok(validated_tasks) = build_validated_runtime_tasks(&runtime_config.tasks) else {
+        return;
+    };
+    let overlapping_watch_task_ids = downstream_watch_task_ids_for_target(&validated_tasks, target_key);
+    if overlapping_watch_task_ids.is_empty() {
+        return;
+    }
+
+    let deadline = Instant::now() + RUNTIME_DOWNSTREAM_SETTLE_WINDOW;
+    let mut settle = state.runtime_chain_settle_until.write().await;
+    for task_id in overlapping_watch_task_ids {
+        settle
+            .entry(task_id)
+            .and_modify(|current| {
+                if deadline > *current {
+                    *current = deadline;
+                }
+            })
+            .or_insert(deadline);
+    }
+}
+
+async fn finish_runtime_producer(
+    producer_id: &str,
+    target_key: &str,
+    success: bool,
+    app: &tauri::AppHandle,
+    state: &AppState,
+) {
+    {
+        let mut producers = state.runtime_active_producers.write().await;
+        producers.remove(producer_id);
+    }
+
+    if success {
+        mark_downstream_watch_tasks_settle_for_target(target_key, state).await;
+    } else {
+        block_downstream_watch_tasks_for_target(
+            target_key,
+            app,
+            state,
+            "Downstream watch sync blocked because the preceding write did not complete successfully.",
+        )
+        .await;
+    }
+
+    state.runtime_dispatcher_wakeup.notify_waiters();
 }
 
 async fn enqueue_runtime_sync_task_internal(
@@ -2272,6 +2541,7 @@ async fn enqueue_runtime_sync_task_internal(
 
     let mut queue = state.runtime_sync_queue.write().await;
     queue.push_back(task_id.to_string());
+    state.runtime_dispatcher_wakeup.notify_waiters();
 
     RuntimeSyncEnqueueResult::Enqueued
 }
@@ -2289,6 +2559,7 @@ async fn enqueue_runtime_sync_task(
     enqueue_result
 }
 
+#[allow(dead_code)]
 async fn dequeue_runtime_sync_task(state: &AppState) -> Option<String> {
     let mut queued_set = state.queued_sync_tasks.write().await;
     let mut queue = state.runtime_sync_queue.write().await;
@@ -2310,10 +2581,86 @@ async fn remove_runtime_sync_task_state(task_id: &str, state: &AppState) {
         pending.remove(task_id);
     }
 
+    {
+        let mut settle = state.runtime_chain_settle_until.write().await;
+        settle.remove(task_id);
+    }
+
     let mut queued = state.queued_sync_tasks.write().await;
     let mut queue = state.runtime_sync_queue.write().await;
     queued.remove(task_id);
     queue.retain(|queued_task_id| queued_task_id != task_id);
+}
+
+fn select_runtime_dispatch_candidate(
+    queue: &VecDeque<String>,
+    queued_set: &HashSet<String>,
+    syncing_tasks: &HashSet<String>,
+    watch_upstreams: &HashMap<String, HashSet<String>>,
+    source_keys: &HashMap<String, String>,
+    active_producers: &HashMap<String, RuntimeActiveProducer>,
+    settle_until: &HashMap<String, Instant>,
+    now: Instant,
+) -> RuntimeDispatchSelection {
+    let mut next_deadline: Option<Instant> = None;
+
+    for task_id in queue {
+        let Some(source_key) = source_keys.get(task_id) else {
+            continue;
+        };
+
+        let blocked_by_upstream = watch_upstreams
+            .get(task_id)
+            .into_iter()
+            .flatten()
+            .any(|upstream_id| syncing_tasks.contains(upstream_id) || queued_set.contains(upstream_id));
+        if blocked_by_upstream {
+            continue;
+        }
+
+        let blocked_by_producer = active_producers.values().any(|producer| {
+            let _ = &producer.producer_id;
+            let _ = producer.kind;
+            is_path_overlap(&producer.target_key, source_key)
+        });
+        if blocked_by_producer {
+            continue;
+        }
+
+        if let Some(deadline) = settle_until.get(task_id) {
+            if *deadline > now {
+                next_deadline = match next_deadline {
+                    Some(current) if current <= *deadline => Some(current),
+                    _ => Some(*deadline),
+                };
+                continue;
+            }
+        }
+
+        return RuntimeDispatchSelection {
+            candidate_task_id: Some(task_id.clone()),
+            next_deadline,
+        };
+    }
+
+    RuntimeDispatchSelection {
+        candidate_task_id: None,
+        next_deadline,
+    }
+}
+
+async fn dequeue_runtime_sync_task_by_id(task_id: &str, state: &AppState) -> bool {
+    let removed = {
+        let mut queued_set = state.queued_sync_tasks.write().await;
+        queued_set.remove(task_id)
+    };
+    if !removed {
+        return false;
+    }
+
+    let mut queue = state.runtime_sync_queue.write().await;
+    queue.retain(|queued_task_id| queued_task_id != task_id);
+    true
 }
 
 fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
@@ -2333,28 +2680,79 @@ fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
         }
 
         loop {
-            let current_syncing = {
-                let syncing = state.syncing_tasks.read().await;
-                syncing.len()
+            let runtime_config = {
+                let config = state.runtime_config.read().await;
+                config.clone()
             };
 
-            let has_queued = {
+            let validated_tasks = match build_validated_runtime_tasks(&runtime_config.tasks) {
+                Ok(tasks) => tasks,
+                Err(_) => break,
+            };
+            let watch_upstreams = build_runtime_watch_upstreams(&validated_tasks);
+            let source_keys: HashMap<String, String> = validated_tasks
+                .iter()
+                .filter(|task| task.watch_mode)
+                .map(|task| (task.id.clone(), task.source_key.clone()))
+                .collect();
+            let queue = {
                 let queue = state.runtime_sync_queue.read().await;
-                !queue.is_empty()
+                queue.clone()
             };
-
-            if should_wait_for_runtime_slot(has_queued, current_syncing) {
-                state.runtime_sync_slot_released.notified().await;
-                continue;
-            }
-
+            let has_queued = !queue.is_empty();
             if !has_queued {
                 break;
             }
-
-            let Some(task_id) = dequeue_runtime_sync_task(&state).await else {
-                break;
+            let queued_set = {
+                let queued_set = state.queued_sync_tasks.read().await;
+                queued_set.clone()
             };
+            let syncing_tasks = {
+                let syncing = state.syncing_tasks.read().await;
+                syncing.clone()
+            };
+            let current_syncing = syncing_tasks.len();
+            let active_producers = {
+                let producers = state.runtime_active_producers.read().await;
+                producers.clone()
+            };
+            let settle_until = {
+                let settle = state.runtime_chain_settle_until.read().await;
+                settle.clone()
+            };
+
+            if should_wait_for_runtime_slot(has_queued, current_syncing) {
+                state.runtime_dispatcher_wakeup.notified().await;
+                continue;
+            }
+
+            let selection = select_runtime_dispatch_candidate(
+                &queue,
+                &queued_set,
+                &syncing_tasks,
+                &watch_upstreams,
+                &source_keys,
+                &active_producers,
+                &settle_until,
+                Instant::now(),
+            );
+
+            let Some(task_id) = selection.candidate_task_id else {
+                if let Some(deadline) = selection.next_deadline {
+                    let sleep_for = deadline.saturating_duration_since(Instant::now());
+                    tokio::select! {
+                        _ = tokio::time::sleep(sleep_for) => {}
+                        _ = state.runtime_dispatcher_wakeup.notified() => {}
+                    }
+                } else {
+                    state.runtime_dispatcher_wakeup.notified().await;
+                }
+                continue;
+            };
+
+            if !dequeue_runtime_sync_task_by_id(&task_id, &state).await {
+                continue;
+            }
 
             emit_runtime_sync_queue_state(&app, &task_id, false, None);
 
@@ -2765,229 +3163,251 @@ async fn execute_sync_internal(
         input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
         input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
         input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
-        let target_preflight = preflight_target_path(&target, true).await?;
+        let target_key = resolved_path_key(target.to_str().unwrap_or(""))?;
+        let producer_id = runtime_sync_producer_id(&task_id, sync_origin);
+        register_runtime_producer(
+            producer_id.clone(),
+            runtime_sync_origin_producer_kind(sync_origin),
+            target_key.clone(),
+            &state,
+        )
+        .await;
+        let sync_result = async {
+            let target_preflight = preflight_target_path(&target, true).await?;
 
-        // 취소 토큰 생성 및 등록
-        let cancel_token = CancellationToken::new();
-        if let Some(external_cancel_token) = external_cancel_token {
-            let forward_cancel = cancel_token.clone();
-            tauri::async_runtime::spawn(async move {
-                external_cancel_token.cancelled().await;
-                forward_cancel.cancel();
-            });
-        }
-        {
-            let mut tokens = state.cancel_tokens.write().await;
-            tokens.insert(task_id.clone(), cancel_token.clone());
-        }
+            // 취소 토큰 생성 및 등록
+            let cancel_token = CancellationToken::new();
+            if let Some(external_cancel_token) = external_cancel_token {
+                let forward_cancel = cancel_token.clone();
+                tauri::async_runtime::spawn(async move {
+                    external_cancel_token.cancelled().await;
+                    forward_cancel.cancel();
+                });
+            }
+            {
+                let mut tokens = state.cancel_tokens.write().await;
+                tokens.insert(task_id.clone(), cancel_token.clone());
+            }
 
-        state.log_manager.log_with_category(
-            "info",
-            "Sync started",
-            Some(task_id.clone()),
-            LogCategory::SyncStarted,
-        );
-        if target_preflight.kind == TargetPreflightKind::CreatedDirectory {
             state.log_manager.log_with_category(
                 "info",
-                &format!("Target directory created: {}", target_preflight.path),
+                "Sync started",
                 Some(task_id.clone()),
-                LogCategory::Other,
+                LogCategory::SyncStarted,
             );
-        }
+            if target_preflight.kind == TargetPreflightKind::CreatedDirectory {
+                state.log_manager.log_with_category(
+                    "info",
+                    &format!("Target directory created: {}", target_preflight.path),
+                    Some(task_id.clone()),
+                    LogCategory::Other,
+                );
+            }
 
-        let engine = SyncEngine::new(source.clone(), target.clone());
-        let options = SyncOptions {
-            checksum_mode,
-            preserve_permissions: true,
-            preserve_times: true,
-            verify_after_copy,
-            exclude_patterns,
-        };
+            let engine = SyncEngine::new(source.clone(), target.clone());
+            let options = SyncOptions {
+                checksum_mode,
+                preserve_permissions: true,
+                preserve_times: true,
+                verify_after_copy,
+                exclude_patterns,
+            };
 
-        let target_newer_conflicts = engine
-            .target_newer_conflicts(&options)
-            .await
-            .map_err(|e| format!("{:#}", e))?;
+            let target_newer_conflicts = engine
+                .target_newer_conflicts(&options)
+                .await
+                .map_err(|e| format!("{:#}", e))?;
 
-        // 동기화 실행 (취소 토큰과 함께)
-        let task_id_clone = task_id.clone();
-        let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
-        let app_clone = app.clone();
+            // 동기화 실행 (취소 토큰과 함께)
+            let task_id_clone = task_id.clone();
+            let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
+            let app_clone = app.clone();
 
-        #[derive(serde::Serialize, Clone)]
-        #[serde(rename_all = "camelCase")]
-        struct ProgressEvent {
-            task_id: String,
-            message: String,
-            current: u64,
-            total: u64,
-            processed_bytes: u64,
-            total_bytes: u64,
-            current_file_bytes_copied: u64,
-            current_file_total_bytes: u64,
-        }
+            #[derive(serde::Serialize, Clone)]
+            #[serde(rename_all = "camelCase")]
+            struct ProgressEvent {
+                task_id: String,
+                message: String,
+                current: u64,
+                total: u64,
+                processed_bytes: u64,
+                total_bytes: u64,
+                current_file_bytes_copied: u64,
+                current_file_total_bytes: u64,
+            }
 
-        let progress_state = SyncProgressState::new();
-        let log_manager = state.log_manager.clone();
-        let task_id_for_log = task_id.clone();
-        let app_for_log = app.clone(); // For log events
-        let mcp_jobs = state.mcp_jobs.clone();
-        let mcp_job_id_for_progress = mcp_job_id.clone();
+            let progress_state = SyncProgressState::new();
+            let log_manager = state.log_manager.clone();
+            let task_id_for_log = task_id.clone();
+            let app_for_log = app.clone(); // For log events
+            let mcp_jobs = state.mcp_jobs.clone();
+            let mcp_job_id_for_progress = mcp_job_id.clone();
 
-        // Create clones for the closure
-        let progress_state_closure = progress_state.clone();
-        let log_manager_closure = log_manager.clone();
+            // Create clones for the closure
+            let progress_state_closure = progress_state.clone();
+            let log_manager_closure = log_manager.clone();
 
-        let result = tokio::select! {
-            res = engine.sync_files(&options, move |progress| {
-                 // 1. Detailed Logging: Batching
-                if let Some(current) = &progress.current_file {
-                    if let Some(category) = progress_phase_to_log_category(&progress.phase) {
-                        if progress_state_closure.should_update_file(&category, current) {
-                            let now = chrono::Utc::now().to_rfc3339();
-                            let message = match &category {
-                                LogCategory::FileCopied => {
-                                    let file_size = format_bytes(progress.current_file_total_bytes);
-                                    format!("Copy: {} ({})", current, file_size)
+            let result = tokio::select! {
+                res = engine.sync_files(&options, move |progress| {
+                     // 1. Detailed Logging: Batching
+                    if let Some(current) = &progress.current_file {
+                        if let Some(category) = progress_phase_to_log_category(&progress.phase) {
+                            if progress_state_closure.should_update_file(&category, current) {
+                                let now = chrono::Utc::now().to_rfc3339();
+                                let message = match &category {
+                                    LogCategory::FileCopied => {
+                                        let file_size = format_bytes(progress.current_file_total_bytes);
+                                        format!("Copy: {} ({})", current, file_size)
+                                    }
+                                    LogCategory::FileDeleted => format!("Delete: {}", current),
+                                    _ => current.to_string(),
+                                };
+                                let entry = logging::LogEntry {
+                                    id: now.clone(),
+                                    timestamp: now,
+                                    level: "info".to_string(),
+                                    message,
+                                    task_id: Some(task_id_for_log.clone()),
+                                    category,
+                                };
+
+                                if let Some(batch) = progress_state_closure.add_log(entry) {
+                                    log_manager_closure.log_batch_entries(
+                                        batch,
+                                        Some(task_id_for_log.clone()),
+                                        Some(&app_for_log),
+                                    );
                                 }
-                                LogCategory::FileDeleted => format!("Delete: {}", current),
-                                _ => current.to_string(),
-                            };
-                            let entry = logging::LogEntry {
-                                id: now.clone(),
-                                timestamp: now,
-                                level: "info".to_string(),
-                                message,
-                                task_id: Some(task_id_for_log.clone()),
-                                category,
-                            };
-
-                            if let Some(batch) = progress_state_closure.add_log(entry) {
-                                log_manager_closure.log_batch_entries(
-                                    batch,
-                                    Some(task_id_for_log.clone()),
-                                    Some(&app_for_log),
-                                );
                             }
                         }
                     }
-                }
+                    // 2. UI Throttling: 100ms
+                    let should_emit = progress_state_closure.should_emit_progress();
 
-                 // 2. UI Throttling: 100ms
-                let should_emit = progress_state_closure.should_emit_progress();
-
-                if should_emit || progress.processed_files == progress.total_files {
-                     let event = ProgressEvent {
-                        task_id: task_id_for_event.clone(),
-                        message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
-                        current: progress.processed_files,
-                        total: progress.total_files,
-                        processed_bytes: progress.processed_bytes,
-                        total_bytes: progress.total_bytes,
-                        current_file_bytes_copied: progress.bytes_copied_current_file,
-                        current_file_total_bytes: progress.current_file_total_bytes,
-                    };
-                    let _ = app_clone.emit("sync-progress", &event);
-                    if let Some(job_id) = mcp_job_id_for_progress.as_deref() {
-                        mcp_jobs.try_update_progress(
-                            job_id,
-                            McpJobProgress {
-                                message: Some(event.message.clone()),
-                                current: event.current,
-                                total: event.total,
-                                processed_bytes: event.processed_bytes,
-                                total_bytes: event.total_bytes,
-                                current_file_bytes_copied: event.current_file_bytes_copied,
-                                current_file_total_bytes: event.current_file_total_bytes,
-                            },
-                            unix_now_ms(),
-                        );
+                    if should_emit || progress.processed_files == progress.total_files {
+                         let event = ProgressEvent {
+                            task_id: task_id_for_event.clone(),
+                            message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
+                            current: progress.processed_files,
+                            total: progress.total_files,
+                            processed_bytes: progress.processed_bytes,
+                            total_bytes: progress.total_bytes,
+                            current_file_bytes_copied: progress.bytes_copied_current_file,
+                            current_file_total_bytes: progress.current_file_total_bytes,
+                        };
+                        let _ = app_clone.emit("sync-progress", &event);
+                        if let Some(job_id) = mcp_job_id_for_progress.as_deref() {
+                            mcp_jobs.try_update_progress(
+                                job_id,
+                                McpJobProgress {
+                                    message: Some(event.message.clone()),
+                                    current: event.current,
+                                    total: event.total,
+                                    processed_bytes: event.processed_bytes,
+                                    total_bytes: event.total_bytes,
+                                    current_file_bytes_copied: event.current_file_bytes_copied,
+                                    current_file_total_bytes: event.current_file_total_bytes,
+                                },
+                                unix_now_ms(),
+                            );
+                        }
                     }
+                }) => {
+                    // Flush remaining logs on completion
+                    if let Some(batch) = progress_state.flush_logs() {
+                        log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
+                    }
+                    res
+                },
+                _ = cancel_token.cancelled() => {
+                     // Flush logs on cancel too
+                    if let Some(batch) = progress_state.flush_logs() {
+                        log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
+                    }
+                    Err(anyhow::anyhow!("Operation cancelled by user"))
                 }
-            }) => {
-                // Flush remaining logs on completion
-                if let Some(batch) = progress_state.flush_logs() {
-                    log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
-                }
-                res
-            },
-            _ = cancel_token.cancelled() => {
-                 // Flush logs on cancel too
-                if let Some(batch) = progress_state.flush_logs() {
-                    log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
-                }
-                Err(anyhow::anyhow!("Operation cancelled by user"))
+            };
+
+            // 취소 토큰 정리
+            {
+                let mut tokens = state.cancel_tokens.write().await;
+                tokens.remove(&task_id_clone);
             }
-        };
 
-        // 취소 토큰 정리
-        {
-            let mut tokens = state.cancel_tokens.write().await;
-            tokens.remove(&task_id_clone);
-        }
-
-        match &result {
-            Ok(res) => {
-                let unit_system = state.runtime_config.read().await.settings.data_unit_system;
-                let msg = format!(
-                    "Sync completed.\nCopied: {} files\nData transferred: {}",
-                    format_number(res.files_copied),
-                    format_bytes_with_unit(res.bytes_copied, unit_system)
-                );
-                state.log_manager.log_with_category(
-                    "success",
-                    &msg,
-                    Some(task_id.clone()),
-                    LogCategory::SyncCompleted,
-                );
-
-                let conflict_session_id = create_conflict_review_session(
-                    &task_id,
-                    &task_name,
-                    &source,
-                    &target,
-                    &target_newer_conflicts,
-                    sync_origin,
-                    &state,
-                    &app,
-                )
-                .await;
-                if conflict_session_id.is_some() && sync_origin == SyncOrigin::Watch {
-                    maybe_notify_conflict_for_watch(&app, &task_name, target_newer_conflicts.len())
-                        .await;
-                }
-
-                Ok(SyncExecutionResult {
-                    sync_result: res.clone(),
-                    conflict_session_id,
-                    conflict_count: target_newer_conflicts.len(),
-                    has_pending_conflicts: !target_newer_conflicts.is_empty(),
-                    target_preflight: Some(target_preflight.clone()),
-                })
-            }
-            Err(e) => {
-                let err_text = format!("{:#}", e);
-                if err_text.contains("cancelled by user") || err_text.contains("Operation cancelled by user") {
-                    state.log_manager.log_with_category(
-                        "warning",
-                        "Sync cancelled by user",
-                        Some(task_id.clone()),
-                        LogCategory::SyncError,
+            match &result {
+                Ok(res) => {
+                    let unit_system = state.runtime_config.read().await.settings.data_unit_system;
+                    let msg = format!(
+                        "Sync completed.\nCopied: {} files\nData transferred: {}",
+                        format_number(res.files_copied),
+                        format_bytes_with_unit(res.bytes_copied, unit_system)
                     );
-                    Err("Operation cancelled by user".to_string())
-                } else {
-                    let msg = format!("Sync failed: {err_text}");
                     state.log_manager.log_with_category(
-                        "error",
+                        "success",
                         &msg,
                         Some(task_id.clone()),
-                        LogCategory::SyncError,
+                        LogCategory::SyncCompleted,
                     );
-                    Err(err_text)
+
+                    let conflict_session_id = create_conflict_review_session(
+                        &task_id,
+                        &task_name,
+                        &source,
+                        &target,
+                        &target_newer_conflicts,
+                        sync_origin,
+                        &state,
+                        &app,
+                    )
+                    .await;
+                    if conflict_session_id.is_some() && sync_origin == SyncOrigin::Watch {
+                        maybe_notify_conflict_for_watch(&app, &task_name, target_newer_conflicts.len())
+                            .await;
+                    }
+
+                    Ok(SyncExecutionResult {
+                        sync_result: res.clone(),
+                        conflict_session_id,
+                        conflict_count: target_newer_conflicts.len(),
+                        has_pending_conflicts: !target_newer_conflicts.is_empty(),
+                        target_preflight: Some(target_preflight.clone()),
+                    })
+                }
+                Err(e) => {
+                    let err_text = format!("{:#}", e);
+                    if err_text.contains("cancelled by user") || err_text.contains("Operation cancelled by user") {
+                        state.log_manager.log_with_category(
+                            "warning",
+                            "Sync cancelled by user",
+                            Some(task_id.clone()),
+                            LogCategory::SyncError,
+                        );
+                        Err("Operation cancelled by user".to_string())
+                    } else {
+                        let msg = format!("Sync failed: {err_text}");
+                        state.log_manager.log_with_category(
+                            "error",
+                            &msg,
+                            Some(task_id.clone()),
+                            LogCategory::SyncError,
+                        );
+                        Err(err_text)
+                    }
                 }
             }
         }
+        .await;
+
+        finish_runtime_producer(
+            &producer_id,
+            &target_key,
+            sync_result.is_ok(),
+            &app,
+            &state,
+        )
+        .await;
+
+        sync_result
     }
     .await;
 
@@ -4383,88 +4803,143 @@ async fn resolve_conflict_items(
                 ConflictItemStatus::Skipped,
                 Some("User chose to skip this conflict item.".to_string()),
             )),
-            ConflictResolutionAction::ForceCopy => copy_file_preserve(&source_path, &target_path)
-                .await
-                .map(|_| {
-                    (
-                        ConflictItemStatus::ForceCopied,
-                        Some("Copied source file to target (force overwrite).".to_string()),
-                    )
-                }),
-            ConflictResolutionAction::RenameThenCopy => {
-                let source_path = source_path.clone();
-                let target_path = target_path.clone();
-                let parent = match target_path.parent() {
-                    Some(value) => value.to_path_buf(),
-                    None => Err("Target file parent directory is invalid".to_string())?,
-                };
-                tokio::fs::create_dir_all(&parent)
-                    .await
-                    .map_err(|e| format!("Failed to ensure target parent directory: {e}"))?;
+            ConflictResolutionAction::ForceCopy => {
+                let producer_id = runtime_conflict_producer_id(
+                    &session_id,
+                    &request.item_id,
+                    RuntimeProducerKind::ConflictForceCopy,
+                );
+                let target_key = resolved_path_key(target_path.to_string_lossy().as_ref())?;
+                register_runtime_producer(
+                    producer_id.clone(),
+                    RuntimeProducerKind::ConflictForceCopy,
+                    target_key.clone(),
+                    state.inner(),
+                )
+                .await;
 
-                if tokio::fs::metadata(&target_path).await.is_err() {
-                    Err("Target file does not exist for safe copy rename".to_string())?;
-                }
-
-                let file_name = source_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("file");
-                let (stem, ext) = match file_name.rsplit_once('.') {
-                    Some((left, right)) if !left.is_empty() && !right.is_empty() => {
-                        (left.to_string(), Some(right.to_string()))
-                    }
-                    _ => (file_name.to_string(), None),
-                };
-                let timestamp = safe_copy_timestamp_label(item_snapshot.source.modified_unix_ms);
-
-                let mut renamed_to: Option<PathBuf> = None;
-                for attempt in 0..20u64 {
-                    let seq = state.conflict_review_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                    let seed = (unix_now_ms() as u64)
-                        .wrapping_add(seq)
-                        .wrapping_add(attempt);
-                    let suffix = random_suffix_token(seed);
-                    let backup_name = if let Some(ext) = ext.as_deref() {
-                        format!("{stem}_{timestamp}_{suffix}.{ext}")
-                    } else {
-                        format!("{stem}_{timestamp}_{suffix}")
-                    };
-                    let backup_path = parent.as_path().join(backup_name);
-                    if tokio::fs::metadata(&backup_path).await.is_ok() {
-                        continue;
-                    }
-
-                    tokio::fs::rename(&target_path, &backup_path)
-                        .await
-                        .map_err(|e| format!("Failed to rename target file: {e}"))?;
-                    renamed_to = Some(backup_path);
-                    break;
-                }
-
-                let renamed_to = match renamed_to {
-                    Some(value) => value,
-                    None => Err("Failed to generate non-conflicting backup file name".to_string())?,
-                };
-
-                copy_file_preserve(&source_path, &target_path)
+                let apply_result = copy_file_preserve(&source_path, &target_path)
                     .await
                     .map(|_| {
                         (
-                            ConflictItemStatus::SafeCopied,
-                            Some(format!(
-                                "Renamed existing target to '{}' and copied source file.",
-                                renamed_to.to_string_lossy()
-                            )),
+                            ConflictItemStatus::ForceCopied,
+                            Some("Copied source file to target (force overwrite).".to_string()),
                         )
-                    })
-                    .map_err(|e| {
-                        format!(
-                            "Target was renamed to '{}' but source copy failed: {}",
-                            renamed_to.to_string_lossy(),
-                            e
-                        )
-                    })
+                    });
+
+                finish_runtime_producer(
+                    &producer_id,
+                    &target_key,
+                    apply_result.is_ok(),
+                    &app,
+                    state.inner(),
+                )
+                .await;
+
+                apply_result
+            }
+            ConflictResolutionAction::RenameThenCopy => {
+                let producer_id = runtime_conflict_producer_id(
+                    &session_id,
+                    &request.item_id,
+                    RuntimeProducerKind::ConflictRenameThenCopy,
+                );
+                let target_key = resolved_path_key(target_path.to_string_lossy().as_ref())?;
+                register_runtime_producer(
+                    producer_id.clone(),
+                    RuntimeProducerKind::ConflictRenameThenCopy,
+                    target_key.clone(),
+                    state.inner(),
+                )
+                .await;
+
+                let apply_result = async {
+                    let source_path = source_path.clone();
+                    let target_path = target_path.clone();
+                    let parent = match target_path.parent() {
+                        Some(value) => value.to_path_buf(),
+                        None => Err("Target file parent directory is invalid".to_string())?,
+                    };
+                    tokio::fs::create_dir_all(&parent)
+                        .await
+                        .map_err(|e| format!("Failed to ensure target parent directory: {e}"))?;
+
+                    if tokio::fs::metadata(&target_path).await.is_err() {
+                        Err("Target file does not exist for safe copy rename".to_string())?;
+                    }
+
+                    let file_name = source_path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("file");
+                    let (stem, ext) = match file_name.rsplit_once('.') {
+                        Some((left, right)) if !left.is_empty() && !right.is_empty() => {
+                            (left.to_string(), Some(right.to_string()))
+                        }
+                        _ => (file_name.to_string(), None),
+                    };
+                    let timestamp = safe_copy_timestamp_label(item_snapshot.source.modified_unix_ms);
+
+                    let mut renamed_to: Option<PathBuf> = None;
+                    for attempt in 0..20u64 {
+                        let seq = state.conflict_review_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                        let seed = (unix_now_ms() as u64)
+                            .wrapping_add(seq)
+                            .wrapping_add(attempt);
+                        let suffix = random_suffix_token(seed);
+                        let backup_name = if let Some(ext) = ext.as_deref() {
+                            format!("{stem}_{timestamp}_{suffix}.{ext}")
+                        } else {
+                            format!("{stem}_{timestamp}_{suffix}")
+                        };
+                        let backup_path = parent.as_path().join(backup_name);
+                        if tokio::fs::metadata(&backup_path).await.is_ok() {
+                            continue;
+                        }
+
+                        tokio::fs::rename(&target_path, &backup_path)
+                            .await
+                            .map_err(|e| format!("Failed to rename target file: {e}"))?;
+                        renamed_to = Some(backup_path);
+                        break;
+                    }
+
+                    let renamed_to = match renamed_to {
+                        Some(value) => value,
+                        None => Err("Failed to generate non-conflicting backup file name".to_string())?,
+                    };
+
+                    copy_file_preserve(&source_path, &target_path)
+                        .await
+                        .map(|_| {
+                            (
+                                ConflictItemStatus::SafeCopied,
+                                Some(format!(
+                                    "Renamed existing target to '{}' and copied source file.",
+                                    renamed_to.to_string_lossy()
+                                )),
+                            )
+                        })
+                        .map_err(|e| {
+                            format!(
+                                "Target was renamed to '{}' but source copy failed: {}",
+                                renamed_to.to_string_lossy(),
+                                e
+                            )
+                        })
+                }
+                .await;
+
+                finish_runtime_producer(
+                    &producer_id,
+                    &target_key,
+                    apply_result.is_ok(),
+                    &app,
+                    state.inner(),
+                )
+                .await;
+
+                apply_result
             }
         };
 
@@ -6232,7 +6707,10 @@ pub fn run() {
             queued_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_pending_sync_tasks: Arc::new(RwLock::new(HashSet::new())),
             runtime_dispatcher_running: Arc::new(Mutex::new(false)),
+            runtime_dispatcher_wakeup: Arc::new(Notify::new()),
             runtime_sync_slot_released: Arc::new(Notify::new()),
+            runtime_chain_settle_until: Arc::new(RwLock::new(HashMap::new())),
+            runtime_active_producers: Arc::new(RwLock::new(HashMap::new())),
             runtime_initial_watch_bootstrapped: Arc::new(AtomicBool::new(false)),
             runtime_config_apply_lock: Arc::new(Mutex::new(())),
             runtime_watch_sources: Arc::new(RwLock::new(HashMap::new())),

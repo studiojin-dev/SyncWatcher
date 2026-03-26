@@ -107,7 +107,7 @@
         "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea."
       },
       "warnings": {
-        "targetInWatchedSource": "El destino se superpone con otro origen vigilado y puede causar bucles."
+        "targetInWatchedSource": "Se permiten las cadenas watch acíclicas, pero el downstream watch sync espera a que las escrituras superpuestas terminen correctamente."
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -275,7 +275,7 @@
           "description": "La validación runtime bloquea configuraciones de rutas inseguras.",
           "withinTaskOverlap": "Dentro de una tarea, source y target no pueden solaparse (misma ruta o relación padre/hijo).",
           "targetUniqueness": "Entre tareas, los targets deben ser únicos y no pueden ser padre/hijo entre sí.",
-          "watchLoopRisk": "Si un watch source se solapa con el target de otra tarea, la configuración se rechaza para evitar bucles."
+          "watchLoopRisk": "Solo se rechazan los ciclos reales de watch. Las cadenas unidireccionales se permiten y el downstream watch sync empieza después de que la escritura previa termine con éxito y pase una breve ventana de settle."
         },
         "conflictOrphan": {
           "title": "Flujo de Conflicto / Limpieza",

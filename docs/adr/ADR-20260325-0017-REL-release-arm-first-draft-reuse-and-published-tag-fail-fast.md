@@ -1,9 +1,8 @@
 # ADR-20260325-0017-REL: ARM-first release orchestration with draft reuse and published-tag fail-fast
-
-- Status: Accepted
-- Date: 2026-03-25
-- Tags: release, ci, github-actions, tauri, updater, macos
-- TL;DR: Create or reuse one draft release per tag, let the ARM build author the canonical updater metadata first, append x64 assets afterward, and fail fast when a tag already has a published release.
+Status: Accepted
+Date: 2026-03-25
+Tags: release, ci, github-actions, tauri, updater, macos
+TL;DR: Create or reuse one draft release per tag, let the ARM build author the canonical updater metadata first, append x64 assets afterward, and fail fast when a tag already has a published release.
 
 ## Context
 

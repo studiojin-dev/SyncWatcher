@@ -1,9 +1,8 @@
-# ADR-20260227-0006: Target-newer conflict hash-equivalence exception
-
-- Status: Accepted
-- Date: 2026-02-27
-- Tags: sync-task, safety, conflict-review, checksum, macos, tauri
-- TL;DR: When target mtime is newer, classify as conflict only if content differs; if source and target are hash-identical, treat as no-op.
+# ADR-20260227-0006-CHE: Target-newer conflict hash-equivalence exception
+Status: Accepted
+Date: 2026-02-27
+Tags: sync-task, safety, conflict-review, checksum, macos, tauri
+TL;DR: When target mtime is newer, classify as conflict only if content differs; if source and target are hash-identical, treat as no-op.
 
 ## Context
 

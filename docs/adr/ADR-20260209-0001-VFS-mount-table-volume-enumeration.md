@@ -1,9 +1,8 @@
-# ADR-20260209-0001: Dashboard volume source of truth
-
-- Status: Accepted
-- Date: 2026-02-09
-- Tags: dashboard, storage, macos, volume-discovery, units
-- TL;DR: Stop scanning `/Volumes`; use `getmntinfo_r_np` as source of truth, and apply a single app-wide capacity unit policy (default binary/IEC).
+# ADR-20260209-0001-VFS: Dashboard volume source of truth
+Status: Accepted
+Date: 2026-02-09
+Tags: dashboard, storage, macos, volume-discovery, units
+TL;DR: Stop scanning `/Volumes`; use `getmntinfo_r_np` as source of truth, and apply a single app-wide capacity unit policy (default binary/IEC).
 
 ## Context
 

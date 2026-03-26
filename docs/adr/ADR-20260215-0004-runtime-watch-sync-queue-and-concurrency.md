@@ -1,9 +1,8 @@
-# ADR-20260215-0004: Runtime watch-mode initial sync queue and concurrency limit
-
-- Status: Accepted
-- Date: 2026-02-15
-- Tags: sync-task, watch-mode, runtime, concurrency, reliability, macos
-- TL;DR: Runtime watch sync uses a bounded queue (max parallelism 2), coalesces watch events during active sync into one replay, and serializes overlapping runtime config applies.
+# ADR-20260215-0004-RTQ: Runtime watch-mode initial sync queue and concurrency limit
+Status: Accepted
+Date: 2026-02-15
+Tags: sync-task, watch-mode, runtime, concurrency, reliability, macos
+TL;DR: Runtime watch sync uses a bounded queue (max parallelism 2), coalesces watch events during active sync into one replay, and serializes overlapping runtime config applies.
 
 ## Context
 

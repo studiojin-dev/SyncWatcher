@@ -107,7 +107,7 @@
         "targetSubdirConflict": "目标不能成为其他任务目标的父/子路径。"
       },
       "warnings": {
-        "targetInWatchedSource": "目标与其他监控任务的源路径重叠，可能导致同步循环。"
+        "targetInWatchedSource": "允许无环的 watch 链路，但 downstream watch sync 会等待重叠写入成功完成后再开始。"
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -275,7 +275,7 @@
           "description": "保存任务时会进行运行时校验并阻止不安全路径组合。",
           "withinTaskOverlap": "单个任务内 source 与 target 不能重叠（同一路径或父子关系）。",
           "targetUniqueness": "多个任务之间 target 必须唯一，且不能是父子关系。",
-          "watchLoopRisk": "若某个 watch source 与其他任务 target 重叠，将拒绝该配置以避免同步循环。"
+          "watchLoopRisk": "只会拒绝真实的 watch cycle。允许单向链路，downstream watch sync 会在上游写入成功并经过短暂 settle window 后启动。"
         },
         "conflictOrphan": {
           "title": "冲突 / 清理工作流",

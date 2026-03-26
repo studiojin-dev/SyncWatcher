@@ -1,9 +1,8 @@
-# ADR-20260301-0008: watchMode zero-copy auto-unmount deferred confirmation
-
-- Status: Accepted
-- Date: 2026-03-01
-- Tags: watch-mode, auto-unmount, ux, notification, safety, macos
-- TL;DR: When watch sync copies zero files, replace immediate auto-unmount with notification + deferred in-app confirmation, and unmount only after explicit approval.
+# ADR-20260301-0008-AUM: watchMode zero-copy auto-unmount deferred confirmation
+Status: Accepted
+Date: 2026-03-01
+Tags: watch-mode, auto-unmount, ux, notification, safety, macos
+TL;DR: When watch sync copies zero files, replace immediate auto-unmount with notification + deferred in-app confirmation, and unmount only after explicit approval.
 
 ## Context
 

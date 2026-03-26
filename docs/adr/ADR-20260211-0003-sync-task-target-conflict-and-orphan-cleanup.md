@@ -1,9 +1,8 @@
-# ADR-20260211-0003: Sync task target conflict policy, UUID runtime validation, and orphan cleanup workflow
-
-- Status: Accepted
-- Date: 2026-02-11
-- Tags: sync-task, safety, watch-mode, cleanup, macos
-- TL;DR: Remove automatic target-side deletion, enforce source/target overlap constraints at runtime (including UUID sources), and replace deletion with explicit orphan scan and confirmed manual cleanup.
+# ADR-20260211-0003-STG: Sync task target conflict policy, UUID runtime validation, and orphan cleanup workflow
+Status: Accepted
+Date: 2026-02-11
+Tags: sync-task, safety, watch-mode, cleanup, macos
+TL;DR: Remove automatic target-side deletion, enforce source/target overlap constraints at runtime (including UUID sources), and replace deletion with explicit orphan scan and confirmed manual cleanup.
 
 ## Context
 

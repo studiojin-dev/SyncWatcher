@@ -1,9 +1,8 @@
-# ADR-20260210-0002: App lifecycle (quit vs background)
-
-- Status: Accepted
-- Date: 2026-02-10
-- Tags: lifecycle, tray, background, cmd-quit, macos
-- TL;DR: Keep window-close behavior stable under `closeAction`, add source-aware close events, and apply Cmd+Q-only confirmation policies.
+# ADR-20260210-0002-LIF: App lifecycle (quit vs background)
+Status: Accepted
+Date: 2026-02-10
+Tags: lifecycle, tray, background, cmd-quit, macos
+TL;DR: Keep window-close behavior stable under `closeAction`, add source-aware close events, and apply Cmd+Q-only confirmation policies.
 
 ## Context
 

@@ -107,7 +107,7 @@
         "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。"
       },
       "warnings": {
-        "targetInWatchedSource": "ターゲットが他の監視ソースと重複し、同期ループの原因になる可能性があります。"
+        "targetInWatchedSource": "循環しない watch チェーンは許可されますが、重複する書き込みが正常完了するまで downstream watch sync は待機します。"
       },
       "autoUnmountPendingStatus": "Unmount confirmation pending",
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
@@ -275,7 +275,7 @@
           "description": "タスク保存時にランタイム検証で危険なパス構成を拒否します。",
           "withinTaskOverlap": "1つのタスク内で source/target の重複は不可です（同一、親子関係を含む）。",
           "targetUniqueness": "複数タスク間で target は重複不可で、親子関係にもできません。",
-          "watchLoopRisk": "watch source が他タスクの target と重なる構成は、同期ループ防止のため拒否されます。"
+          "watchLoopRisk": "実際の watch cycle だけを拒否します。一方向チェーンは許可され、downstream watch sync は先行書き込みが成功し短い settle window が過ぎてから開始されます。"
         },
         "conflictOrphan": {
           "title": "競合 / クリーンアップ手順",

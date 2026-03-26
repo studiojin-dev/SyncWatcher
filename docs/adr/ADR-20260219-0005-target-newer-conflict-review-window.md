@@ -1,9 +1,8 @@
-# ADR-20260219-0005: Target-newer conflict deferred review in dedicated window
-
-- Status: Accepted
-- Date: 2026-02-19
-- Tags: sync-task, safety, conflict-review, watch-mode, ux, macos, tauri
-- TL;DR: When target files are newer than source, skip auto-copy and defer handling to an explicit review session in a separate conflict-review window.
+# ADR-20260219-0005-CRW: Target-newer conflict deferred review in dedicated window
+Status: Accepted
+Date: 2026-02-19
+Tags: sync-task, safety, conflict-review, watch-mode, ux, macos, tauri
+TL;DR: When target files are newer than source, skip auto-copy and defer handling to an explicit review session in a separate conflict-review window.
 
 ## Context
 
