@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MantineProvider } from '@mantine/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -146,6 +147,15 @@ describe('SyncTasksView action confirmations', () => {
       if (command === 'list_conflict_review_sessions') {
         return [];
       }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return {
+          ok: true,
+          issue: null,
+        };
+      }
       if (command === 'start_sync') {
         return {
           syncResult: {
@@ -175,7 +185,11 @@ describe('SyncTasksView action confirmations', () => {
 
   it('does not execute dry-run when confirmation is rejected', async () => {
     askMock.mockResolvedValueOnce(false);
-    render(<SyncTasksView />);
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
@@ -211,7 +225,11 @@ describe('SyncTasksView action confirmations', () => {
       ],
     ]);
 
-    render(<SyncTasksView />);
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
@@ -246,7 +264,11 @@ describe('SyncTasksView action confirmations', () => {
       ],
     ]);
 
-    render(<SyncTasksView />);
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
@@ -472,5 +494,241 @@ describe('SyncTasksView action confirmations', () => {
         'warning',
       );
     });
+  });
+
+  it('opens a validation modal instead of an error toast when save validation fails', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return {
+          ok: false,
+          issue: {
+            code: 'duplicateTarget',
+            taskId: 'task-1',
+            taskName: 'Task 1',
+            conflictingTaskIds: ['task-2'],
+            conflictingTaskNames: ['Task 2'],
+            source: null,
+            target: '/tmp/target',
+          },
+        };
+      }
+      return undefined;
+    });
+
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/tmp/source' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    expect(await screen.findByText('syncTasks.validationModal.title')).toBeInTheDocument();
+    expect(screen.getByText('syncTasks.errors.duplicateTarget')).toBeInTheDocument();
+    expect(screen.getByText('Task 2')).toBeInTheDocument();
+    expect(updateTaskMock).not.toHaveBeenCalled();
+    expect(showToastMock).not.toHaveBeenCalledWith(
+      'syncTasks.errors.duplicateTarget',
+      'error',
+    );
+    expect(statusState.setLastLog).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        message: 'syncTasks.errors.duplicateTarget',
+        level: 'error',
+      }),
+    );
+  });
+
+  it('renders task id fallbacks in the validation modal when some conflicting names are missing', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return {
+          ok: false,
+          issue: {
+            code: 'watchCycle',
+            taskId: 'task-1',
+            taskName: 'Task 1',
+            conflictingTaskIds: ['task-2', 'task-3'],
+            conflictingTaskNames: ['Task 2'],
+            source: null,
+            target: null,
+          },
+        };
+      }
+      return undefined;
+    });
+
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/tmp/source' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    expect(await screen.findByText('syncTasks.validationModal.title')).toBeInTheDocument();
+    expect(screen.getAllByText('Task 1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Task 2')).toBeInTheDocument();
+    expect(screen.getByText('task-3')).toBeInTheDocument();
+    expect(updateTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('opens a validation modal for new tasks without writing a provisional lastLog', async () => {
+    const randomUuidSpy = vi
+      .spyOn(globalThis.crypto, 'randomUUID')
+      .mockReturnValue('11111111-1111-4111-8111-111111111111');
+    try {
+      invokeMock.mockImplementation(async (command: string) => {
+        if (command === 'list_conflict_review_sessions') {
+          return [];
+        }
+        if (command === 'get_removable_volumes') {
+          return [];
+        }
+        if (command === 'runtime_validate_tasks') {
+          return {
+            ok: false,
+            issue: {
+              code: 'duplicateTarget',
+              taskId: '11111111-1111-4111-8111-111111111111',
+              taskName: 'Draft Task',
+              conflictingTaskIds: ['task-1'],
+              conflictingTaskNames: ['Task 1'],
+              source: '/tmp/source',
+              target: '/tmp/target',
+            },
+          };
+        }
+        return undefined;
+      });
+
+      render(
+        <MantineProvider>
+          <SyncTasksView />
+        </MantineProvider>,
+      );
+
+      fireEvent.click(screen.getByText('syncTasks.addTask'));
+      fireEvent.click(screen.getAllByRole('radio')[0]);
+      fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+        target: { value: 'Draft Task' },
+      });
+      fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+        target: { value: '/tmp/source' },
+      });
+      fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+        target: { value: '/tmp/target' },
+      });
+      fireEvent.click(screen.getByText('syncTasks.save'));
+
+      expect(await screen.findByText('syncTasks.validationModal.title')).toBeInTheDocument();
+      expect(screen.getAllByText('Task 1').length).toBeGreaterThan(0);
+      expect(addTaskMock).not.toHaveBeenCalled();
+      expect(statusState.setLastLog).not.toHaveBeenCalled();
+    } finally {
+      randomUuidSpy.mockRestore();
+    }
+  });
+
+  it('saves an edited task after successful validation and shows a success toast', async () => {
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'Task 1 Updated' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/tmp/source' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/updated-target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith(
+        'task-1',
+        expect.objectContaining({
+          name: 'Task 1 Updated',
+          source: '/tmp/source',
+          target: '/tmp/updated-target',
+        }),
+      );
+    });
+    expect(showToastMock).toHaveBeenCalledWith(
+      'syncTasks.editTask: Task 1 Updated',
+      'success',
+    );
+    expect(screen.queryByText('syncTasks.validationModal.title')).not.toBeInTheDocument();
+  });
+
+  it('creates a new task after successful validation and shows a success toast', async () => {
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    fireEvent.click(screen.getByText('syncTasks.addTask'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'New Task' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/tmp/new-source' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/new-target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(addTaskMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'New Task',
+          source: '/tmp/new-source',
+          target: '/tmp/new-target',
+        }),
+      );
+    });
+    expect(showToastMock).toHaveBeenCalledWith(
+      'syncTasks.addTask: New Task',
+      'success',
+    );
+    expect(screen.queryByText('syncTasks.validationModal.title')).not.toBeInTheDocument();
   });
 });

@@ -15,21 +15,23 @@ mod integration_tests {
         cancel_operation_internal, classify_missing_target_path, compute_volume_mount_diff,
         decide_autostart_launch, decide_runtime_auto_unmount, dequeue_runtime_sync_task,
         enqueue_runtime_sync_task_internal, ensure_non_overlapping_paths,
-        find_task_source_recommendation, format_bytes_with_unit, get_app_version,
+        find_runtime_task_validation_issue, find_task_source_recommendation,
+        format_bytes_with_unit, get_app_version,
         handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
         progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
-        refresh_uuid_source_identity, remove_runtime_sync_task_state,
-        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
-        runtime_get_state_internal, set_auto_unmount_session_disabled_internal,
+        record_runtime_validation_issue, refresh_uuid_source_identity,
+        remove_runtime_sync_task_state, resolve_runtime_exclude_patterns,
+        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        runtime_validation_issue_log_message, set_auto_unmount_session_disabled_internal,
         sync_dry_run_internal, take_runtime_pending_sync_task, validate_runtime_tasks,
         volume_watch_next_tick_delay, AppState, CancelOperationType, DataUnitSystem,
         DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision,
         RuntimeExclusionSet, RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask,
-        VolumeEmitDebounceState, build_runtime_watch_upstreams, build_validated_runtime_tasks,
-        find_runtime_watch_cycle, mark_downstream_watch_tasks_settle_for_target,
-        select_runtime_dispatch_candidate,
+        RuntimeTaskValidationCode, RuntimeTaskValidationIssue, VolumeEmitDebounceState,
+        build_runtime_watch_upstreams, build_validated_runtime_tasks, find_runtime_watch_cycle,
+        mark_downstream_watch_tasks_settle_for_target, select_runtime_dispatch_candidate,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
@@ -700,6 +702,50 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_find_runtime_task_validation_issue_returns_source_target_overlap_metadata() {
+        let tasks = vec![build_runtime_task_with_paths(
+            "a",
+            "/data/source",
+            "/data/source/sub",
+            false,
+        )];
+
+        let issue = find_runtime_task_validation_issue(&tasks).expect("expected issue");
+        assert_eq!(issue.code, RuntimeTaskValidationCode::SourceTargetOverlap);
+        assert_eq!(issue.task_id.as_deref(), Some("a"));
+        assert_eq!(issue.task_name.as_deref(), Some("task-a"));
+        assert_eq!(issue.source.as_deref(), Some("/data/source"));
+        assert_eq!(issue.target.as_deref(), Some("/data/source/sub"));
+        assert!(issue.conflicting_task_ids.is_empty());
+    }
+
+    #[test]
+    fn test_find_runtime_task_validation_issue_distinguishes_duplicate_target_and_subdir_conflict() {
+        let duplicate_target_tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/shared", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/shared", false),
+        ];
+        let duplicate_issue =
+            find_runtime_task_validation_issue(&duplicate_target_tasks).expect("duplicate issue");
+        assert_eq!(duplicate_issue.code, RuntimeTaskValidationCode::DuplicateTarget);
+        assert_eq!(duplicate_issue.task_id.as_deref(), Some("a"));
+        assert_eq!(duplicate_issue.conflicting_task_ids, vec!["b".to_string()]);
+
+        let nested_target_tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/root", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/root/child", false),
+        ];
+        let nested_issue =
+            find_runtime_task_validation_issue(&nested_target_tasks).expect("nested issue");
+        assert_eq!(
+            nested_issue.code,
+            RuntimeTaskValidationCode::TargetSubdirConflict
+        );
+        assert_eq!(nested_issue.task_id.as_deref(), Some("a"));
+        assert_eq!(nested_issue.conflicting_task_ids, vec!["b".to_string()]);
+    }
+
+    #[test]
     fn test_find_runtime_watch_cycle_detects_longer_cycle() {
         let tasks = vec![
             build_runtime_task_with_paths("a", "/watch/a", "/watch/b/in", true),
@@ -732,6 +778,93 @@ mod integration_tests {
 
         let settle = state.runtime_chain_settle_until.read().await;
         assert!(settle.get("watch-a").is_some());
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_allows_manual_target_inside_watch_source() {
+        let tasks = vec![
+            build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+            build_runtime_task_with_paths(
+                "manual-b",
+                "/src/manual",
+                "/media/incoming/export",
+                false,
+            ),
+        ];
+
+        assert!(validate_runtime_tasks(&tasks).is_ok());
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_two_node_watch_cycle() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/loop/target", true),
+            build_runtime_task_with_paths("b", "/loop/target/inbound", "/src/a/return", true),
+        ];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Watch cycle detected"));
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_rejects_longer_watch_cycle() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/chain/b", true),
+            build_runtime_task_with_paths("b", "/chain/b/in", "/chain/c", true),
+            build_runtime_task_with_paths("c", "/chain/c/in", "/src/a/back", true),
+        ];
+
+        let result = validate_runtime_tasks(&tasks);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Watch cycle detected"));
+    }
+
+    #[test]
+    fn test_find_runtime_task_validation_issue_returns_watch_cycle_metadata() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/chain/b", true),
+            build_runtime_task_with_paths("b", "/chain/b/in", "/chain/c", true),
+            build_runtime_task_with_paths("c", "/chain/c/in", "/src/a/back", true),
+        ];
+
+        let issue = find_runtime_task_validation_issue(&tasks).expect("cycle issue");
+        assert_eq!(issue.code, RuntimeTaskValidationCode::WatchCycle);
+        let mut involved_ids = issue.conflicting_task_ids.clone();
+        if let Some(task_id) = issue.task_id.clone() {
+            involved_ids.push(task_id);
+        }
+        involved_ids.sort();
+        assert_eq!(
+            involved_ids,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_validate_runtime_tasks_allows_case_insensitive_parent_child_watch_chain() {
+        let tasks = vec![
+            build_runtime_task_with_paths(
+                "photo-save",
+                "[VOLUME_UUID:07497716-6027-3FE9-B418-6BEA262C702F1]/",
+                "/VoLumes/EV0990/Camera/a7cr",
+                true,
+            ),
+            build_runtime_task_with_paths(
+                "camera-nas",
+                "/Volumes/ev0990/camera",
+                "/Volumes/kimjeongjin/camera",
+                true,
+            ),
+        ];
+
+        assert!(validate_runtime_tasks(&tasks).is_ok());
     }
 
     #[test]
@@ -1694,6 +1827,62 @@ mod integration_tests {
         assert_eq!(task1_logs.len(), 1);
         assert_eq!(task2_logs.len(), 1);
         assert_eq!(task1_logs[0].task_id, Some("task1".to_string()));
+    }
+
+    #[test]
+    fn test_record_runtime_validation_issue_writes_global_and_task_logs() {
+        let state = build_app_state();
+        let issue = RuntimeTaskValidationIssue {
+            code: RuntimeTaskValidationCode::DuplicateTarget,
+            task_id: Some("task-a".to_string()),
+            task_name: Some("Task A".to_string()),
+            conflicting_task_ids: vec!["task-b".to_string()],
+            conflicting_task_names: vec!["Task B".to_string()],
+            source: None,
+            target: Some("/dst/shared".to_string()),
+        };
+
+        record_runtime_validation_issue(&issue, None, &state);
+
+        let all_logs = state.log_manager.get_logs(None);
+        assert_eq!(all_logs.len(), 3);
+        assert_eq!(
+            all_logs
+                .iter()
+                .filter(|entry| entry.category == crate::logging::LogCategory::ValidationError)
+                .count(),
+            3
+        );
+
+        let task_a_logs = state.log_manager.get_logs(Some("task-a".to_string()));
+        let task_b_logs = state.log_manager.get_logs(Some("task-b".to_string()));
+        assert_eq!(task_a_logs.len(), 1);
+        assert_eq!(task_b_logs.len(), 1);
+        let activity_logs = state.log_manager.get_activity_logs();
+        assert_eq!(activity_logs.len(), 1);
+        assert_eq!(
+            activity_logs[0].category,
+            crate::logging::LogCategory::ValidationError
+        );
+        assert_eq!(activity_logs[0].task_id, None);
+    }
+
+    #[test]
+    fn test_runtime_validation_issue_log_message_includes_all_watch_cycle_participants() {
+        let issue = RuntimeTaskValidationIssue {
+            code: RuntimeTaskValidationCode::WatchCycle,
+            task_id: Some("task-a".to_string()),
+            task_name: Some("Task A".to_string()),
+            conflicting_task_ids: vec!["task-b".to_string(), "task-c".to_string()],
+            conflicting_task_names: vec!["Task B".to_string()],
+            source: None,
+            target: None,
+        };
+
+        let message = runtime_validation_issue_log_message(&issue);
+        assert!(message.contains("'Task A'"));
+        assert!(message.contains("'Task B'"));
+        assert!(message.contains("'task-c'"));
     }
 
     #[test]

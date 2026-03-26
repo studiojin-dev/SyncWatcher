@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIVITY_VISIBLE_CATEGORIES,
   TASK_VISIBLE_CATEGORIES,
+  isActivityVisibleEntry,
   isActivityVisibleCategory,
   isTaskVisibleCategory,
   LOG_CATEGORIES,
@@ -13,6 +14,7 @@ describe('logCategories whitelist drift guard', () => {
       'SyncCompleted',
       'SyncError',
       'SyncStarted',
+      'ValidationError',
       'VolumeMounted',
       'VolumeUnmounted',
       'WatchStarted',
@@ -25,6 +27,7 @@ describe('logCategories whitelist drift guard', () => {
       'SyncCompleted',
       'SyncError',
       'SyncStarted',
+      'ValidationError',
       'WatchStarted',
       'WatchStopped',
     ]);
@@ -39,6 +42,7 @@ describe('logCategories whitelist drift guard', () => {
       'WatchStopped',
       'VolumeMounted',
       'VolumeUnmounted',
+      'ValidationError',
     ]);
     const expectedTask = new Set([
       'SyncStarted',
@@ -48,6 +52,7 @@ describe('logCategories whitelist drift guard', () => {
       'WatchStopped',
       'FileCopied',
       'FileDeleted',
+      'ValidationError',
     ]);
 
     for (const category of LOG_CATEGORIES) {
@@ -59,5 +64,27 @@ describe('logCategories whitelist drift guard', () => {
     expect(isTaskVisibleCategory('Other')).toBe(false);
     expect(isActivityVisibleCategory(undefined)).toBe(false);
     expect(isTaskVisibleCategory(undefined)).toBe(false);
+  });
+
+  it('filters task-scoped validation entries from the activity contract', () => {
+    expect(
+      isActivityVisibleEntry({
+        category: 'ValidationError',
+        task_id: 'task-1',
+      }),
+    ).toBe(false);
+
+    expect(
+      isActivityVisibleEntry({
+        category: 'ValidationError',
+      }),
+    ).toBe(true);
+
+    expect(
+      isActivityVisibleEntry({
+        category: 'SyncStarted',
+        task_id: 'task-1',
+      }),
+    ).toBe(true);
   });
 });

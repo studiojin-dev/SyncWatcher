@@ -29,6 +29,7 @@ import OrphanFilesModal from '../components/features/OrphanFilesModal';
 import DryRunResultView from '../components/features/DryRunResultView';
 import ConflictSessionListPanel from '../components/features/ConflictSessionListPanel';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
+import SyncTaskValidationErrorModal from '../components/features/SyncTaskValidationErrorModal';
 import { formatBytes } from '../utils/formatBytes';
 import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
 import type {
@@ -50,6 +51,10 @@ import {
   type SourceUuidType,
 } from './syncTaskUuid';
 import { isUuidSourceResolutionError } from '../utils/syncTaskSourceRecommendations';
+import type {
+  RuntimeTaskValidationIssue,
+  RuntimeTaskValidationResult,
+} from '../types/runtime';
 
 /** Volume information from backend */
 interface VolumeInfo {
@@ -88,6 +93,72 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function getValidationSummary(
+  issue: RuntimeTaskValidationIssue,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  switch (issue.code) {
+    case 'sourceTargetOverlap':
+      return t('syncTasks.errors.sourceEqualsTarget', {
+        defaultValue: 'Source and target cannot overlap.',
+      });
+    case 'duplicateTarget':
+      return t('syncTasks.errors.duplicateTarget', {
+        defaultValue: 'Target conflicts with another task target.',
+      });
+    case 'targetSubdirConflict':
+      return t('syncTasks.errors.targetSubdirConflict', {
+        defaultValue: 'Target cannot be parent/child of another task target.',
+      });
+    case 'watchCycle':
+      return t('syncTasks.errors.watchCycle', {
+        defaultValue: 'Watch tasks cannot form a cycle.',
+      });
+    case 'invalidInput':
+    default:
+      return t('syncTasks.errors.invalidInput', {
+        defaultValue: 'Task configuration is invalid.',
+      });
+  }
+}
+
+function getValidationRuleDescription(
+  issue: RuntimeTaskValidationIssue,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  switch (issue.code) {
+    case 'sourceTargetOverlap':
+      return t('syncTasks.validationModal.ruleDescriptions.sourceTargetOverlap', {
+        defaultValue:
+          'Within one task, source and target cannot point to the same path or parent/child paths.',
+      });
+    case 'duplicateTarget':
+      return t('syncTasks.validationModal.ruleDescriptions.duplicateTarget', {
+        defaultValue:
+          'Different tasks cannot share the same target directory because ownership and cleanup become ambiguous.',
+      });
+    case 'targetSubdirConflict':
+      return t(
+        'syncTasks.validationModal.ruleDescriptions.targetSubdirConflict',
+        {
+          defaultValue:
+            'Different task targets cannot be nested because parent/child target trees can overwrite or hide each other.',
+        },
+      );
+    case 'watchCycle':
+      return t('syncTasks.validationModal.ruleDescriptions.watchCycle', {
+        defaultValue:
+          'Watch-enabled tasks must stay one-way. Cycles are rejected because they can trigger endless sync loops.',
+      });
+    case 'invalidInput':
+    default:
+      return t('syncTasks.validationModal.ruleDescriptions.invalidInput', {
+        defaultValue:
+          'The task payload could not be validated. Check the selected source and target values and try again.',
+      });
+  }
 }
 
 function showTargetPreflightToast(
@@ -169,6 +240,8 @@ function SyncTasksView({
   const { showToast } = useToast();
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<SyncTask | null>(null);
+  const [validationErrorModal, setValidationErrorModal] =
+    useState<RuntimeTaskValidationIssue | null>(null);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [subView, setSubView] = useState<SubView>({ kind: 'list' });
 
@@ -540,9 +613,24 @@ function SyncTasksView({
           )
         : [...tasks, provisionalTask];
 
-      await invoke('runtime_validate_tasks', {
+      const validation = await invoke<RuntimeTaskValidationResult>(
+        'runtime_validate_tasks',
+        {
         tasks: allTasks.map(toRuntimeTask),
-      });
+        },
+      );
+
+      if (!validation.ok && validation.issue) {
+        if (editingTask) {
+          useSyncTaskStatusStore.getState().setLastLog(editingTask.id, {
+            message: getValidationSummary(validation.issue, t),
+            timestamp: new Date().toLocaleTimeString(),
+            level: 'error',
+          });
+        }
+        setValidationErrorModal(validation.issue);
+        return;
+      }
 
       if (editingTask) {
         await updateTask(editingTask.id, taskData);
@@ -552,6 +640,7 @@ function SyncTasksView({
         showToast(t('syncTasks.addTask') + ': ' + taskData.name, 'success');
       }
 
+      setValidationErrorModal(null);
       setShowForm(false);
       setEditingTask(null);
     } catch (error) {
@@ -951,6 +1040,22 @@ function SyncTasksView({
         })}
       />
 
+      <SyncTaskValidationErrorModal
+        opened={!!validationErrorModal}
+        issue={validationErrorModal}
+        summary={
+          validationErrorModal
+            ? getValidationSummary(validationErrorModal, t)
+            : ''
+        }
+        ruleDescription={
+          validationErrorModal
+            ? getValidationRuleDescription(validationErrorModal, t)
+            : ''
+        }
+        onClose={() => setValidationErrorModal(null)}
+      />
+
       <FadeIn>
         <header className="flex justify-between items-center mb-8 p-6 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)]">
           <div>
@@ -966,6 +1071,7 @@ function SyncTasksView({
           <button
             className="bg-[var(--accent-main)] text-white px-4 py-2 border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] font-bold flex items-center gap-2 active:shadow-[2px_2px_0_0_var(--shadow-color)] transition-all"
             onClick={() => {
+              setValidationErrorModal(null);
               setShowForm(true);
               setEditingTask(null);
             }}
@@ -1304,6 +1410,7 @@ function SyncTasksView({
                     type="button"
                     className="px-4 py-2 font-bold uppercase hover:underline"
                     onClick={() => {
+                      setValidationErrorModal(null);
                       setShowForm(false);
                       setEditingTask(null);
                     }}
@@ -1486,6 +1593,7 @@ function SyncTasksView({
                       <button
                         className="px-3 py-1 font-bold font-mono text-xs border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)]"
                         onClick={() => {
+                          setValidationErrorModal(null);
                           setEditingTask(task);
                           setShowForm(true);
                         }}

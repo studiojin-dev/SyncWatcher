@@ -721,6 +721,35 @@ struct ValidatedRuntimeTask {
     watch_mode: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum RuntimeTaskValidationCode {
+    SourceTargetOverlap,
+    DuplicateTarget,
+    TargetSubdirConflict,
+    WatchCycle,
+    InvalidInput,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeTaskValidationIssue {
+    code: RuntimeTaskValidationCode,
+    task_id: Option<String>,
+    task_name: Option<String>,
+    conflicting_task_ids: Vec<String>,
+    conflicting_task_names: Vec<String>,
+    source: Option<String>,
+    target: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeTaskValidationResult {
+    ok: bool,
+    issue: Option<RuntimeTaskValidationIssue>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeProducerKind {
     WatchSync,
@@ -2143,6 +2172,247 @@ fn resolved_path_key(path: &str) -> Result<String, String> {
             normalized_source, ..
         } => Ok(path_key_for_compare(&PathBuf::from(normalized_source))),
     }
+}
+
+impl RuntimeTaskValidationIssue {
+    fn invalid_input(task: Option<&RuntimeSyncTask>) -> Self {
+        Self {
+            code: RuntimeTaskValidationCode::InvalidInput,
+            task_id: task.map(|item| item.id.clone()),
+            task_name: task.map(|item| item.name.clone()),
+            conflicting_task_ids: Vec::new(),
+            conflicting_task_names: Vec::new(),
+            source: task.map(|item| item.source.clone()),
+            target: task.map(|item| item.target.clone()),
+        }
+    }
+}
+
+fn runtime_validation_issue_task_ids(issue: &RuntimeTaskValidationIssue) -> Vec<String> {
+    let mut task_ids = Vec::new();
+    if let Some(task_id) = &issue.task_id {
+        task_ids.push(task_id.clone());
+    }
+    task_ids.extend(issue.conflicting_task_ids.iter().cloned());
+    task_ids.sort();
+    task_ids.dedup();
+    task_ids
+}
+
+fn runtime_validation_issue_display_names(issue: &RuntimeTaskValidationIssue) -> Vec<String> {
+    let mut names = Vec::new();
+
+    if let Some(task_name) = issue.task_name.as_ref().filter(|name| !name.is_empty()) {
+        names.push(task_name.clone());
+    } else if let Some(task_id) = &issue.task_id {
+        names.push(task_id.clone());
+    }
+
+    let related_count = issue
+        .conflicting_task_ids
+        .len()
+        .max(issue.conflicting_task_names.len());
+
+    for index in 0..related_count {
+        if let Some(task_name) = issue
+            .conflicting_task_names
+            .get(index)
+            .filter(|name| !name.is_empty())
+        {
+            names.push(task_name.clone());
+        } else if let Some(task_id) = issue.conflicting_task_ids.get(index) {
+            names.push(task_id.clone());
+        }
+    }
+
+    names
+}
+
+fn runtime_validation_issue_log_message(issue: &RuntimeTaskValidationIssue) -> String {
+    match issue.code {
+        RuntimeTaskValidationCode::SourceTargetOverlap => format!(
+            "Validation blocked saving sync task '{}' because source and target overlap.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"))
+        ),
+        RuntimeTaskValidationCode::DuplicateTarget => format!(
+            "Validation blocked saving sync tasks '{}' and '{}' because target paths conflict.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown")),
+            issue
+                .conflicting_task_names
+                .first()
+                .map(String::as_str)
+                .or_else(|| issue.conflicting_task_ids.first().map(String::as_str))
+                .unwrap_or("unknown"),
+        ),
+        RuntimeTaskValidationCode::TargetSubdirConflict => format!(
+            "Validation blocked saving sync tasks '{}' and '{}' because target paths cannot be parent/child.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown")),
+            issue
+                .conflicting_task_names
+                .first()
+                .map(String::as_str)
+                .or_else(|| issue.conflicting_task_ids.first().map(String::as_str))
+                .unwrap_or("unknown"),
+        ),
+        RuntimeTaskValidationCode::WatchCycle => {
+            let cycle_names = runtime_validation_issue_display_names(issue);
+            format!(
+                "Validation blocked saving watch tasks because a cycle was detected: {}.",
+                cycle_names
+                    .iter()
+                    .map(|name| format!("'{name}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        RuntimeTaskValidationCode::InvalidInput => format!(
+            "Validation blocked saving sync task '{}' because its configuration is invalid.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"))
+        ),
+    }
+}
+
+fn record_runtime_validation_issue(
+    issue: &RuntimeTaskValidationIssue,
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+) {
+    let message = runtime_validation_issue_log_message(issue);
+    state.log_manager.log_with_category_and_event(
+        "error",
+        &message,
+        None,
+        LogCategory::ValidationError,
+        app,
+    );
+
+    for task_id in runtime_validation_issue_task_ids(issue) {
+        state.log_manager.log_with_category_and_event(
+            "error",
+            &message,
+            Some(task_id),
+            LogCategory::ValidationError,
+            app,
+        );
+    }
+}
+
+fn find_runtime_task_validation_issue(
+    tasks: &[RuntimeSyncTask],
+) -> Option<RuntimeTaskValidationIssue> {
+    let mut validated_tasks: Vec<ValidatedRuntimeTask> = Vec::with_capacity(tasks.len());
+
+    for task in tasks {
+        if input_validation::validate_task_id(&task.id).is_err()
+            || input_validation::validate_path_argument(&task.source).is_err()
+            || input_validation::validate_path_argument(&task.target).is_err()
+        {
+            return Some(RuntimeTaskValidationIssue::invalid_input(Some(task)));
+        }
+
+        let source_key = match resolved_path_key(&task.source) {
+            Ok(value) => value,
+            Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
+        };
+        let target_key = match resolved_path_key(&task.target) {
+            Ok(value) => value,
+            Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
+        };
+
+        if is_path_overlap(&source_key, &target_key) {
+            return Some(RuntimeTaskValidationIssue {
+                code: RuntimeTaskValidationCode::SourceTargetOverlap,
+                task_id: Some(task.id.clone()),
+                task_name: Some(task.name.clone()),
+                conflicting_task_ids: Vec::new(),
+                conflicting_task_names: Vec::new(),
+                source: Some(task.source.clone()),
+                target: Some(task.target.clone()),
+            });
+        }
+
+        validated_tasks.push(ValidatedRuntimeTask {
+            id: task.id.clone(),
+            name: task.name.clone(),
+            source_key,
+            target_key,
+            watch_mode: task.watch_mode,
+        });
+    }
+
+    for left_index in 0..validated_tasks.len() {
+        for right_index in (left_index + 1)..validated_tasks.len() {
+            let left = &validated_tasks[left_index];
+            let right = &validated_tasks[right_index];
+
+            if is_path_overlap(&left.target_key, &right.target_key) {
+                let code = if left.target_key == right.target_key {
+                    RuntimeTaskValidationCode::DuplicateTarget
+                } else {
+                    RuntimeTaskValidationCode::TargetSubdirConflict
+                };
+
+                return Some(RuntimeTaskValidationIssue {
+                    code,
+                    task_id: Some(left.id.clone()),
+                    task_name: Some(left.name.clone()),
+                    conflicting_task_ids: vec![right.id.clone()],
+                    conflicting_task_names: vec![right.name.clone()],
+                    source: None,
+                    target: Some(tasks[left_index].target.clone()),
+                });
+            }
+        }
+    }
+
+    if let Some(cycle) = find_runtime_watch_cycle(&validated_tasks) {
+        let mut ordered_cycle_ids: Vec<String> = Vec::new();
+        for task_id in cycle {
+            if ordered_cycle_ids.iter().any(|existing| existing == &task_id) {
+                continue;
+            }
+            ordered_cycle_ids.push(task_id);
+        }
+
+        let names_by_id: HashMap<&str, &str> = validated_tasks
+            .iter()
+            .map(|task| (task.id.as_str(), task.name.as_str()))
+            .collect();
+        let cycle_names: Vec<String> = ordered_cycle_ids
+            .iter()
+            .map(|task_id| {
+                names_by_id
+                    .get(task_id.as_str())
+                    .copied()
+                    .unwrap_or(task_id.as_str())
+                    .to_string()
+            })
+            .collect();
+
+        return Some(RuntimeTaskValidationIssue {
+            code: RuntimeTaskValidationCode::WatchCycle,
+            task_id: ordered_cycle_ids.first().cloned(),
+            task_name: cycle_names.first().cloned(),
+            conflicting_task_ids: ordered_cycle_ids.iter().skip(1).cloned().collect(),
+            conflicting_task_names: cycle_names.iter().skip(1).cloned().collect(),
+            source: None,
+            target: None,
+        });
+    }
+
+    None
 }
 
 fn build_validated_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<Vec<ValidatedRuntimeTask>, String> {
@@ -5433,8 +5703,23 @@ async fn runtime_set_config(
 }
 
 #[tauri::command]
-async fn runtime_validate_tasks(tasks: Vec<RuntimeSyncTask>) -> Result<(), String> {
-    validate_runtime_tasks(&tasks)
+async fn runtime_validate_tasks(
+    tasks: Vec<RuntimeSyncTask>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<RuntimeTaskValidationResult, String> {
+    if let Some(issue) = find_runtime_task_validation_issue(&tasks) {
+        record_runtime_validation_issue(&issue, Some(&app), state.inner());
+        return Ok(RuntimeTaskValidationResult {
+            ok: false,
+            issue: Some(issue),
+        });
+    }
+
+    Ok(RuntimeTaskValidationResult {
+        ok: true,
+        issue: None,
+    })
 }
 
 #[tauri::command]

@@ -71,6 +71,28 @@ export interface RuntimeAutoUnmountRequestEvent {
     reason: 'zero-copy' | string;
 }
 
+export type RuntimeTaskValidationCode =
+    | 'sourceTargetOverlap'
+    | 'duplicateTarget'
+    | 'targetSubdirConflict'
+    | 'watchCycle'
+    | 'invalidInput';
+
+export interface RuntimeTaskValidationIssue {
+    code: RuntimeTaskValidationCode;
+    taskId: string | null;
+    taskName: string | null;
+    conflictingTaskIds: string[];
+    conflictingTaskNames: string[];
+    source: string | null;
+    target: string | null;
+}
+
+export interface RuntimeTaskValidationResult {
+    ok: boolean;
+    issue: RuntimeTaskValidationIssue | null;
+}
+
 export interface CloseRequestedEventPayload {
     source?: 'window-close' | 'cmd-quit';
 }
