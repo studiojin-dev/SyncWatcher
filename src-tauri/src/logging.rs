@@ -384,10 +384,13 @@ mod tests {
         );
 
         let activity_logs = manager.get_activity_logs();
-        assert_eq!(activity_logs.len(), 3);
+        assert_eq!(activity_logs.len(), 2);
         assert!(activity_logs
             .iter()
             .all(|entry| entry.category.is_activity_visible()));
+        assert!(activity_logs
+            .iter()
+            .all(|entry| !(entry.category == LogCategory::ValidationError && entry.task_id.is_some())));
     }
 
     #[test]

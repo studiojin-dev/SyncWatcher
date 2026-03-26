@@ -2380,7 +2380,10 @@ fn find_runtime_task_validation_issue(
     if let Some(cycle) = find_runtime_watch_cycle(&validated_tasks) {
         let mut ordered_cycle_ids: Vec<String> = Vec::new();
         for task_id in cycle {
-            if ordered_cycle_ids.iter().any(|existing| existing == &task_id) {
+            if ordered_cycle_ids
+                .iter()
+                .any(|existing| existing == &task_id)
+            {
                 continue;
             }
             ordered_cycle_ids.push(task_id);
@@ -2415,7 +2418,9 @@ fn find_runtime_task_validation_issue(
     None
 }
 
-fn build_validated_runtime_tasks(tasks: &[RuntimeSyncTask]) -> Result<Vec<ValidatedRuntimeTask>, String> {
+fn build_validated_runtime_tasks(
+    tasks: &[RuntimeSyncTask],
+) -> Result<Vec<ValidatedRuntimeTask>, String> {
     let mut validated_tasks: Vec<ValidatedRuntimeTask> = Vec::with_capacity(tasks.len());
 
     for task in tasks {
@@ -2466,9 +2471,7 @@ fn build_runtime_watch_upstreams(
     upstreams
 }
 
-fn find_runtime_watch_cycle(
-    validated_tasks: &[ValidatedRuntimeTask],
-) -> Option<Vec<String>> {
+fn find_runtime_watch_cycle(validated_tasks: &[ValidatedRuntimeTask]) -> Option<Vec<String>> {
     fn visit(
         task_id: &str,
         upstreams: &HashMap<String, HashSet<String>>,
@@ -2715,7 +2718,8 @@ async fn block_downstream_watch_tasks_for_target(
     let Ok(validated_tasks) = build_validated_runtime_tasks(&runtime_config.tasks) else {
         return;
     };
-    let overlapping_watch_task_ids = downstream_watch_task_ids_for_target(&validated_tasks, target_key);
+    let overlapping_watch_task_ids =
+        downstream_watch_task_ids_for_target(&validated_tasks, target_key);
 
     {
         let mut settle = state.runtime_chain_settle_until.write().await;
@@ -2733,10 +2737,7 @@ async fn block_downstream_watch_tasks_for_target(
     }
 }
 
-async fn mark_downstream_watch_tasks_settle_for_target(
-    target_key: &str,
-    state: &AppState,
-) {
+async fn mark_downstream_watch_tasks_settle_for_target(target_key: &str, state: &AppState) {
     let runtime_config = {
         let config = state.runtime_config.read().await;
         config.clone()
@@ -2744,7 +2745,8 @@ async fn mark_downstream_watch_tasks_settle_for_target(
     let Ok(validated_tasks) = build_validated_runtime_tasks(&runtime_config.tasks) else {
         return;
     };
-    let overlapping_watch_task_ids = downstream_watch_task_ids_for_target(&validated_tasks, target_key);
+    let overlapping_watch_task_ids =
+        downstream_watch_task_ids_for_target(&validated_tasks, target_key);
     if overlapping_watch_task_ids.is_empty() {
         return;
     }
@@ -2879,11 +2881,14 @@ fn select_runtime_dispatch_candidate(
             continue;
         };
 
-        let blocked_by_upstream = watch_upstreams
-            .get(task_id)
-            .into_iter()
-            .flatten()
-            .any(|upstream_id| syncing_tasks.contains(upstream_id) || queued_set.contains(upstream_id));
+        let blocked_by_upstream =
+            watch_upstreams
+                .get(task_id)
+                .into_iter()
+                .flatten()
+                .any(|upstream_id| {
+                    syncing_tasks.contains(upstream_id) || queued_set.contains(upstream_id)
+                });
         if blocked_by_upstream {
             continue;
         }
@@ -5148,7 +5153,8 @@ async fn resolve_conflict_items(
                         }
                         _ => (file_name.to_string(), None),
                     };
-                    let timestamp = safe_copy_timestamp_label(item_snapshot.source.modified_unix_ms);
+                    let timestamp =
+                        safe_copy_timestamp_label(item_snapshot.source.modified_unix_ms);
 
                     let mut renamed_to: Option<PathBuf> = None;
                     for attempt in 0..20u64 {
@@ -5176,7 +5182,9 @@ async fn resolve_conflict_items(
 
                     let renamed_to = match renamed_to {
                         Some(value) => value,
-                        None => Err("Failed to generate non-conflicting backup file name".to_string())?,
+                        None => {
+                            Err("Failed to generate non-conflicting backup file name".to_string())?
+                        }
                     };
 
                     copy_file_preserve(&source_path, &target_path)
@@ -6519,27 +6527,27 @@ fn log_autostart_launch_provenance(decision: &AutostartLaunchDecision) {
     }
 }
 
-fn restore_main_window_from_tray(app: &AppHandle) {
+fn restore_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
-        eprintln!("[Tray] Main window not found");
+        eprintln!("[App] Main window not found");
         return;
     };
 
     #[cfg(target_os = "macos")]
     {
         if let Err(err) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
-            eprintln!("[Tray] Failed to set activation policy: {}", err);
+            eprintln!("[App] Failed to set activation policy: {}", err);
         }
     }
 
     if let Err(err) = window.show() {
-        eprintln!("[Tray] Failed to show main window: {}", err);
+        eprintln!("[App] Failed to show main window: {}", err);
     }
     if let Err(err) = window.unminimize() {
-        eprintln!("[Tray] Failed to unminimize main window: {}", err);
+        eprintln!("[App] Failed to unminimize main window: {}", err);
     }
     if let Err(err) = window.set_focus() {
-        eprintln!("[Tray] Failed to focus main window: {}", err);
+        eprintln!("[App] Failed to focus main window: {}", err);
     }
 }
 
@@ -6732,7 +6740,7 @@ pub fn run() {
                     if !should_hide_on_startup {
                         match main_window.is_visible() {
                             Ok(true) => {}
-                            Ok(false) | Err(_) => restore_main_window_from_tray(&app_handle),
+                            Ok(false) | Err(_) => restore_main_window(&app_handle),
                         }
                     }
                 });
@@ -6760,7 +6768,7 @@ pub fn run() {
                 tray_builder
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "tray_open" => {
-                            restore_main_window_from_tray(app);
+                            restore_main_window(app);
                         }
                         "tray_quit" => {
                             let _ = app.emit("tray-quit-requested", ());
@@ -6774,7 +6782,7 @@ pub fn run() {
                             ..
                         } = event
                         {
-                            restore_main_window_from_tray(tray.app_handle());
+                            restore_main_window(tray.app_handle());
                         }
                     })
                     .build(app)?;
@@ -7075,8 +7083,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
             let allow_force_exit = app_handle
                 .state::<AppExitControl>()
                 .allow_force_exit
@@ -7093,5 +7101,16 @@ pub fn run() {
             api.prevent_exit();
             emit_close_requested(app_handle, CloseRequestSource::CmdQuit);
         }
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            if !has_visible_windows {
+                eprintln!("[App] Reopen event restoring hidden main window");
+                restore_main_window(app_handle);
+            }
+        }
+        _ => {}
     });
 }
