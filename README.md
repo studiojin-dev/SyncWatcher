@@ -144,3 +144,8 @@ The official app is free to use, including commercial and internal company use. 
 
 - License support purchase: [Lemon Squeezy checkout](https://studiojin.lemonsqueezy.com/checkout/buy/1301030)
 - Additional tip: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
+- Support email: [support@studiojin.dev](mailto:support@studiojin.dev)
+- Terms & Conditions: [TERMS.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.md)
+- Privacy Policy: [PRIVACY.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/PRIVACY.md)
+- Terms & Conditions (Korean): [TERMS.ko.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.ko.md)
+- Privacy Policy (Korean): [PRIVACY.ko.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/PRIVACY.ko.md)

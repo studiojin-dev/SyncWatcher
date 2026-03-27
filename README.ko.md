@@ -144,3 +144,8 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 - 라이선스 후원 구매: [Lemon Squeezy checkout](https://studiojin.lemonsqueezy.com/checkout/buy/1301030)
 - 추가 후원: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
+- 지원 이메일: [support@studiojin.dev](mailto:support@studiojin.dev)
+- 이용약관: [TERMS.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.md)
+- 개인정보처리방침: [PRIVACY.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/PRIVACY.md)
+- 이용약관(한국어): [TERMS.ko.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.ko.md)
+- 개인정보처리방침(한국어): [PRIVACY.ko.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/PRIVACY.ko.md)
