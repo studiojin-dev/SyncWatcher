@@ -45,6 +45,7 @@ interface SyncTaskListProps {
 function renderLastLog(
   taskStatus: TaskStatus | undefined,
   dataUnitSystem: DataUnitSystem,
+  t: TranslateFn,
 ) {
   const progress = taskStatus?.progress;
   let progressSuffix = '';
@@ -83,9 +84,31 @@ function renderLastLog(
   }
 
   if (!taskStatus?.lastLog) {
+    const fallbackKey =
+      taskStatus?.status === 'watching'
+        ? 'syncTasks.watchStatusWatching'
+        : taskStatus?.status === 'queued'
+          ? 'syncTasks.watchStatusQueued'
+          : taskStatus?.status === 'syncing'
+            ? 'syncTasks.watchStatusSyncing'
+            : taskStatus?.status === 'dryRunning'
+              ? 'syncTasks.watchStatusDryRunning'
+              : 'syncTasks.watchStatusIdle';
+
     return (
       <span className="text-[var(--text-secondary)] opacity-50 shrink-0">
-        Waiting for logs...
+        {t(fallbackKey, {
+          defaultValue:
+            taskStatus?.status === 'watching'
+              ? 'Watching for changes...'
+              : taskStatus?.status === 'queued'
+                ? 'Queued for watch sync...'
+                : taskStatus?.status === 'syncing'
+                  ? 'Syncing...'
+                  : taskStatus?.status === 'dryRunning'
+                    ? 'Dry Run in progress...'
+                    : 'No logs yet',
+        })}
       </span>
     );
   }
@@ -304,7 +327,7 @@ function SyncTaskList({
                     {task.target}
                   </div>
                   <div className="mt-2 h-8 px-2 border-2 border-dashed border-[var(--border-main)] bg-[var(--bg-tertiary)] font-mono text-xs flex items-center min-w-0 w-full overflow-hidden">
-                    {renderLastLog(taskStatus, dataUnitSystem)}
+                    {renderLastLog(taskStatus, dataUnitSystem, t)}
                   </div>
                 </div>
               </div>

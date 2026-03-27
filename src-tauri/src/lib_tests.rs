@@ -12,27 +12,28 @@ mod integration_tests {
     use crate::system_integration::VolumeInfo;
     use crate::watcher::WatcherManager;
     use crate::{
-        cancel_operation_internal, classify_missing_target_path, compute_volume_mount_diff,
-        decide_autostart_launch, decide_runtime_auto_unmount, dequeue_runtime_sync_task,
-        enqueue_runtime_sync_task_internal, ensure_non_overlapping_paths,
-        finish_runtime_producer,
-        find_runtime_task_validation_issue, find_task_source_recommendation,
-        format_bytes_with_unit, get_app_version,
-        handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
+        build_runtime_watch_upstreams, build_validated_runtime_tasks,
+        can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
+        classify_missing_target_path, compute_volume_mount_diff, decide_autostart_launch,
+        decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
+        enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
+        find_runtime_task_validation_issue, find_runtime_watch_cycle,
+        find_task_source_recommendation, finish_runtime_producer, format_bytes_with_unit,
+        get_app_version, handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
-        normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
-        progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
-        record_runtime_validation_issue, refresh_uuid_source_identity,
-        remove_runtime_sync_task_state, resolve_runtime_exclude_patterns,
-        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        runtime_validation_issue_log_message, set_auto_unmount_session_disabled_internal,
+        mark_downstream_watch_tasks_settle_for_target, normalize_uuid_sub_path,
+        parse_uuid_source_path, preflight_target_path, progress_phase_to_log_category,
+        prune_auto_unmount_session_disabled_tasks, record_runtime_validation_issue,
+        refresh_uuid_source_identity, remove_runtime_sync_task_state,
+        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
+        runtime_get_state_internal, runtime_validation_issue_log_message,
+        runtime_watch_bootstrap_task_ids, runtime_watch_task_needs_restart,
+        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
         sync_dry_run_internal, take_runtime_pending_sync_task, validate_runtime_tasks,
         volume_watch_next_tick_delay, AppState, CancelOperationType, DataUnitSystem,
-        DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision,
-        RuntimeExclusionSet, RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask,
-        RuntimeTaskValidationCode, RuntimeTaskValidationIssue, VolumeEmitDebounceState,
-        build_runtime_watch_upstreams, build_validated_runtime_tasks, find_runtime_watch_cycle,
-        mark_downstream_watch_tasks_settle_for_target, select_runtime_dispatch_candidate,
+        DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
+        RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
+        RuntimeTaskValidationIssue, VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
@@ -331,6 +332,120 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_runtime_watch_bootstrap_task_ids_use_watch_mode_only() {
+        let tasks = vec![
+            build_runtime_task("a", "/src/a", true),
+            build_runtime_task("b", "/src/b", false),
+            build_runtime_task(
+                "uuid-watch",
+                "[VOLUME_UUID:07497716-6027-3FE9-B418-6BEA262C7D2F]/",
+                true,
+            ),
+        ];
+
+        assert_eq!(
+            runtime_watch_bootstrap_task_ids(&tasks),
+            vec!["a".to_string(), "uuid-watch".to_string(),]
+        );
+    }
+
+    #[test]
+    fn test_runtime_watch_task_needs_restart_when_new_stopped_or_source_changed() {
+        let managed_sources =
+            HashMap::from([("task-1".to_string(), "/Volumes/old/source".to_string())]);
+        let watching_now = HashSet::from(["task-1".to_string()]);
+
+        assert!(!runtime_watch_task_needs_restart(
+            "task-1",
+            "/Volumes/old/source",
+            &managed_sources,
+            &watching_now,
+        ));
+        assert!(runtime_watch_task_needs_restart(
+            "task-2",
+            "/Volumes/new/source",
+            &managed_sources,
+            &watching_now,
+        ));
+        assert!(runtime_watch_task_needs_restart(
+            "task-1",
+            "/Volumes/new/source",
+            &managed_sources,
+            &watching_now,
+        ));
+        assert!(runtime_watch_task_needs_restart(
+            "task-1",
+            "/Volumes/old/source",
+            &managed_sources,
+            &HashSet::new(),
+        ));
+    }
+
+    #[test]
+    fn test_can_enqueue_runtime_watch_bootstrap_task_blocks_syncing_queued_and_pending() {
+        let syncing = HashSet::from(["syncing".to_string()]);
+        let queued = HashSet::from(["queued".to_string()]);
+        let pending = HashSet::from(["pending".to_string()]);
+
+        assert!(!can_enqueue_runtime_watch_bootstrap_task(
+            "syncing", &syncing, &queued, &pending
+        ));
+        assert!(!can_enqueue_runtime_watch_bootstrap_task(
+            "queued", &syncing, &queued, &pending
+        ));
+        assert!(!can_enqueue_runtime_watch_bootstrap_task(
+            "pending", &syncing, &queued, &pending
+        ));
+        assert!(can_enqueue_runtime_watch_bootstrap_task(
+            "eligible", &syncing, &queued, &pending
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_enqueue_runtime_watch_bootstrap_tasks_enqueues_only_eligible_tasks() {
+        let state = build_app_state();
+        {
+            let mut syncing = state.syncing_tasks.write().await;
+            syncing.insert("syncing".to_string());
+        }
+        {
+            let mut queued = state.queued_sync_tasks.write().await;
+            queued.insert("queued".to_string());
+        }
+        {
+            let mut queue = state.runtime_sync_queue.write().await;
+            queue.push_back("queued".to_string());
+        }
+        {
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.insert("pending".to_string());
+        }
+
+        let task_ids = vec![
+            "eligible".to_string(),
+            "syncing".to_string(),
+            "queued".to_string(),
+            "pending".to_string(),
+        ];
+
+        let enqueued = enqueue_runtime_watch_bootstrap_tasks(&task_ids, &state).await;
+        assert_eq!(enqueued, vec!["eligible".to_string()]);
+
+        let queue = state.runtime_sync_queue.read().await;
+        assert_eq!(
+            queue.iter().cloned().collect::<Vec<_>>(),
+            vec!["queued".to_string(), "eligible".to_string()]
+        );
+        drop(queue);
+
+        let queued = state.queued_sync_tasks.read().await;
+        assert!(queued.contains("eligible"));
+        assert!(queued.contains("queued"));
+        assert!(!queued.contains("syncing"));
+        assert!(!queued.contains("pending"));
+    }
+
+    #[test]
     fn test_resolve_runtime_exclude_patterns_deduplicates_preserving_order() {
         let task = RuntimeSyncTask {
             id: "task-1".to_string(),
@@ -621,12 +736,7 @@ mod integration_tests {
     #[test]
     fn test_validate_runtime_tasks_rejects_watch_cycle() {
         let tasks = vec![
-            build_runtime_task_with_paths(
-                "a",
-                "/watch/a",
-                "/watch/b/import",
-                true,
-            ),
+            build_runtime_task_with_paths("a", "/watch/a", "/watch/b/import", true),
             build_runtime_task_with_paths("b", "/watch/b", "/watch/a/export", true),
         ];
 
@@ -721,14 +831,18 @@ mod integration_tests {
     }
 
     #[test]
-    fn test_find_runtime_task_validation_issue_distinguishes_duplicate_target_and_subdir_conflict() {
+    fn test_find_runtime_task_validation_issue_distinguishes_duplicate_target_and_subdir_conflict()
+    {
         let duplicate_target_tasks = vec![
             build_runtime_task_with_paths("a", "/src/a", "/dst/shared", false),
             build_runtime_task_with_paths("b", "/src/b", "/dst/shared", false),
         ];
         let duplicate_issue =
             find_runtime_task_validation_issue(&duplicate_target_tasks).expect("duplicate issue");
-        assert_eq!(duplicate_issue.code, RuntimeTaskValidationCode::DuplicateTarget);
+        assert_eq!(
+            duplicate_issue.code,
+            RuntimeTaskValidationCode::DuplicateTarget
+        );
         assert_eq!(duplicate_issue.task_id.as_deref(), Some("a"));
         assert_eq!(duplicate_issue.conflicting_task_ids, vec!["b".to_string()]);
 
@@ -765,7 +879,12 @@ mod integration_tests {
         {
             let mut runtime_config = state.runtime_config.write().await;
             runtime_config.tasks = vec![
-                build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+                build_runtime_task_with_paths(
+                    "watch-a",
+                    "/media/incoming",
+                    "/backup/watch-a",
+                    true,
+                ),
                 build_runtime_task_with_paths(
                     "manual-b",
                     "/src/manual",
@@ -788,7 +907,12 @@ mod integration_tests {
         {
             let mut runtime_config = state.runtime_config.write().await;
             runtime_config.tasks = vec![
-                build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+                build_runtime_task_with_paths(
+                    "watch-a",
+                    "/media/incoming",
+                    "/backup/watch-a",
+                    true,
+                ),
                 build_runtime_task_with_paths(
                     "manual-b",
                     "/src/manual",
@@ -858,7 +982,12 @@ mod integration_tests {
         {
             let mut runtime_config = state.runtime_config.write().await;
             runtime_config.tasks = vec![
-                build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+                build_runtime_task_with_paths(
+                    "watch-a",
+                    "/media/incoming",
+                    "/backup/watch-a",
+                    true,
+                ),
                 build_runtime_task_with_paths(
                     "manual-b",
                     "/src/manual",
@@ -1014,7 +1143,8 @@ mod integration_tests {
         let queued_set = HashSet::from([String::from("watch-a")]);
         let syncing = HashSet::new();
         let watch_upstreams = HashMap::new();
-        let source_keys = HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
+        let source_keys =
+            HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
         let active_producers = HashMap::from([(
             String::from("sync:manual:task-b"),
             RuntimeActiveProducer {
@@ -1046,7 +1176,8 @@ mod integration_tests {
         let queued_set = HashSet::from([String::from("watch-a")]);
         let syncing = HashSet::new();
         let watch_upstreams = HashMap::new();
-        let source_keys = HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
+        let source_keys =
+            HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
         let active_producers = HashMap::from([(
             String::from("conflict:force-copy:session-1:item-1"),
             RuntimeActiveProducer {
@@ -1105,11 +1236,17 @@ mod integration_tests {
             &HashMap::new(),
             &HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]),
             &HashMap::new(),
-            &HashMap::from([(String::from("watch-a"), Instant::now() - Duration::from_millis(1))]),
+            &HashMap::from([(
+                String::from("watch-a"),
+                Instant::now() - Duration::from_millis(1),
+            )]),
             Instant::now(),
         );
 
-        assert_eq!(selection_after.candidate_task_id.as_deref(), Some("watch-a"));
+        assert_eq!(
+            selection_after.candidate_task_id.as_deref(),
+            Some("watch-a")
+        );
     }
 
     #[test]

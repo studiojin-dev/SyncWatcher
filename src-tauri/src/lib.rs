@@ -2559,6 +2559,30 @@ fn runtime_desired_watch_sources(tasks: &[RuntimeSyncTask]) -> HashMap<String, S
         .collect()
 }
 
+fn runtime_watch_bootstrap_task_ids(tasks: &[RuntimeSyncTask]) -> Vec<String> {
+    tasks
+        .iter()
+        .filter(|task| task.watch_mode)
+        .map(|task| task.id.clone())
+        .collect()
+}
+
+fn runtime_watch_task_needs_restart(
+    task_id: &str,
+    source: &str,
+    managed_sources: &HashMap<String, String>,
+    watching_now: &HashSet<String>,
+) -> bool {
+    let source_changed = managed_sources
+        .get(task_id)
+        .map(|existing| existing != source)
+        .unwrap_or(false);
+    let is_managed = managed_sources.contains_key(task_id);
+    let is_watching = watching_now.contains(task_id);
+
+    !is_managed || !is_watching || source_changed
+}
+
 fn runtime_find_watch_task<'a>(
     tasks: &'a [RuntimeSyncTask],
     task_id: &str,
@@ -2865,6 +2889,69 @@ async fn remove_runtime_sync_task_state(task_id: &str, state: &AppState) {
     let mut queue = state.runtime_sync_queue.write().await;
     queued.remove(task_id);
     queue.retain(|queued_task_id| queued_task_id != task_id);
+}
+
+fn can_enqueue_runtime_watch_bootstrap_task(
+    task_id: &str,
+    syncing_tasks: &HashSet<String>,
+    queued_tasks: &HashSet<String>,
+    pending_tasks: &HashSet<String>,
+) -> bool {
+    !syncing_tasks.contains(task_id)
+        && !queued_tasks.contains(task_id)
+        && !pending_tasks.contains(task_id)
+}
+
+async fn enqueue_runtime_watch_bootstrap_tasks(
+    task_ids: &[String],
+    state: &AppState,
+) -> Vec<String> {
+    if task_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let syncing_tasks = {
+        let syncing = state.syncing_tasks.read().await;
+        syncing.clone()
+    };
+    let queued_tasks = {
+        let queued = state.queued_sync_tasks.read().await;
+        queued.clone()
+    };
+    let pending_tasks = {
+        let pending = state.runtime_pending_sync_tasks.read().await;
+        pending.clone()
+    };
+
+    let mut enqueued_task_ids = Vec::new();
+    for task_id in task_ids {
+        if !can_enqueue_runtime_watch_bootstrap_task(
+            task_id,
+            &syncing_tasks,
+            &queued_tasks,
+            &pending_tasks,
+        ) {
+            continue;
+        }
+
+        if enqueue_runtime_sync_task_internal(task_id, state).await
+            == RuntimeSyncEnqueueResult::Enqueued
+        {
+            enqueued_task_ids.push(task_id.clone());
+        }
+    }
+
+    enqueued_task_ids
+}
+
+fn emit_runtime_watch_bootstrap_queue_state(
+    task_ids: &[String],
+    reason: &str,
+    app: &tauri::AppHandle,
+) {
+    for task_id in task_ids {
+        emit_runtime_sync_queue_state(app, task_id, true, Some(reason.to_string()));
+    }
 }
 
 fn select_runtime_dispatch_candidate(
@@ -3916,17 +4003,14 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
         let sources = state.runtime_watch_sources.read().await;
         sources.clone()
     };
+    let allow_restarted_watch_bootstrap = state
+        .runtime_initial_watch_bootstrapped
+        .load(Ordering::SeqCst);
+    let mut restarted_watch_task_ids = Vec::new();
 
     // Start or restart desired watchers.
     for (task_id, source) in &desired {
-        let source_changed = managed_sources
-            .get(task_id)
-            .map(|existing| existing != source)
-            .unwrap_or(false);
-        let is_managed = managed_sources.contains_key(task_id);
-        let is_watching = watching_now.contains(task_id);
-
-        if !is_managed || !is_watching || source_changed {
+        if runtime_watch_task_needs_restart(task_id, source, &managed_sources, &watching_now) {
             match start_watch_internal(
                 task_id.clone(),
                 PathBuf::from(source),
@@ -3941,6 +4025,9 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
                         let mut sources = state.runtime_watch_sources.write().await;
                         sources.insert(task_id.clone(), source.clone());
                     }
+                    if allow_restarted_watch_bootstrap {
+                        restarted_watch_task_ids.push(task_id.clone());
+                    }
                     emit_runtime_watch_state(&app, task_id, true, None);
                 }
                 Err(err) => {
@@ -3952,6 +4039,23 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
                 }
             }
         }
+    }
+
+    if allow_restarted_watch_bootstrap && {
+        let enqueued_task_ids =
+            enqueue_runtime_watch_bootstrap_tasks(&restarted_watch_task_ids, &state).await;
+        if enqueued_task_ids.is_empty() {
+            false
+        } else {
+            emit_runtime_watch_bootstrap_queue_state(
+                &enqueued_task_ids,
+                "Initial sync after watch activation",
+                &app,
+            );
+            true
+        }
+    } {
+        schedule_runtime_sync_dispatcher(app.clone(), state.clone());
     }
 
     // Stop watchers no longer managed by runtime config.
@@ -4005,20 +4109,18 @@ async fn enqueue_initial_runtime_watch_syncs(app: tauri::AppHandle, state: AppSt
         config.clone()
     };
 
-    let mut enqueued_any = false;
-    for task in runtime_config.tasks.iter().filter(|task| task.watch_mode) {
-        let enqueue_result = enqueue_runtime_sync_task(
-            &task.id,
+    let enqueued_task_ids = enqueue_runtime_watch_bootstrap_tasks(
+        &runtime_watch_bootstrap_task_ids(&runtime_config.tasks),
+        &state,
+    )
+    .await;
+
+    if !enqueued_task_ids.is_empty() {
+        emit_runtime_watch_bootstrap_queue_state(
+            &enqueued_task_ids,
+            "Initial sync after runtime initialization",
             &app,
-            &state,
-            Some("Initial sync after runtime initialization".to_string()),
-        )
-        .await;
-
-        enqueued_any = enqueued_any || enqueue_result == RuntimeSyncEnqueueResult::Enqueued;
-    }
-
-    if enqueued_any {
+        );
         schedule_runtime_sync_dispatcher(app, state);
     }
 }

@@ -1,19 +1,19 @@
 [
   {
-    "id": "ADR-20260326-0018-CHN",
-    "title": "Watch chain cycle gating and downstream settle window",
+    "id": "ADR-20260327-0019-WAC",
+    "title": "Runtime watch activation re-enqueues initial sync",
     "tags": [
-      "sync-task",
-      "watch-mode",
       "runtime",
-      "scheduling",
+      "watch-mode",
+      "uuid-source",
       "reliability",
+      "tauri",
       "macos"
     ],
     "status": "Accepted",
-    "date": "2026-03-26",
-    "tldr": "Allow acyclic watch chains, reject only true watch cycles, and delay downstream watch sync until upstream sync completes plus a short settle window.",
-    "path": "docs/adr/ADR-20260326-0018-CHN-watch-chain-cycle-gating-and-settle-window.md"
+    "date": "2026-03-27",
+    "tldr": "After the first runtime bootstrap, any watch task that newly activates or restarts must enqueue one initial sync so existing diffs are not stranded until the next filesystem event.",
+    "path": "docs/adr/ADR-20260327-0019-WAC-runtime-watch-activation-reenqueues-initial-sync.md"
   },
   {
     "id": "ADR-20260326-0018-RTG",
@@ -30,6 +30,22 @@
     "date": "2026-03-26",
     "tldr": "Allow acyclic watch chains, but delay downstream watch sync until every overlapping writer succeeds and a short settle window has elapsed.",
     "path": "docs/adr/ADR-20260326-0018-RTG-producer-completion-gate-for-safe-downstream-watch-sync.md"
+  },
+  {
+    "id": "ADR-20260326-0018-CHN",
+    "title": "Watch chain cycle gating and downstream settle window",
+    "tags": [
+      "sync-task",
+      "watch-mode",
+      "runtime",
+      "scheduling",
+      "reliability",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-26",
+    "tldr": "Allow acyclic watch chains, reject only true watch cycles, and delay downstream watch sync until upstream sync completes plus a short settle window.",
+    "path": "docs/adr/ADR-20260326-0018-CHN-watch-chain-cycle-gating-and-settle-window.md"
   },
   {
     "id": "ADR-20260325-0017-REL",
