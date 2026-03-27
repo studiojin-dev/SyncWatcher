@@ -90,6 +90,17 @@ type TauriInternalsShape = {
   invoke?: unknown;
 };
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 describe('BackendRuntimeBridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -214,6 +225,190 @@ describe('BackendRuntimeBridge', () => {
       expect(mockInvoke).toHaveBeenCalledTimes(2);
     });
     expect(storeState.setWatchingTasks).toHaveBeenLastCalledWith(['task-1']);
+  });
+
+  it('ignores an older runtime snapshot when a newer refresh resolves first', async () => {
+    const firstRequest = createDeferred<{
+      watchingTasks: string[];
+      syncingTasks: string[];
+      queuedTasks: string[];
+      dryRunningTasks: string[];
+    }>();
+    const secondRequest = createDeferred<{
+      watchingTasks: string[];
+      syncingTasks: string[];
+      queuedTasks: string[];
+      dryRunningTasks: string[];
+    }>();
+
+    mockInvoke
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockImplementationOnce(() => secondRequest.promise);
+
+    const onStateChange = vi.fn();
+    render(<BackendRuntimeBridge onInitialRuntimeSyncChange={onStateChange} />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('config-store-changed')).toBe(true);
+    });
+
+    const handler = eventHandlers.get('config-store-changed');
+    if (!handler) {
+      throw new Error('config-store-changed handler not found');
+    }
+
+    act(() => {
+      handler({
+        payload: {
+          scope: 'settings',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      secondRequest.resolve({
+        watchingTasks: ['task-new'],
+        syncingTasks: [],
+        queuedTasks: [],
+        dryRunningTasks: [],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(storeState.setWatchingTasks).toHaveBeenCalledWith(['task-new']);
+      expect(onStateChange).toHaveBeenCalledWith('success');
+    });
+
+    const appliedCallCount = storeState.setWatchingTasks.mock.calls.length;
+
+    await act(async () => {
+      firstRequest.resolve({
+        watchingTasks: ['task-old'],
+        syncingTasks: [],
+        queuedTasks: [],
+        dryRunningTasks: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(storeState.setWatchingTasks).toHaveBeenCalledTimes(appliedCallCount);
+    expect(storeState.setWatchingTasks).not.toHaveBeenCalledWith(['task-old']);
+  });
+
+  it('ignores a stale runtime error after a newer runtime sync succeeds', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const firstRequest = createDeferred<{
+      watchingTasks: string[];
+      syncingTasks: string[];
+      queuedTasks: string[];
+      dryRunningTasks: string[];
+    }>();
+    const secondRequest = createDeferred<{
+      watchingTasks: string[];
+      syncingTasks: string[];
+      queuedTasks: string[];
+      dryRunningTasks: string[];
+    }>();
+
+    mockInvoke
+      .mockImplementationOnce(() => firstRequest.promise)
+      .mockImplementationOnce(() => secondRequest.promise);
+
+    const onStateChange = vi.fn();
+    render(<BackendRuntimeBridge onInitialRuntimeSyncChange={onStateChange} />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('config-store-changed')).toBe(true);
+    });
+
+    const handler = eventHandlers.get('config-store-changed');
+    if (!handler) {
+      throw new Error('config-store-changed handler not found');
+    }
+
+    act(() => {
+      handler({
+        payload: {
+          scope: 'settings',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      secondRequest.resolve({
+        watchingTasks: [],
+        syncingTasks: [],
+        queuedTasks: [],
+        dryRunningTasks: [],
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(onStateChange).toHaveBeenCalledWith('success');
+    });
+
+    await act(async () => {
+      firstRequest.reject(new Error('stale failure'));
+      await Promise.resolve();
+    });
+
+    expect(onStateChange).not.toHaveBeenCalledWith('error');
+    expect(showToastMock).not.toHaveBeenCalledWith('Failed to read runtime state', 'error');
+    expect(storeState.setLastLog).not.toHaveBeenCalledWith('__runtime__', expect.anything());
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      'Runtime state sync command failed',
+      expect.anything(),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('ignores late runtime_get_state resolution after unmount', async () => {
+    const pendingRequest = createDeferred<{
+      watchingTasks: string[];
+      syncingTasks: string[];
+      queuedTasks: string[];
+      dryRunningTasks: string[];
+    }>();
+
+    mockInvoke.mockImplementationOnce(() => pendingRequest.promise);
+
+    const onStateChange = vi.fn();
+    const { unmount } = render(
+      <BackendRuntimeBridge onInitialRuntimeSyncChange={onStateChange} />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(onStateChange).toHaveBeenCalledWith('pending');
+
+    unmount();
+
+    await act(async () => {
+      pendingRequest.resolve({
+        watchingTasks: ['task-late'],
+        syncingTasks: [],
+        queuedTasks: [],
+        dryRunningTasks: [],
+      });
+      await Promise.resolve();
+    });
+
+    expect(storeState.setWatchingTasks).not.toHaveBeenCalled();
+    expect(onStateChange.mock.calls).toEqual([['pending']]);
+    expect(showToastMock).not.toHaveBeenCalled();
   });
 
   it('stores progress and avoids duplicate lastLog updates when message is unchanged', async () => {

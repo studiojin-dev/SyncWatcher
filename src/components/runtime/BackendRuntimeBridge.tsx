@@ -159,12 +159,23 @@ function BackendRuntimeBridge({
     const ready = tasksLoaded && setsLoaded && settingsLoaded;
     const watchingTasksRef = useRef<Set<string>>(new Set());
     const initialSyncResolvedRef = useRef(false);
+    const runtimeStateRequestSeqRef = useRef(0);
+    const latestRuntimeStateRequestSeqRef = useRef(0);
+    const runtimeStateMountedRef = useRef(true);
     const queuedStatusDemotionTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
     const lastRuntimeSyncErrorToastRef = useRef<{ message: string; at: number } | null>(null);
     const autoUnmountStatusMessages = useMemo(() => {
         const localized = AUTO_UNMOUNT_STATUS_KEYS.map((key) => t(key));
         return new Set<string>([...AUTO_UNMOUNT_STATUS_KEYS, ...localized]);
     }, [t]);
+
+    useEffect(() => {
+        runtimeStateMountedRef.current = true;
+
+        return () => {
+            runtimeStateMountedRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         const unlistenProgress = listen<SyncProgressEvent>('sync-progress', (event) => {
@@ -402,10 +413,16 @@ function BackendRuntimeBridge({
 
     const syncRuntimeState = useCallback(async (options?: { initial?: boolean }) => {
         const isInitialSyncAttempt = options?.initial ?? false;
+        const requestSeq = runtimeStateRequestSeqRef.current + 1;
+        runtimeStateRequestSeqRef.current = requestSeq;
+        latestRuntimeStateRequestSeqRef.current = requestSeq;
 
         if (isInitialSyncAttempt) {
             onInitialRuntimeSyncChange?.('pending');
         }
+
+        const isStaleRequest = () =>
+            !runtimeStateMountedRef.current || latestRuntimeStateRequestSeqRef.current !== requestSeq;
 
         try {
             const invokePromise = invoke<RuntimeState>('runtime_get_state');
@@ -417,6 +434,10 @@ function BackendRuntimeBridge({
                 )
                 : await invokePromise;
 
+            if (isStaleRequest()) {
+                return;
+            }
+
             watchingTasksRef.current = new Set(nextState.watchingTasks);
             applyRuntimeSnapshotToStore(nextState);
 
@@ -425,6 +446,10 @@ function BackendRuntimeBridge({
                 onInitialRuntimeSyncChange?.('success');
             }
         } catch (err) {
+            if (isStaleRequest()) {
+                return;
+            }
+
             const errorMessage = err instanceof Error ? err.message : String(err);
             console.error('Runtime state sync command failed', {
                 command: 'runtime_get_state',
@@ -465,17 +490,15 @@ function BackendRuntimeBridge({
         }
 
         let cancelled = false;
-        const isInitialSyncAttempt = !initialSyncResolvedRef.current;
-
         const refreshRuntimeState = async () => {
-            await syncRuntimeState({ initial: isInitialSyncAttempt });
+            await syncRuntimeState({ initial: !initialSyncResolvedRef.current });
         };
 
         void refreshRuntimeState();
 
         const unlistenPromise = listenConfigStoreChanged(['settings', 'syncTasks', 'exclusionSets'], () => {
             if (!cancelled) {
-                void syncRuntimeState();
+                void refreshRuntimeState();
             }
         });
 

@@ -15,6 +15,7 @@ mod integration_tests {
         cancel_operation_internal, classify_missing_target_path, compute_volume_mount_diff,
         decide_autostart_launch, decide_runtime_auto_unmount, dequeue_runtime_sync_task,
         enqueue_runtime_sync_task_internal, ensure_non_overlapping_paths,
+        finish_runtime_producer,
         find_runtime_task_validation_issue, find_task_source_recommendation,
         format_bytes_with_unit, get_app_version,
         handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
@@ -778,6 +779,146 @@ mod integration_tests {
 
         let settle = state.runtime_chain_settle_until.read().await;
         assert!(settle.get("watch-a").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_finish_runtime_producer_failure_blocks_downstream_before_removal() {
+        let state = build_app_state();
+
+        {
+            let mut runtime_config = state.runtime_config.write().await;
+            runtime_config.tasks = vec![
+                build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+                build_runtime_task_with_paths(
+                    "manual-b",
+                    "/src/manual",
+                    "/media/incoming/export",
+                    false,
+                ),
+            ];
+        }
+
+        {
+            let mut queued = state.queued_sync_tasks.write().await;
+            queued.insert("watch-a".to_string());
+        }
+        {
+            let mut queue = state.runtime_sync_queue.write().await;
+            queue.push_back("watch-a".to_string());
+        }
+        {
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.insert("watch-a".to_string());
+        }
+        {
+            let mut producers = state.runtime_active_producers.write().await;
+            producers.insert(
+                "sync:manual:task-b".to_string(),
+                RuntimeActiveProducer {
+                    producer_id: "sync:manual:task-b".to_string(),
+                    kind: RuntimeProducerKind::ManualSync,
+                    target_key: "/media/incoming/export".to_string(),
+                },
+            );
+        }
+
+        finish_runtime_producer(
+            "sync:manual:task-b",
+            "/media/incoming/export",
+            false,
+            None,
+            &state,
+        )
+        .await;
+
+        let queued = state.queued_sync_tasks.read().await;
+        assert!(!queued.contains("watch-a"));
+        drop(queued);
+
+        let queue = state.runtime_sync_queue.read().await;
+        assert!(!queue.iter().any(|task_id| task_id == "watch-a"));
+        drop(queue);
+
+        let pending = state.runtime_pending_sync_tasks.read().await;
+        assert!(!pending.contains("watch-a"));
+        drop(pending);
+
+        let settle = state.runtime_chain_settle_until.read().await;
+        assert!(settle.get("watch-a").is_none());
+        drop(settle);
+
+        let producers = state.runtime_active_producers.read().await;
+        assert!(!producers.contains_key("sync:manual:task-b"));
+    }
+
+    #[tokio::test]
+    async fn test_finish_runtime_producer_success_marks_settle_before_removal() {
+        let state = build_app_state();
+
+        {
+            let mut runtime_config = state.runtime_config.write().await;
+            runtime_config.tasks = vec![
+                build_runtime_task_with_paths("watch-a", "/media/incoming", "/backup/watch-a", true),
+                build_runtime_task_with_paths(
+                    "manual-b",
+                    "/src/manual",
+                    "/media/incoming/export",
+                    false,
+                ),
+            ];
+        }
+
+        {
+            let mut queued = state.queued_sync_tasks.write().await;
+            queued.insert("watch-a".to_string());
+        }
+        {
+            let mut queue = state.runtime_sync_queue.write().await;
+            queue.push_back("watch-a".to_string());
+        }
+        {
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.insert("watch-a".to_string());
+        }
+        {
+            let mut producers = state.runtime_active_producers.write().await;
+            producers.insert(
+                "sync:manual:task-b".to_string(),
+                RuntimeActiveProducer {
+                    producer_id: "sync:manual:task-b".to_string(),
+                    kind: RuntimeProducerKind::ManualSync,
+                    target_key: "/media/incoming/export".to_string(),
+                },
+            );
+        }
+
+        finish_runtime_producer(
+            "sync:manual:task-b",
+            "/media/incoming/export",
+            true,
+            None,
+            &state,
+        )
+        .await;
+
+        let queued = state.queued_sync_tasks.read().await;
+        assert!(queued.contains("watch-a"));
+        drop(queued);
+
+        let queue = state.runtime_sync_queue.read().await;
+        assert!(queue.iter().any(|task_id| task_id == "watch-a"));
+        drop(queue);
+
+        let pending = state.runtime_pending_sync_tasks.read().await;
+        assert!(pending.contains("watch-a"));
+        drop(pending);
+
+        let settle = state.runtime_chain_settle_until.read().await;
+        assert!(settle.get("watch-a").is_some());
+        drop(settle);
+
+        let producers = state.runtime_active_producers.read().await;
+        assert!(!producers.contains_key("sync:manual:task-b"));
     }
 
     #[test]

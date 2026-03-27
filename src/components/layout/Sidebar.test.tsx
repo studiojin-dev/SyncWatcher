@@ -91,7 +91,7 @@ describe('Sidebar', () => {
     expect(supportLink).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('renders the runtime app version in the footer', async () => {
+  it('renders the runtime app version in the header badge', async () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
 
     expect(await screen.findByText('v1.2.0-beta')).toBeInTheDocument();

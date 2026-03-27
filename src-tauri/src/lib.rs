@@ -2685,7 +2685,7 @@ fn downstream_watch_task_ids_for_target(
 
 async fn remove_queued_runtime_watch_task(
     task_id: &str,
-    app: &tauri::AppHandle,
+    app: Option<&tauri::AppHandle>,
     state: &AppState,
     reason: &str,
 ) {
@@ -2701,13 +2701,16 @@ async fn remove_queued_runtime_watch_task(
     };
 
     if queued_removed {
+        let Some(app) = app else {
+            return;
+        };
         emit_runtime_sync_queue_state(app, task_id, false, Some(reason.to_string()));
     }
 }
 
 async fn block_downstream_watch_tasks_for_target(
     target_key: &str,
-    app: &tauri::AppHandle,
+    app: Option<&tauri::AppHandle>,
     state: &AppState,
     reason: &str,
 ) {
@@ -2769,14 +2772,9 @@ async fn finish_runtime_producer(
     producer_id: &str,
     target_key: &str,
     success: bool,
-    app: &tauri::AppHandle,
+    app: Option<&tauri::AppHandle>,
     state: &AppState,
 ) {
-    {
-        let mut producers = state.runtime_active_producers.write().await;
-        producers.remove(producer_id);
-    }
-
     if success {
         mark_downstream_watch_tasks_settle_for_target(target_key, state).await;
     } else {
@@ -2787,6 +2785,11 @@ async fn finish_runtime_producer(
             "Downstream watch sync blocked because the preceding write did not complete successfully.",
         )
         .await;
+    }
+
+    {
+        let mut producers = state.runtime_active_producers.write().await;
+        producers.remove(producer_id);
     }
 
     state.runtime_dispatcher_wakeup.notify_waiters();
@@ -3677,7 +3680,7 @@ async fn execute_sync_internal(
             &producer_id,
             &target_key,
             sync_result.is_ok(),
-            &app,
+            Some(&app),
             &state,
         )
         .await;
@@ -5106,7 +5109,7 @@ async fn resolve_conflict_items(
                     &producer_id,
                     &target_key,
                     apply_result.is_ok(),
-                    &app,
+                    Some(&app),
                     state.inner(),
                 )
                 .await;
@@ -5212,7 +5215,7 @@ async fn resolve_conflict_items(
                     &producer_id,
                     &target_key,
                     apply_result.is_ok(),
-                    &app,
+                    Some(&app),
                     state.inner(),
                 )
                 .await;

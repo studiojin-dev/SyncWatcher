@@ -51,13 +51,18 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <aside className="flex flex-col h-full bg-[var(--bg-primary)] border-r-4 border-[var(--border-main)] overflow-hidden">
             {/* Header Area */}
             <header className="p-6 border-b-4 border-[var(--border-main)] bg-[var(--bg-tertiary)] flex flex-col gap-2 relative">
-                <div className="flex items-center gap-3 relative z-10">
+                <div className="flex items-end justify-between gap-4 relative z-10">
+                    <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 bg-[var(--accent-error)] border-3 border-[var(--border-main)] flex items-center justify-center shadow-[4px_4px_0_0_var(--shadow-color)]">
                         <span className="font-heading font-black text-xl text-white">S</span>
                     </div>
                     <h1 className="text-2xl font-black font-heading tracking-tighter uppercase italic transform -rotate-2">
                         {t('appName')}
                     </h1>
+                    </div>
+                    <div className="shrink-0 px-4 py-2 bg-[#f5f1e6] text-black border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] rounded-2xl font-black font-heading text-xl leading-none">
+                        v{appVersion}
+                    </div>
                 </div>
             </header>
 
@@ -160,10 +165,6 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                     )}
                 </div>
 
-                <div className="neo-box p-2 bg-[var(--bg-primary)] text-center text-[10px] uppercase font-bold tracking-widest border-2 border-[var(--border-main)] relative overflow-hidden group">
-                    <span className="relative z-10">v{appVersion}</span>
-                    <div className="absolute inset-0 bg-[var(--accent-warning)] translate-y-full group-hover:translate-y-0 transition-transform duration-200" />
-                </div>
             </div>
             <LicenseActivation
                 open={showLicenseModal}

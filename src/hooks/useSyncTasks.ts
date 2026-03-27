@@ -48,6 +48,13 @@ interface PersistedSyncTask extends SyncTask {
 
 const DEFAULT_TASKS: PersistedSyncTask[] = [];
 
+function isYamlStoreParseError(value: Partial<YamlStoreError> | null | undefined): value is YamlStoreError {
+    return value?.type === 'PARSE_ERROR'
+        && typeof value.message === 'string'
+        && typeof value.filePath === 'string'
+        && typeof value.rawContent === 'string';
+}
+
 function normalizeTask(task: PersistedSyncTask): SyncTask {
     const normalizedTask: SyncTask = {
         id: task.id,
@@ -75,35 +82,118 @@ export function useSyncTasks() {
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState<YamlStoreError | null>(null);
     const tasksRef = useRef<PersistedSyncTask[]>(DEFAULT_TASKS);
+    const loadSeqRef = useRef(0);
+    const mutationSeqRef = useRef(0);
+    const pendingMutationCountRef = useRef(0);
+    const taskMutationSeqRef = useRef<Map<string, number>>(new Map());
+    const deferredLoadRequestedRef = useRef(false);
+    const loadTasksRef = useRef<() => Promise<void>>(async () => {});
     const tasks = useMemo(() => storedTasks.map(normalizeTask), [storedTasks]);
 
     useEffect(() => {
         tasksRef.current = storedTasks;
     }, [storedTasks]);
 
+    const commitTasks = useCallback((nextTasks: PersistedSyncTask[]) => {
+        tasksRef.current = nextTasks;
+        setStoredTasks(nextTasks);
+    }, []);
+
+    const beginTaskMutation = useCallback((taskId: string) => {
+        const mutationSeq = mutationSeqRef.current + 1;
+        mutationSeqRef.current = mutationSeq;
+        pendingMutationCountRef.current += 1;
+        taskMutationSeqRef.current.set(taskId, mutationSeq);
+        return mutationSeq;
+    }, []);
+
+    const endTaskMutation = useCallback((taskId: string, mutationSeq: number) => {
+        pendingMutationCountRef.current = Math.max(0, pendingMutationCountRef.current - 1);
+        if (taskMutationSeqRef.current.get(taskId) === mutationSeq) {
+            taskMutationSeqRef.current.delete(taskId);
+        }
+    }, []);
+
+    const flushDeferredLoadIfIdle = useCallback(() => {
+        if (pendingMutationCountRef.current !== 0 || !deferredLoadRequestedRef.current) {
+            return;
+        }
+
+        deferredLoadRequestedRef.current = false;
+        void loadTasksRef.current();
+    }, []);
+
+    const requestDeferredLoadReplay = useCallback(() => {
+        deferredLoadRequestedRef.current = true;
+        flushDeferredLoadIfIdle();
+    }, [flushDeferredLoadIfIdle]);
+
     const loadTasks = useCallback(async () => {
+        const loadSeq = loadSeqRef.current + 1;
+        loadSeqRef.current = loadSeq;
+        const mutationSeqAtStart = mutationSeqRef.current;
+        const startedWithPendingMutations = pendingMutationCountRef.current > 0;
+
         try {
             const response = await invoke<unknown>('list_sync_tasks');
+            if (loadSeq !== loadSeqRef.current) {
+                return;
+            }
+
             const responseError = readConfigRecord<YamlStoreError>(response, ['error']);
-            if (responseError && responseError.type === 'PARSE_ERROR') {
-                setStoredTasks(DEFAULT_TASKS);
-                setError(responseError as YamlStoreError);
+            if (isYamlStoreParseError(responseError)) {
+                if (
+                    startedWithPendingMutations
+                    || pendingMutationCountRef.current > 0
+                    || mutationSeqAtStart !== mutationSeqRef.current
+                ) {
+                    requestDeferredLoadReplay();
+                    return;
+                }
+                commitTasks(DEFAULT_TASKS);
+                setError(responseError);
                 return;
             }
 
             const nextTasks = readConfigCollection<PersistedSyncTask>(response, ['tasks', 'syncTasks']);
-            setStoredTasks(nextTasks);
+            if (
+                startedWithPendingMutations
+                || pendingMutationCountRef.current > 0
+                || mutationSeqAtStart !== mutationSeqRef.current
+            ) {
+                requestDeferredLoadReplay();
+                return;
+            }
+            commitTasks(nextTasks);
             setError(null);
         } catch (err) {
+            if (loadSeq !== loadSeqRef.current) {
+                return;
+            }
+
             const parsedError = parseConfigError(err);
             const nextError = readConfigRecord<YamlStoreError>(parsedError, ['error']);
-            setStoredTasks(DEFAULT_TASKS);
-            setError(nextError && nextError.type === 'PARSE_ERROR' ? nextError as YamlStoreError : null);
+            if (
+                !startedWithPendingMutations
+                && pendingMutationCountRef.current === 0
+                && mutationSeqAtStart === mutationSeqRef.current
+            ) {
+                commitTasks(DEFAULT_TASKS);
+                setError(isYamlStoreParseError(nextError) ? nextError : null);
+            } else {
+                requestDeferredLoadReplay();
+            }
             console.error('Failed to load sync tasks:', err);
         } finally {
-            setLoaded(true);
+            if (loadSeq === loadSeqRef.current) {
+                setLoaded(true);
+            }
         }
-    }, []);
+    }, [commitTasks, requestDeferredLoadReplay]);
+
+    useEffect(() => {
+        loadTasksRef.current = loadTasks;
+    }, [loadTasks]);
 
     useEffect(() => {
         void loadTasks();
@@ -131,33 +221,37 @@ export function useSyncTasks() {
             id: crypto.randomUUID(),
         };
         newTask.autoUnmount = shouldEnableAutoUnmount(newTask);
+        const mutationSeq = beginTaskMutation(newTask.id);
 
         const nextTasks = [...tasksRef.current, newTask];
-        tasksRef.current = nextTasks;
-        setStoredTasks(nextTasks);
+        commitTasks(nextTasks);
 
         try {
             const response = await invoke<unknown>('create_sync_task', { task: newTask });
             const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
-            if (persistedTask) {
+            if (persistedTask && taskMutationSeqRef.current.get(newTask.id) === mutationSeq) {
                 const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);
-                const persistedTasks = nextTasks.map((candidate) =>
+                const persistedTasks = tasksRef.current.map((candidate) =>
                     candidate.id === newTask.id ? normalizedTask : candidate
                 );
-                tasksRef.current = persistedTasks;
-                setStoredTasks(persistedTasks);
+                commitTasks(persistedTasks);
             }
             setError(null);
         } catch (err) {
-            tasksRef.current = tasksRef.current.filter((candidate) => candidate.id !== newTask.id);
-            setStoredTasks(tasksRef.current);
+            if (taskMutationSeqRef.current.get(newTask.id) === mutationSeq) {
+                commitTasks(tasksRef.current.filter((candidate) => candidate.id !== newTask.id));
+            }
             throw err;
+        } finally {
+            endTaskMutation(newTask.id, mutationSeq);
+            flushDeferredLoadIfIdle();
         }
 
         return newTask;
-    }, []);
+    }, [beginTaskMutation, commitTasks, endTaskMutation, flushDeferredLoadIfIdle]);
 
     const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
+        const mutationSeq = beginTaskMutation(id);
         const previousTasks = tasksRef.current;
         const newTasks = previousTasks.map((t) =>
             t.id === id
@@ -171,43 +265,49 @@ export function useSyncTasks() {
                 }
                 : t
         );
-        tasksRef.current = newTasks;
-        setStoredTasks(newTasks);
+        commitTasks(newTasks);
 
         try {
             const response = await invoke<unknown>('update_sync_task', { id, updates });
             const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
-            if (persistedTask) {
+            if (persistedTask && taskMutationSeqRef.current.get(id) === mutationSeq) {
                 const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);
-                const persistedTasks = newTasks.map((candidate) =>
+                const persistedTasks = tasksRef.current.map((candidate) =>
                     candidate.id === id ? normalizedTask : candidate
                 );
-                tasksRef.current = persistedTasks;
-                setStoredTasks(persistedTasks);
+                commitTasks(persistedTasks);
             }
             setError(null);
         } catch (err) {
-            tasksRef.current = previousTasks;
-            setStoredTasks(previousTasks);
+            if (taskMutationSeqRef.current.get(id) === mutationSeq) {
+                commitTasks(previousTasks);
+            }
             throw err;
+        } finally {
+            endTaskMutation(id, mutationSeq);
+            flushDeferredLoadIfIdle();
         }
-    }, []);
+    }, [beginTaskMutation, commitTasks, endTaskMutation, flushDeferredLoadIfIdle]);
 
     const deleteTask = useCallback(async (id: string) => {
+        const mutationSeq = beginTaskMutation(id);
         const previousTasks = tasksRef.current;
         const nextTasks = previousTasks.filter((task) => task.id !== id);
-        tasksRef.current = nextTasks;
-        setStoredTasks(nextTasks);
+        commitTasks(nextTasks);
 
         try {
             await invoke('delete_sync_task', { id });
             setError(null);
         } catch (err) {
-            tasksRef.current = previousTasks;
-            setStoredTasks(previousTasks);
+            if (taskMutationSeqRef.current.get(id) === mutationSeq) {
+                commitTasks(previousTasks);
+            }
             throw err;
+        } finally {
+            endTaskMutation(id, mutationSeq);
+            flushDeferredLoadIfIdle();
         }
-    }, []);
+    }, [beginTaskMutation, commitTasks, endTaskMutation, flushDeferredLoadIfIdle]);
 
     const reload = useCallback(async () => {
         setError(null);
