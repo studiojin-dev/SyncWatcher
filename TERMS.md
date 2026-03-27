@@ -109,7 +109,7 @@ You are solely responsible for:
 
 To the maximum extent permitted by law, StudioJin and its affiliates, licensors, and suppliers will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for any loss of profits, revenue, goodwill, data, or business interruption, arising out of or related to SyncWatcher or these Terms.
 
-To the maximum extent permitted by law, our total aggregate liability arising out of or related to SyncWatcher or these Terms will not exceed the amount you paid for the relevant paid license in the 12 months before the event giving rise to the claim, or USD 50 if you did not pay anything.
+To the maximum extent permitted by law, our total aggregate liability arising out of or related to SyncWatcher or these Terms will not exceed the amount you paid for the relevant paid license in the 12 months before the event giving rise to the claim, or KRW 50,000 if you did not pay anything.
 
 Some jurisdictions do not allow certain limitations, so some of the above may not apply to you.
 
