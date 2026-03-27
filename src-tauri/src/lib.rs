@@ -2418,6 +2418,63 @@ fn find_runtime_task_validation_issue(
     None
 }
 
+fn find_runtime_orphan_target_conflict_issue(
+    task_id: &str,
+    tasks: &[RuntimeSyncTask],
+) -> Result<Option<RuntimeTaskValidationIssue>, String> {
+    input_validation::validate_task_id(task_id).map_err(|e| e.to_string())?;
+
+    let selected_task = tasks
+        .iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| format!("Sync task not found: {task_id}"))?;
+
+    if input_validation::validate_path_argument(&selected_task.target).is_err() {
+        return Ok(Some(RuntimeTaskValidationIssue::invalid_input(Some(
+            selected_task,
+        ))));
+    }
+
+    let selected_target_key = match resolved_path_key(&selected_task.target) {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok(Some(RuntimeTaskValidationIssue::invalid_input(Some(
+                selected_task,
+            ))))
+        }
+    };
+
+    for other_task in tasks.iter().filter(|task| task.id != task_id) {
+        if input_validation::validate_path_argument(&other_task.target).is_err() {
+            continue;
+        }
+
+        let Ok(other_target_key) = resolved_path_key(&other_task.target) else {
+            continue;
+        };
+
+        if is_path_overlap(&selected_target_key, &other_target_key) {
+            let code = if selected_target_key == other_target_key {
+                RuntimeTaskValidationCode::DuplicateTarget
+            } else {
+                RuntimeTaskValidationCode::TargetSubdirConflict
+            };
+
+            return Ok(Some(RuntimeTaskValidationIssue {
+                code,
+                task_id: Some(selected_task.id.clone()),
+                task_name: Some(selected_task.name.clone()),
+                conflicting_task_ids: vec![other_task.id.clone()],
+                conflicting_task_names: vec![other_task.name.clone()],
+                source: None,
+                target: Some(selected_task.target.clone()),
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
 fn build_validated_runtime_tasks(
     tasks: &[RuntimeSyncTask],
 ) -> Result<Vec<ValidatedRuntimeTask>, String> {
@@ -4769,27 +4826,60 @@ async fn find_orphan_files_internal(
 ) -> Result<Vec<OrphanFile>, String> {
     try_acquire_task_operation(&task_id, TaskOperationKind::OrphanScan, state).await?;
 
-    let source =
-        resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    let target =
-        resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-    ensure_non_overlapping_paths(&source, &target)?;
+    let result: Result<Vec<OrphanFile>, String> = async {
+        let task_records = state
+            .config_store
+            .load_tasks()
+            .map_err(config_store_error_to_string)?;
+        let runtime_tasks: Vec<RuntimeSyncTask> =
+            task_records.iter().map(to_runtime_task_record).collect();
+        if let Some(issue) = find_runtime_orphan_target_conflict_issue(&task_id, &runtime_tasks)? {
+            let selected_name = issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"));
+            let conflicting_name = issue
+                .conflicting_task_names
+                .first()
+                .map(String::as_str)
+                .or_else(|| issue.conflicting_task_ids.first().map(String::as_str))
+                .unwrap_or("unknown");
+            return Err(match issue.code {
+                RuntimeTaskValidationCode::DuplicateTarget => format!(
+                    "Orphan scan blocked: '{selected_name}' shares its target with '{conflicting_name}'."
+                ),
+                RuntimeTaskValidationCode::TargetSubdirConflict => format!(
+                    "Orphan scan blocked: '{selected_name}' uses a target nested with '{conflicting_name}'."
+                ),
+                _ => "Orphan scan blocked by task validation.".to_string(),
+            });
+        }
 
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(source.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_path_argument(target.to_str().unwrap_or(""))
-        .map_err(|e| e.to_string())?;
-    input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
+        let source =
+            resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        let target =
+            resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        ensure_non_overlapping_paths(&source, &target)?;
 
-    let engine = SyncEngine::new(source, target);
-    let orphans = engine
-        .find_orphan_files_with_cancel(&exclude_patterns, external_cancel_token)
-        .await
-        .map_err(|e| format!("{:#}", e));
+        input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(source.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())?;
+        input_validation::validate_path_argument(target.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())?;
+        input_validation::validate_exclude_patterns(&exclude_patterns)
+            .map_err(|e| e.to_string())?;
+
+        let engine = SyncEngine::new(source, target);
+        engine
+            .find_orphan_files_with_cancel(&exclude_patterns, external_cancel_token)
+            .await
+            .map_err(|e| format!("{:#}", e))
+    }
+    .await;
+
     release_task_operation(&task_id, state).await;
 
-    let orphans = orphans?;
+    let orphans = result?;
     state.log_manager.log_with_category(
         "info",
         &format!("Orphan scan completed: {} candidates", orphans.len()),
@@ -5832,6 +5922,19 @@ async fn runtime_validate_tasks(
     Ok(RuntimeTaskValidationResult {
         ok: true,
         issue: None,
+    })
+}
+
+#[tauri::command]
+async fn runtime_validate_orphan_scan(
+    task_id: String,
+    tasks: Vec<RuntimeSyncTask>,
+) -> Result<RuntimeTaskValidationResult, String> {
+    let issue = find_runtime_orphan_target_conflict_issue(&task_id, &tasks)?;
+
+    Ok(RuntimeTaskValidationResult {
+        ok: issue.is_none(),
+        issue,
     })
 }
 
@@ -7162,6 +7265,7 @@ pub fn run() {
             get_watching_tasks,
             runtime_set_config,
             runtime_validate_tasks,
+            runtime_validate_orphan_scan,
             runtime_get_state,
             set_auto_unmount_session_disabled,
             is_auto_unmount_session_disabled,

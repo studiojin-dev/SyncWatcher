@@ -12,12 +12,27 @@ const {
   addTaskMock,
   showToastMock,
   statusState,
+  syncTasksState,
   useSyncTaskStatusStoreMock,
 } = vi.hoisted(() => {
   const updateTaskMock = vi.fn();
   const deleteTaskMock = vi.fn();
   const addTaskMock = vi.fn();
   const showToastMock = vi.fn();
+  const syncTasksState = {
+    tasks: [
+      {
+        id: 'task-1',
+        name: 'Task 1',
+        source: '[DISK_UUID:disk-1]/DCIM',
+        target: '/tmp/target',
+        checksumMode: false,
+        watchMode: true,
+        autoUnmount: true,
+        sourceType: 'uuid',
+      },
+    ],
+  };
   const statusState = {
     statuses: new Map(),
     watchingTaskIds: new Set<string>(['task-1']),
@@ -45,6 +60,7 @@ const {
     addTaskMock,
     showToastMock,
     statusState,
+    syncTasksState,
     useSyncTaskStatusStoreMock,
   };
 });
@@ -70,18 +86,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 
 vi.mock('../context/SyncTasksContext', () => ({
   useSyncTasksContext: () => ({
-    tasks: [
-      {
-        id: 'task-1',
-        name: 'Task 1',
-        source: '[DISK_UUID:disk-1]/DCIM',
-        target: '/tmp/target',
-        checksumMode: false,
-        watchMode: true,
-        autoUnmount: true,
-        sourceType: 'uuid',
-      },
-    ],
+    tasks: syncTasksState.tasks,
     addTask: addTaskMock,
     updateTask: updateTaskMock,
     deleteTask: deleteTaskMock,
@@ -124,6 +129,18 @@ const openMock = open as unknown as ReturnType<typeof vi.fn>;
 describe('SyncTasksView action confirmations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    syncTasksState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Task 1',
+        source: '[DISK_UUID:disk-1]/DCIM',
+        target: '/tmp/target',
+        checksumMode: false,
+        watchMode: true,
+        autoUnmount: true,
+        sourceType: 'uuid',
+      },
+    ];
     statusState.watchingTaskIds = new Set(['task-1']);
     statusState.queuedTaskIds = new Set();
     statusState.syncingTaskIds = new Set();
@@ -151,6 +168,12 @@ describe('SyncTasksView action confirmations', () => {
         return [];
       }
       if (command === 'runtime_validate_tasks') {
+        return {
+          ok: true,
+          issue: null,
+        };
+      }
+      if (command === 'runtime_validate_orphan_scan') {
         return {
           ok: true,
           issue: null,
@@ -552,6 +575,214 @@ describe('SyncTasksView action confirmations', () => {
         level: 'error',
       }),
     );
+  });
+
+  it('shows the validation modal and blocks orphan scan for duplicate targets', async () => {
+    syncTasksState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Task 1',
+        source: '/tmp/source-1',
+        target: '/tmp/shared-target',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+      {
+        id: 'task-2',
+        name: 'Task 2',
+        source: '/tmp/source-2',
+        target: '/tmp/shared-target',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+    ];
+
+    invokeMock.mockImplementation(async (command: string, payload?: { taskId?: string }) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return { ok: true, issue: null };
+      }
+      if (command === 'runtime_validate_orphan_scan' && payload?.taskId === 'task-1') {
+        return {
+          ok: false,
+          issue: {
+            code: 'duplicateTarget',
+            taskId: 'task-1',
+            taskName: 'Task 1',
+            conflictingTaskIds: ['task-2'],
+            conflictingTaskNames: ['Task 2'],
+            source: null,
+            target: '/tmp/shared-target',
+          },
+        };
+      }
+      return undefined;
+    });
+
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTitle('orphan.title')).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getAllByTitle('orphan.title')[0]);
+
+    expect(await screen.findByText('syncTasks.validationModal.title')).toBeInTheDocument();
+    expect(screen.getByText('syncTasks.errors.duplicateTarget')).toBeInTheDocument();
+    expect(screen.getAllByText('Task 2').length).toBeGreaterThan(0);
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'find_orphan_files'),
+    ).toBe(false);
+  });
+
+  it('shows the validation modal and blocks orphan scan for nested targets', async () => {
+    syncTasksState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Task 1',
+        source: '/tmp/source-1',
+        target: '/tmp/root-target/child',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+      {
+        id: 'task-2',
+        name: 'Task 2',
+        source: '/tmp/source-2',
+        target: '/tmp/root-target',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+    ];
+
+    invokeMock.mockImplementation(async (command: string, payload?: { taskId?: string }) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return { ok: true, issue: null };
+      }
+      if (command === 'runtime_validate_orphan_scan' && payload?.taskId === 'task-1') {
+        return {
+          ok: false,
+          issue: {
+            code: 'targetSubdirConflict',
+            taskId: 'task-1',
+            taskName: 'Task 1',
+            conflictingTaskIds: ['task-2'],
+            conflictingTaskNames: ['Task 2'],
+            source: null,
+            target: '/tmp/root-target/child',
+          },
+        };
+      }
+      return undefined;
+    });
+
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTitle('orphan.title')).toHaveLength(2);
+    });
+
+    fireEvent.click(screen.getAllByTitle('orphan.title')[0]);
+
+    expect(await screen.findByText('syncTasks.validationModal.title')).toBeInTheDocument();
+    expect(screen.getByText('syncTasks.errors.targetSubdirConflict')).toBeInTheDocument();
+    expect(screen.getAllByText('Task 2').length).toBeGreaterThan(0);
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'find_orphan_files'),
+    ).toBe(false);
+  });
+
+  it('still opens orphan scan for an unrelated valid task when other tasks conflict', async () => {
+    syncTasksState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Task 1',
+        source: '/tmp/source-1',
+        target: '/tmp/conflict-root',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+      {
+        id: 'task-2',
+        name: 'Task 2',
+        source: '/tmp/source-2',
+        target: '/tmp/conflict-root/child',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+      {
+        id: 'task-3',
+        name: 'Task 3',
+        source: '/tmp/source-3',
+        target: '/tmp/isolated-target',
+        checksumMode: false,
+        watchMode: false,
+        autoUnmount: false,
+      },
+    ];
+
+    invokeMock.mockImplementation(async (command: string, payload?: { taskId?: string }) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return { ok: true, issue: null };
+      }
+      if (command === 'runtime_validate_orphan_scan' && payload?.taskId === 'task-3') {
+        return { ok: true, issue: null };
+      }
+      if (command === 'find_orphan_files') {
+        return [];
+      }
+      return undefined;
+    });
+
+    render(
+      <MantineProvider>
+        <SyncTasksView />
+      </MantineProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTitle('orphan.title')).toHaveLength(3);
+    });
+
+    fireEvent.click(screen.getAllByTitle('orphan.title')[2]);
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some((call) => call[0] === 'find_orphan_files'),
+      ).toBe(true);
+    });
+    expect(screen.queryByText('syncTasks.validationModal.title')).not.toBeInTheDocument();
   });
 
   it('renders task id fallbacks in the validation modal when some conflicting names are missing', async () => {

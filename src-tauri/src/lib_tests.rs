@@ -17,6 +17,7 @@ mod integration_tests {
         classify_missing_target_path, compute_volume_mount_diff, decide_autostart_launch,
         decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
         enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
+        find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
         find_runtime_task_validation_issue, find_runtime_watch_cycle,
         find_task_source_recommendation, finish_runtime_producer, format_bytes_with_unit,
         get_app_version, handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
@@ -704,6 +705,110 @@ mod integration_tests {
             .err()
             .unwrap_or_default()
             .contains("Target path conflict"));
+    }
+
+    #[test]
+    fn test_orphan_target_conflict_helper_returns_duplicate_target_for_selected_task() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/shared", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/shared", false),
+        ];
+
+        let issue = find_runtime_orphan_target_conflict_issue("b", &tasks)
+            .expect("helper should not error")
+            .expect("selected task should be blocked");
+
+        assert_eq!(issue.code, RuntimeTaskValidationCode::DuplicateTarget);
+        assert_eq!(issue.task_id.as_deref(), Some("b"));
+        assert_eq!(issue.conflicting_task_ids, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn test_orphan_target_conflict_helper_returns_nested_target_for_selected_task() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/root", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/root/child", false),
+        ];
+
+        let issue = find_runtime_orphan_target_conflict_issue("b", &tasks)
+            .expect("helper should not error")
+            .expect("selected task should be blocked");
+
+        assert_eq!(issue.code, RuntimeTaskValidationCode::TargetSubdirConflict);
+        assert_eq!(issue.task_id.as_deref(), Some("b"));
+        assert_eq!(issue.conflicting_task_ids, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn test_orphan_target_conflict_helper_ignores_unrelated_task_conflicts() {
+        let tasks = vec![
+            build_runtime_task_with_paths("a", "/src/a", "/dst/root", false),
+            build_runtime_task_with_paths("b", "/src/b", "/dst/root/child", false),
+            build_runtime_task_with_paths("c", "/src/c", "/dst/isolated", false),
+        ];
+
+        let issue = find_runtime_orphan_target_conflict_issue("c", &tasks)
+            .expect("helper should not error");
+
+        assert!(issue.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_find_orphan_files_internal_rejects_selected_task_target_conflict() {
+        let state = build_app_state();
+        state
+            .config_store
+            .save_tasks(&[
+                SyncTaskRecord {
+                    id: "task-a".to_string(),
+                    name: "Task A".to_string(),
+                    source: "/src/a".to_string(),
+                    target: "/dst/shared".to_string(),
+                    checksum_mode: false,
+                    verify_after_copy: true,
+                    exclusion_sets: Vec::new(),
+                    watch_mode: false,
+                    auto_unmount: false,
+                    source_type: Some(SourceType::Path),
+                    source_uuid: None,
+                    source_uuid_type: None,
+                    source_sub_path: None,
+                    source_identity: None,
+                },
+                SyncTaskRecord {
+                    id: "task-b".to_string(),
+                    name: "Task B".to_string(),
+                    source: "/src/b".to_string(),
+                    target: "/dst/shared".to_string(),
+                    checksum_mode: false,
+                    verify_after_copy: true,
+                    exclusion_sets: Vec::new(),
+                    watch_mode: false,
+                    auto_unmount: false,
+                    source_type: Some(SourceType::Path),
+                    source_uuid: None,
+                    source_uuid_type: None,
+                    source_sub_path: None,
+                    source_identity: None,
+                },
+            ])
+            .expect("tasks should save");
+
+        let result = find_orphan_files_internal(
+            "task-b".to_string(),
+            PathBuf::from("/src/b"),
+            PathBuf::from("/dst/shared"),
+            Vec::new(),
+            &state,
+            None,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap_or_default()
+            .contains("Orphan scan blocked"));
     }
 
     #[test]

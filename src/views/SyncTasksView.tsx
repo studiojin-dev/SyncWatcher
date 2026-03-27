@@ -289,7 +289,9 @@ function SyncTasksView({
           onDeleteTask={(task) => {
             void handleDelete(task);
           }}
-          onShowOrphans={openOrphansView}
+          onShowOrphans={(task, excludePatterns) => {
+            void openOrphansView(task, excludePatterns);
+          }}
           onShowLogs={openLogsView}
         />
       ) : null}

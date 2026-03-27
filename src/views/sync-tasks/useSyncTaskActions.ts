@@ -141,16 +141,39 @@ export function useSyncTaskActions({
   );
 
   const openOrphansView = useCallback(
-    (task: SyncTask, excludePatterns: string[]) => {
-      setSubView({
-        kind: 'orphans',
-        taskId: task.id,
-        source: task.source,
-        target: task.target,
-        excludePatterns,
-      });
+    async (task: SyncTask, excludePatterns: string[]) => {
+      try {
+        const validation = await invoke<RuntimeTaskValidationResult>(
+          'runtime_validate_orphan_scan',
+          {
+            taskId: task.id,
+            tasks: tasks.map(toRuntimeTask),
+          },
+        );
+
+        if (
+          !validation.ok &&
+          validation.issue &&
+          (validation.issue.code === 'duplicateTarget' ||
+            validation.issue.code === 'targetSubdirConflict')
+        ) {
+          setValidationErrorModal(validation.issue);
+          return;
+        }
+
+        setValidationErrorModal(null);
+        setSubView({
+          kind: 'orphans',
+          taskId: task.id,
+          source: task.source,
+          target: task.target,
+          excludePatterns,
+        });
+      } catch (error) {
+        showToast(getErrorMessage(error), 'error');
+      }
     },
-    [setSubView],
+    [setSubView, setValidationErrorModal, showToast, tasks],
   );
 
   const openDryRunSession = useCallback(
