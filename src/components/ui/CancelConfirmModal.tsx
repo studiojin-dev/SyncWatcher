@@ -7,6 +7,8 @@ interface CancelConfirmModalProps {
     onCancel: () => void;
     message?: string;
     title?: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
 }
 
 /**
@@ -19,6 +21,8 @@ export default function CancelConfirmModal({
     onCancel,
     message,
     title,
+    confirmLabel,
+    cancelLabel,
 }: CancelConfirmModalProps) {
     const { t } = useTranslation();
 
@@ -39,13 +43,13 @@ export default function CancelConfirmModal({
                             onClick={onCancel}
                             className="px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
                         >
-                            {t('common.no', { defaultValue: '아니오' })}
+                            {cancelLabel || t('common.no', { defaultValue: '아니오' })}
                         </button>
                         <button
                             onClick={onConfirm}
                             className="px-4 py-2 font-bold uppercase bg-[var(--color-accent-error)] text-white border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] hover:shadow-[2px_2px_0_0_var(--shadow-color)] active:shadow-none transition-all"
                         >
-                            {t('common.yes', { defaultValue: '예, 취소합니다' })}
+                            {confirmLabel || t('common.yes', { defaultValue: '예, 취소합니다' })}
                         </button>
                     </div>
                 </div>

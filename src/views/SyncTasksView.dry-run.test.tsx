@@ -1,0 +1,415 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MantineProvider } from '@mantine/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { ask } from '@tauri-apps/plugin-dialog';
+import type { SyncTask } from '../hooks/useSyncTasks';
+import type {
+  DryRunResult,
+  DryRunSessionState,
+  DryRunSessionStatus,
+} from '../types/syncEngine';
+import type { TaskStatus } from '../hooks/useSyncTaskStatus';
+import SyncTasksView from './SyncTasksView';
+
+const {
+  addTaskMock,
+  deleteTaskMock,
+  showToastMock,
+  statusState,
+  syncTasksState,
+  updateTaskMock,
+  useSyncTaskStatusStoreMock,
+} = vi.hoisted(() => {
+  const addTaskMock = vi.fn();
+  const deleteTaskMock = vi.fn();
+  const updateTaskMock = vi.fn();
+  const showToastMock = vi.fn();
+  const syncTasksState = {
+    tasks: [] as SyncTask[],
+  };
+  const statusState = {
+    statuses: new Map<string, TaskStatus>(),
+    watchingTaskIds: new Set<string>(),
+    queuedTaskIds: new Set<string>(),
+    syncingTaskIds: new Set<string>(),
+    dryRunningTaskIds: new Set<string>(),
+    dryRunSessions: new Map<string, DryRunSessionState>(),
+    setLastLog: vi.fn(),
+    setDryRunning: vi.fn(),
+    setDryRunningTasks: vi.fn(),
+    beginDryRunSession: vi.fn(),
+    setDryRunProgress: vi.fn(),
+    appendDryRunDiffBatch: vi.fn(),
+    completeDryRunSession: vi.fn(),
+    failDryRunSession: vi.fn(),
+    getDryRunSession: vi.fn(),
+    clearDryRunSession: vi.fn(),
+  };
+  const useSyncTaskStatusStoreMock = Object.assign(() => statusState, {
+    getState: () => statusState,
+  });
+
+  return {
+    addTaskMock,
+    deleteTaskMock,
+    showToastMock,
+    statusState,
+    syncTasksState,
+    updateTaskMock,
+    useSyncTaskStatusStoreMock,
+  };
+});
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => key,
+  }),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  ask: vi.fn(),
+  open: vi.fn(),
+}));
+
+vi.mock('../context/SyncTasksContext', () => ({
+  useSyncTasksContext: () => ({
+    tasks: syncTasksState.tasks,
+    addTask: addTaskMock,
+    updateTask: updateTaskMock,
+    deleteTask: deleteTaskMock,
+    error: null,
+    reload: vi.fn(),
+  }),
+}));
+
+vi.mock('../context/ExclusionSetsContext', () => ({
+  useExclusionSetsContext: () => ({
+    sets: [],
+    getPatternsForSets: vi.fn(() => []),
+  }),
+}));
+
+vi.mock('../hooks/useSettings', () => ({
+  useSettings: () => ({
+    settings: {
+      dataUnitSystem: 'binary',
+    },
+  }),
+}));
+
+vi.mock('../hooks/useSyncTaskStatus', () => ({
+  useSyncTaskStatusStore: useSyncTaskStatusStoreMock,
+  useDryRunSession: (taskId: string) => statusState.dryRunSessions.get(taskId),
+}));
+
+vi.mock('../components/ui/Toast', () => ({
+  useToast: () => ({
+    showToast: showToastMock,
+  }),
+}));
+
+const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
+const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
+const askMock = ask as unknown as ReturnType<typeof vi.fn>;
+
+function createDefaultTask(): SyncTask {
+  return {
+    id: 'task-1',
+    name: 'Task 1',
+    source: '[DISK_UUID:disk-1]/DCIM',
+    target: '/tmp/target',
+    checksumMode: false,
+    watchMode: true,
+    autoUnmount: true,
+    sourceType: 'uuid',
+  };
+}
+
+function createEmptyDryRunResult(): DryRunResult {
+  return {
+    diffs: [],
+    total_files: 0,
+    files_to_copy: 0,
+    files_modified: 0,
+    bytes_to_copy: 0,
+    targetPreflight: null,
+  };
+}
+
+function createDryRunSession(
+  taskId: string,
+  taskName: string,
+  status: DryRunSessionStatus = 'running',
+  result: DryRunResult = createEmptyDryRunResult(),
+): DryRunSessionState {
+  return {
+    taskId,
+    taskName,
+    status,
+    result,
+    updatedAtUnixMs: Date.now(),
+  };
+}
+
+function getOrCreateTaskStatus(taskId: string): TaskStatus {
+  return statusState.statuses.get(taskId) ?? { taskId, status: 'idle' };
+}
+
+function setTaskStatus(taskId: string, status: TaskStatus['status']) {
+  const current = getOrCreateTaskStatus(taskId);
+  statusState.statuses.set(taskId, { ...current, status });
+}
+
+function installStatefulStatusMockImplementations() {
+  statusState.setLastLog.mockImplementation(
+    (taskId: string, log: TaskStatus['lastLog']) => {
+      const current = getOrCreateTaskStatus(taskId);
+      statusState.statuses.set(taskId, { ...current, lastLog: log });
+    },
+  );
+  statusState.getDryRunSession.mockImplementation((taskId: string) =>
+    statusState.dryRunSessions.get(taskId),
+  );
+  statusState.setDryRunning.mockImplementation(
+    (taskId: string, dryRunning: boolean) => {
+      if (dryRunning) {
+        statusState.dryRunningTaskIds.add(taskId);
+        setTaskStatus(taskId, 'dryRunning');
+        return;
+      }
+
+      statusState.dryRunningTaskIds.delete(taskId);
+      setTaskStatus(
+        taskId,
+        statusState.watchingTaskIds.has(taskId) ? 'watching' : 'idle',
+      );
+    },
+  );
+  statusState.beginDryRunSession.mockImplementation(
+    (taskId: string, taskName: string) => {
+      statusState.dryRunSessions.set(
+        taskId,
+        createDryRunSession(taskId, taskName),
+      );
+    },
+  );
+  statusState.completeDryRunSession.mockImplementation(
+    (taskId: string, result: DryRunResult) => {
+      const current =
+        statusState.dryRunSessions.get(taskId) ??
+        createDryRunSession(taskId, taskId);
+      statusState.dryRunSessions.set(taskId, {
+        ...current,
+        status: 'completed',
+        result,
+        error: undefined,
+        updatedAtUnixMs: Date.now(),
+      });
+    },
+  );
+  statusState.failDryRunSession.mockImplementation(
+    (taskId: string, error: string) => {
+      const current =
+        statusState.dryRunSessions.get(taskId) ??
+        createDryRunSession(taskId, taskId);
+      statusState.dryRunSessions.set(taskId, {
+        ...current,
+        status: error.toLowerCase().includes('cancel') ? 'cancelled' : 'failed',
+        error,
+        updatedAtUnixMs: Date.now(),
+      });
+    },
+  );
+  statusState.clearDryRunSession.mockImplementation((taskId: string) => {
+    statusState.dryRunSessions.delete(taskId);
+  });
+}
+
+function renderWithMantine(ui: React.ReactElement) {
+  return render(<MantineProvider>{ui}</MantineProvider>);
+}
+
+function installDefaultInvokeMock() {
+  invokeMock.mockImplementation(async (command: string) => {
+    if (command === 'list_conflict_review_sessions') {
+      return [];
+    }
+    if (command === 'get_removable_volumes') {
+      return [];
+    }
+    if (command === 'sync_dry_run') {
+      return createEmptyDryRunResult();
+    }
+    return undefined;
+  });
+}
+
+describe('SyncTasksView dry-run flows', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    syncTasksState.tasks = [createDefaultTask()];
+    statusState.statuses = new Map();
+    statusState.watchingTaskIds = new Set(['task-1']);
+    statusState.queuedTaskIds = new Set();
+    statusState.syncingTaskIds = new Set();
+    statusState.dryRunningTaskIds = new Set();
+    statusState.dryRunSessions = new Map();
+    statusState.setLastLog.mockReset();
+    statusState.setDryRunning.mockReset();
+    statusState.setDryRunningTasks.mockReset();
+    statusState.beginDryRunSession.mockReset();
+    statusState.setDryRunProgress.mockReset();
+    statusState.appendDryRunDiffBatch.mockReset();
+    statusState.completeDryRunSession.mockReset();
+    statusState.failDryRunSession.mockReset();
+    statusState.getDryRunSession.mockReset();
+    statusState.clearDryRunSession.mockReset();
+    installStatefulStatusMockImplementations();
+    listenMock.mockResolvedValue(() => {});
+    askMock.mockResolvedValue(true);
+    installDefaultInvokeMock();
+  });
+
+  it('does not execute dry-run before in-app confirmation', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+
+    expect(askMock).not.toHaveBeenCalled();
+    expect(screen.getByText('syncTasks.confirmDryRun')).toBeInTheDocument();
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+    ).toBe(false);
+  });
+
+  it('executes dry-run after in-app confirmation', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+      ).toBe(true);
+    });
+    expect(statusState.beginDryRunSession).toHaveBeenCalledWith('task-1', 'Task 1');
+    expect(statusState.setDryRunning).toHaveBeenCalledWith('task-1', true);
+    expect(statusState.completeDryRunSession).toHaveBeenCalledWith(
+      'task-1',
+      createEmptyDryRunResult(),
+    );
+  });
+
+  it('reopens an existing dry-run session instead of starting a new run', async () => {
+    statusState.dryRunSessions = new Map([
+      ['task-1', createDryRunSession('task-1', 'Task 1', 'completed')],
+    ]);
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+
+    expect(askMock).not.toHaveBeenCalled();
+    expect(
+      invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+    ).toBe(false);
+    expect(screen.getByText('syncTasks.dryRun · Task 1')).toBeInTheDocument();
+  });
+
+  it('keeps the dry-run icon distinct from the watch icon when a dry-run session exists', async () => {
+    statusState.dryRunSessions = new Map([
+      ['task-1', createDryRunSession('task-1', 'Task 1', 'completed')],
+    ]);
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+      expect(screen.getByTitle('syncTasks.watchToggleOff')).toBeInTheDocument();
+    });
+
+    const dryRunIcon = screen
+      .getByTitle('syncTasks.dryRun')
+      .querySelector('svg');
+    const watchIcon = screen
+      .getByTitle('syncTasks.watchToggleOff')
+      .querySelector('svg');
+
+    expect(dryRunIcon).not.toBeNull();
+    expect(watchIcon).not.toBeNull();
+    expect(dryRunIcon?.innerHTML).not.toEqual(watchIcon?.innerHTML);
+  });
+
+  it('keeps the cancel modal path when dry-run is active without a local session', async () => {
+    statusState.statuses = new Map([
+      ['task-1', { taskId: 'task-1', status: 'dryRunning' }],
+    ]);
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('common.cancel')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('common.cancel'));
+
+    expect(askMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('syncTasks.cancelDryRun', { exact: false }),
+    ).toBeInTheDocument();
+  });
+
+  it('starts a new dry-run from the result view retry action', async () => {
+    statusState.dryRunSessions = new Map([
+      ['task-1', createDryRunSession('task-1', 'Task 1', 'completed')],
+    ]);
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+    fireEvent.click(screen.getByText('common.retry'));
+
+    expect(askMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+      ).toBe(true);
+    });
+    expect(statusState.beginDryRunSession).toHaveBeenCalledWith('task-1', 'Task 1');
+  });
+});

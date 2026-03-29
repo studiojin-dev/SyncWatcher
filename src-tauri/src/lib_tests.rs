@@ -4,7 +4,7 @@ mod integration_tests {
         apply_sync_task_update, launch_at_login_status_or_default, ConfigStore,
         SourceIdentitySnapshot, SourceType, SourceUuidType, SyncTaskRecord, UpdateSyncTaskRequest,
     };
-    use crate::logging::LogManager;
+    use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
     use crate::sync_engine::types::{
         DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
@@ -14,33 +14,42 @@ mod integration_tests {
     use crate::{
         build_runtime_watch_upstreams, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
-        classify_missing_target_path, compute_volume_mount_diff, decide_autostart_launch,
-        decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
+        classify_missing_target_path, close_conflict_review_session_internal,
+        compute_volume_mount_diff, decide_autostart_launch, decide_runtime_auto_unmount,
+        dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
         enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
         find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
         find_runtime_task_validation_issue, find_runtime_watch_cycle,
         find_task_source_recommendation, finish_runtime_producer, format_bytes_with_unit,
         get_app_version, handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
-        mark_downstream_watch_tasks_settle_for_target, normalize_uuid_sub_path,
-        parse_uuid_source_path, preflight_target_path, progress_phase_to_log_category,
-        prune_auto_unmount_session_disabled_tasks, record_runtime_validation_issue,
+        log_conflict_resolution_failure, log_conflict_resolution_success,
+        log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
+        normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
+        progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
+        read_current_conflict_file_info, record_runtime_validation_issue,
         refresh_uuid_source_identity, remove_runtime_sync_task_state,
-        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
-        runtime_get_state_internal, runtime_validation_issue_log_message,
-        runtime_watch_bootstrap_task_ids, runtime_watch_task_needs_restart,
-        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
-        sync_dry_run_internal, take_runtime_pending_sync_task, validate_runtime_tasks,
-        volume_watch_next_tick_delay, AppState, CancelOperationType, DataUnitSystem,
-        DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
+        resolve_conflict_items_internal, resolve_runtime_exclude_patterns,
+        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
+        runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
+        set_auto_unmount_session_disabled_internal, sync_dry_run_internal,
+        take_runtime_pending_sync_task, unix_now_ms, validate_runtime_tasks,
+        volume_watch_next_tick_delay, AppState, CancelOperationType, ConflictFileInfo,
+        ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
+        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
+        RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
         RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
-        RuntimeTaskValidationIssue, VolumeEmitDebounceState,
+        RuntimeTaskValidationIssue, TargetNewerConflictItem, VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::mpsc::{sync_channel, Receiver};
     use std::sync::Arc;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use tauri::Listener;
+    use tempfile::tempdir;
     use tokio::sync::{Mutex, Notify, RwLock};
     use tokio_util::sync::CancellationToken;
 
@@ -194,6 +203,84 @@ mod integration_tests {
         }
     }
 
+    fn build_conflict_item(relative_path: &str) -> TargetNewerConflictItem {
+        TargetNewerConflictItem {
+            id: "item-1".to_string(),
+            relative_path: relative_path.to_string(),
+            source_path: format!("/tmp/source/{relative_path}"),
+            target_path: format!("/tmp/target/{relative_path}"),
+            source: ConflictFileInfo {
+                size: 16,
+                modified_unix_ms: Some(100),
+                created_unix_ms: Some(90),
+            },
+            target: ConflictFileInfo {
+                size: 8,
+                modified_unix_ms: Some(110),
+                created_unix_ms: Some(80),
+            },
+            status: ConflictItemStatus::Pending,
+            note: None,
+            resolved_at_unix_ms: None,
+        }
+    }
+
+    fn build_conflict_session(
+        session_id: &str,
+        task_id: &str,
+        task_name: &str,
+        source_root: &Path,
+        target_root: &Path,
+        items: Vec<TargetNewerConflictItem>,
+    ) -> ConflictReviewSession {
+        ConflictReviewSession {
+            id: session_id.to_string(),
+            task_id: task_id.to_string(),
+            task_name: task_name.to_string(),
+            source_root: source_root.display().to_string(),
+            target_root: target_root.display().to_string(),
+            origin: ConflictSessionOrigin::Manual,
+            created_at_unix_ms: unix_now_ms(),
+            items,
+        }
+    }
+
+    fn listen_for_task_log_event<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+    ) -> Receiver<LogEvent> {
+        let (tx, rx) = sync_channel(1);
+        app.listen_any("new-log-task", move |event| {
+            let log_event = serde_json::from_str::<LogEvent>(event.payload())
+                .expect("new-log-task payload should deserialize");
+            tx.send(log_event)
+                .expect("new-log-task payload should be received");
+        });
+        rx
+    }
+
+    async fn build_conflict_item_with_paths(
+        item_id: &str,
+        relative_path: &str,
+        source_path: &Path,
+        target_path: &Path,
+    ) -> TargetNewerConflictItem {
+        TargetNewerConflictItem {
+            id: item_id.to_string(),
+            relative_path: relative_path.to_string(),
+            source_path: source_path.display().to_string(),
+            target_path: target_path.display().to_string(),
+            source: read_current_conflict_file_info(source_path)
+                .await
+                .expect("source metadata should exist"),
+            target: read_current_conflict_file_info(target_path)
+                .await
+                .expect("target metadata should exist"),
+            status: ConflictItemStatus::Pending,
+            note: None,
+            resolved_at_unix_ms: None,
+        }
+    }
+
     #[tokio::test]
     async fn test_is_runtime_watch_task_active_requires_manager_and_source_tracking() {
         let state = build_app_state();
@@ -254,6 +341,415 @@ mod integration_tests {
         // Verify log_manager is accessible by checking logs count
         let logs = state.log_manager.get_logs(None);
         assert_eq!(logs.len(), 0);
+    }
+
+    #[test]
+    fn test_log_conflict_resolution_success_records_task_log() {
+        let state = build_app_state();
+        let item = build_conflict_item("photos/a.jpg");
+
+        log_conflict_resolution_success(
+            &state,
+            Option::<&tauri::AppHandle>::None,
+            "task-1",
+            "session-1",
+            &item,
+            &ConflictResolutionAction::RenameThenCopy,
+            Some(
+                "Renamed existing target to '/tmp/target/photos/a_20260328_120000_ABC.jpg' and copied source file.",
+            ),
+        );
+
+        let logs = state.log_manager.get_logs(Some("task-1".to_string()));
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, "success");
+        assert_eq!(logs[0].category, crate::logging::LogCategory::Other);
+        assert!(logs[0].message.contains(
+            "Conflict review [session-1] renamed target then copied source: photos/a.jpg"
+        ));
+        assert!(logs[0]
+            .message
+            .contains("Renamed existing target to '/tmp/target/photos/a_20260328_120000_ABC.jpg'"));
+    }
+
+    #[test]
+    fn test_log_conflict_resolution_failure_records_task_log() {
+        let state = build_app_state();
+        let item = build_conflict_item("photos/b.jpg");
+
+        log_conflict_resolution_failure(
+            &state,
+            Option::<&tauri::AppHandle>::None,
+            "task-2",
+            "session-2",
+            &item,
+            &ConflictResolutionAction::ForceCopy,
+            "Permission denied",
+        );
+
+        let logs = state.log_manager.get_logs(Some("task-2".to_string()));
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, "error");
+        assert!(logs[0].message.contains(
+            "Conflict review [session-2] failed to force copy source over target: photos/b.jpg"
+        ));
+        assert!(logs[0].message.contains("Permission denied"));
+    }
+
+    #[test]
+    fn test_log_conflict_skip_on_close_records_task_log() {
+        let state = build_app_state();
+        let item = build_conflict_item("photos/c.jpg");
+
+        log_conflict_skip_on_close(
+            &state,
+            Option::<&tauri::AppHandle>::None,
+            "task-3",
+            "session-3",
+            &item,
+        );
+
+        let logs = state.log_manager.get_logs(Some("task-3".to_string()));
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, "warning");
+        assert!(logs[0]
+            .message
+            .contains("Conflict review [session-3] skipped pending item on close: photos/c.jpg"));
+    }
+
+    #[test]
+    fn test_log_conflict_resolution_success_emits_task_log_event() {
+        let state = build_app_state();
+        let item = build_conflict_item("photos/a.jpg");
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let rx = listen_for_task_log_event(&app_handle);
+
+        log_conflict_resolution_success(
+            &state,
+            Some(&app_handle),
+            "task-success-event",
+            "session-success-event",
+            &item,
+            &ConflictResolutionAction::RenameThenCopy,
+            Some("Renamed existing target and copied source file."),
+        );
+
+        let event = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected new-log-task event");
+        assert_eq!(event.task_id.as_deref(), Some("task-success-event"));
+        assert_eq!(event.entry.level, "success");
+        assert_eq!(event.entry.category, crate::logging::LogCategory::Other);
+        assert!(event.entry.message.contains(
+            "Conflict review [session-success-event] renamed target then copied source: photos/a.jpg"
+        ));
+    }
+
+    #[test]
+    fn test_log_conflict_resolution_failure_emits_task_log_event() {
+        let state = build_app_state();
+        let item = build_conflict_item("photos/b.jpg");
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let rx = listen_for_task_log_event(&app_handle);
+
+        log_conflict_resolution_failure(
+            &state,
+            Some(&app_handle),
+            "task-failure-event",
+            "session-failure-event",
+            &item,
+            &ConflictResolutionAction::ForceCopy,
+            "Permission denied",
+        );
+
+        let event = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected new-log-task event");
+        assert_eq!(event.task_id.as_deref(), Some("task-failure-event"));
+        assert_eq!(event.entry.level, "error");
+        assert_eq!(event.entry.category, crate::logging::LogCategory::Other);
+        assert!(event.entry.message.contains(
+            "Conflict review [session-failure-event] failed to force copy source over target: photos/b.jpg"
+        ));
+        assert!(event.entry.message.contains("Permission denied"));
+    }
+
+    #[test]
+    fn test_log_conflict_skip_on_close_emits_task_log_event() {
+        let state = build_app_state();
+        let item = build_conflict_item("photos/c.jpg");
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let rx = listen_for_task_log_event(&app_handle);
+
+        log_conflict_skip_on_close(
+            &state,
+            Some(&app_handle),
+            "task-skip-event",
+            "session-skip-event",
+            &item,
+        );
+
+        let event = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected new-log-task event");
+        assert_eq!(event.task_id.as_deref(), Some("task-skip-event"));
+        assert_eq!(event.entry.level, "warning");
+        assert_eq!(event.entry.category, crate::logging::LogCategory::Other);
+        assert!(event.entry.message.contains(
+            "Conflict review [session-skip-event] skipped pending item on close: photos/c.jpg"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_conflict_items_internal_rename_then_copy_updates_files_session_and_logs()
+    {
+        let state = build_app_state();
+        let temp = tempdir().expect("tempdir should be created");
+        let source_root = temp.path().join("source");
+        let target_root = temp.path().join("target");
+        let relative_path = "photos/a.jpg";
+        let source_path = source_root.join(relative_path);
+        let target_path = target_root.join(relative_path);
+
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "new-photo").unwrap();
+        std::fs::write(&target_path, "old-photo").unwrap();
+
+        let item =
+            build_conflict_item_with_paths("item-1", relative_path, &source_path, &target_path)
+                .await;
+        let session = build_conflict_session(
+            "session-rename",
+            "task-rename",
+            "Task Rename",
+            &source_root,
+            &target_root,
+            vec![item],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-rename".to_string(), session);
+
+        let result = resolve_conflict_items_internal(
+            "session-rename".to_string(),
+            vec![ConflictResolutionRequest {
+                item_id: "item-1".to_string(),
+                action: ConflictResolutionAction::RenameThenCopy,
+            }],
+            None,
+            &state,
+        )
+        .await
+        .expect("rename then copy should succeed");
+
+        assert_eq!(result.processed_count, 1);
+        assert_eq!(result.pending_count, 0);
+        assert!(result.failures.is_empty());
+        assert_eq!(std::fs::read_to_string(&target_path).unwrap(), "new-photo");
+
+        let sibling_paths: Vec<PathBuf> = std::fs::read_dir(target_path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(sibling_paths.len(), 2);
+        let backup_path = sibling_paths
+            .into_iter()
+            .find(|path| path != &target_path)
+            .expect("renamed backup should exist");
+        assert_eq!(std::fs::read_to_string(&backup_path).unwrap(), "old-photo");
+
+        let sessions = state.conflict_review_sessions.read().await;
+        let session = sessions.get("session-rename").unwrap();
+        let item = &session.items[0];
+        assert_eq!(item.status, ConflictItemStatus::SafeCopied);
+        assert!(item
+            .note
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Renamed existing target to"));
+        assert!(item.resolved_at_unix_ms.is_some());
+        drop(sessions);
+
+        let logs = state.log_manager.get_logs(Some("task-rename".to_string()));
+        assert!(logs.iter().any(|entry| {
+            entry.level == "success"
+                && entry
+                    .message
+                    .contains("Conflict review [session-rename] renamed target then copied source: photos/a.jpg")
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_conflict_items_internal_records_failure_log_and_note_on_copy_error() {
+        let state = build_app_state();
+        let temp = tempdir().expect("tempdir should be created");
+        let source_root = temp.path().join("source");
+        let target_root = temp.path().join("target");
+        let relative_path = "docs/missing.txt";
+        let source_path = source_root.join(relative_path);
+        let target_path = target_root.join(relative_path);
+
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "original-source").unwrap();
+        std::fs::write(&target_path, "existing-target").unwrap();
+
+        let item = build_conflict_item_with_paths(
+            "item-missing",
+            relative_path,
+            &source_path,
+            &target_path,
+        )
+        .await;
+        std::fs::remove_file(&source_path).unwrap();
+
+        let session = build_conflict_session(
+            "session-missing",
+            "task-missing",
+            "Task Missing",
+            &source_root,
+            &target_root,
+            vec![item],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-missing".to_string(), session);
+
+        let result = resolve_conflict_items_internal(
+            "session-missing".to_string(),
+            vec![ConflictResolutionRequest {
+                item_id: "item-missing".to_string(),
+                action: ConflictResolutionAction::ForceCopy,
+            }],
+            None,
+            &state,
+        )
+        .await
+        .expect("failure should be reported in the result, not as a command error");
+
+        assert_eq!(result.processed_count, 0);
+        assert_eq!(result.pending_count, 1);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].message.contains("Failed to copy file"));
+
+        let sessions = state.conflict_review_sessions.read().await;
+        let session = sessions.get("session-missing").unwrap();
+        let item = &session.items[0];
+        assert_eq!(item.status, ConflictItemStatus::Pending);
+        assert!(item
+            .note
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Failed to copy file"));
+        assert!(item.resolved_at_unix_ms.is_none());
+        drop(sessions);
+
+        let logs = state.log_manager.get_logs(Some("task-missing".to_string()));
+        assert!(logs.iter().any(|entry| {
+            entry.level == "error"
+                && entry
+                    .message
+                    .contains("Conflict review [session-missing] failed to force copy source over target: docs/missing.txt")
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_close_conflict_review_session_internal_skips_pending_items_and_logs_each_one() {
+        let state = build_app_state();
+        let source_root = PathBuf::from("/tmp/source-root");
+        let target_root = PathBuf::from("/tmp/target-root");
+        let session = build_conflict_session(
+            "session-close",
+            "task-close",
+            "Task Close",
+            &source_root,
+            &target_root,
+            vec![
+                build_conflict_item("photos/a.jpg"),
+                build_conflict_item("photos/b.jpg"),
+            ],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-close".to_string(), session);
+
+        let result =
+            close_conflict_review_session_internal("session-close".to_string(), true, None, &state)
+                .await
+                .expect("closing with force skip should succeed");
+
+        assert!(result.closed);
+        assert!(result.had_pending);
+        assert_eq!(result.skipped_count, 2);
+        assert!(state
+            .conflict_review_sessions
+            .read()
+            .await
+            .get("session-close")
+            .is_none());
+
+        let logs = state.log_manager.get_logs(Some("task-close".to_string()));
+        assert_eq!(logs.len(), 2);
+        assert!(logs.iter().all(|entry| {
+            entry.level == "warning"
+                && entry
+                    .message
+                    .contains("Conflict review [session-close] skipped pending item on close:")
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_close_conflict_review_session_internal_keeps_pending_session_without_force_skip()
+    {
+        let state = build_app_state();
+        let source_root = PathBuf::from("/tmp/source-root");
+        let target_root = PathBuf::from("/tmp/target-root");
+        let session = build_conflict_session(
+            "session-stay-open",
+            "task-stay-open",
+            "Task Stay Open",
+            &source_root,
+            &target_root,
+            vec![build_conflict_item("photos/c.jpg")],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-stay-open".to_string(), session);
+
+        let result = close_conflict_review_session_internal(
+            "session-stay-open".to_string(),
+            false,
+            None,
+            &state,
+        )
+        .await
+        .expect("closing without force skip should return a result");
+
+        assert!(!result.closed);
+        assert!(result.had_pending);
+        assert_eq!(result.skipped_count, 0);
+        assert!(state
+            .conflict_review_sessions
+            .read()
+            .await
+            .get("session-stay-open")
+            .is_some());
+        assert!(state
+            .log_manager
+            .get_logs(Some("task-stay-open".to_string()))
+            .is_empty());
     }
 
     #[test]

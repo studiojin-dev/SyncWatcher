@@ -65,14 +65,14 @@ impl LogCategory {
 }
 
 /// Event emitted when a new log entry is added
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEvent {
     pub task_id: Option<String>,
     pub entry: LogEntry,
 }
 
 /// Batch event for multiple logs
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogBatchEvent {
     pub task_id: Option<String>,
     pub entries: Vec<LogEntry>,
@@ -119,13 +119,13 @@ impl LogManager {
         }
     }
 
-    pub fn log_with_category_and_event(
+    pub fn log_with_category_and_event<R: tauri::Runtime>(
         &self,
         level: &str,
         message: &str,
         task_id: Option<String>,
         category: LogCategory,
-        app: Option<&tauri::AppHandle>,
+        app: Option<&tauri::AppHandle<R>>,
     ) {
         let entry = Self::build_entry(level, message, task_id.clone(), category);
         self.append_entries(std::slice::from_ref(&entry));
@@ -141,12 +141,12 @@ impl LogManager {
         }
     }
 
-    pub fn log_with_event(
+    pub fn log_with_event<R: tauri::Runtime>(
         &self,
         level: &str,
         message: &str,
         task_id: Option<String>,
-        app: Option<&tauri::AppHandle>,
+        app: Option<&tauri::AppHandle<R>>,
     ) {
         self.log_with_category_and_event(level, message, task_id, LogCategory::Other, app);
     }
@@ -158,15 +158,21 @@ impl LogManager {
         task_id: Option<String>,
         category: LogCategory,
     ) {
-        self.log_with_category_and_event(level, message, task_id, category, None);
+        self.log_with_category_and_event(
+            level,
+            message,
+            task_id,
+            category,
+            Option::<&tauri::AppHandle>::None,
+        );
     }
 
     /// Add multiple logs at once and optionally emit a batch event
-    pub fn log_batch_entries(
+    pub fn log_batch_entries<R: tauri::Runtime>(
         &self,
         entries: Vec<LogEntry>,
         task_id: Option<String>,
-        app: Option<&tauri::AppHandle>,
+        app: Option<&tauri::AppHandle<R>>,
     ) {
         if entries.is_empty() {
             return;
@@ -178,12 +184,12 @@ impl LogManager {
         }
     }
 
-    pub fn log_batch_with_category(
+    pub fn log_batch_with_category<R: tauri::Runtime>(
         &self,
         mut entries: Vec<LogEntry>,
         task_id: Option<String>,
         category: LogCategory,
-        app: Option<&tauri::AppHandle>,
+        app: Option<&tauri::AppHandle<R>>,
     ) {
         for entry in &mut entries {
             entry.category = category.clone();
@@ -192,11 +198,11 @@ impl LogManager {
     }
 
     /// Backward-compatible API: defaults all batch entries to Other category.
-    pub fn log_batch(
+    pub fn log_batch<R: tauri::Runtime>(
         &self,
         entries: Vec<LogEntry>,
         task_id: Option<String>,
-        app: Option<&tauri::AppHandle>,
+        app: Option<&tauri::AppHandle<R>>,
     ) {
         self.log_batch_with_category(entries, task_id, LogCategory::Other, app);
     }
@@ -390,7 +396,8 @@ mod tests {
             .all(|entry| entry.category.is_activity_visible()));
         assert!(activity_logs
             .iter()
-            .all(|entry| !(entry.category == LogCategory::ValidationError && entry.task_id.is_some())));
+            .all(|entry| !(entry.category == LogCategory::ValidationError
+                && entry.task_id.is_some())));
     }
 
     #[test]

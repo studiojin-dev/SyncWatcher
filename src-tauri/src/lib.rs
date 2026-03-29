@@ -1284,6 +1284,98 @@ fn build_conflict_item(
     }
 }
 
+fn conflict_resolution_success_log_details(
+    action: &ConflictResolutionAction,
+) -> (&'static str, &'static str) {
+    match action {
+        ConflictResolutionAction::ForceCopy => ("warning", "force copied source over target"),
+        ConflictResolutionAction::RenameThenCopy => {
+            ("success", "renamed target then copied source")
+        }
+        ConflictResolutionAction::Skip => ("warning", "skipped for this run"),
+    }
+}
+
+fn conflict_resolution_failure_action_text(action: &ConflictResolutionAction) -> &'static str {
+    match action {
+        ConflictResolutionAction::ForceCopy => "force copy source over target",
+        ConflictResolutionAction::RenameThenCopy => "rename target then copy source",
+        ConflictResolutionAction::Skip => "skip for this run",
+    }
+}
+
+fn log_conflict_resolution_success<R: tauri::Runtime>(
+    state: &AppState,
+    app: Option<&AppHandle<R>>,
+    task_id: &str,
+    session_id: &str,
+    item: &TargetNewerConflictItem,
+    action: &ConflictResolutionAction,
+    note: Option<&str>,
+) {
+    let (level, action_text) = conflict_resolution_success_log_details(action);
+    let mut message = format!(
+        "Conflict review [{}] {}: {}",
+        session_id, action_text, item.relative_path
+    );
+    if let Some(note) = note {
+        message.push('\n');
+        message.push_str(note);
+    }
+    state.log_manager.log_with_category_and_event(
+        level,
+        &message,
+        Some(task_id.to_string()),
+        LogCategory::Other,
+        app,
+    );
+}
+
+fn log_conflict_resolution_failure<R: tauri::Runtime>(
+    state: &AppState,
+    app: Option<&AppHandle<R>>,
+    task_id: &str,
+    session_id: &str,
+    item: &TargetNewerConflictItem,
+    action: &ConflictResolutionAction,
+    error: &str,
+) {
+    let message = format!(
+        "Conflict review [{}] failed to {}: {}\n{}",
+        session_id,
+        conflict_resolution_failure_action_text(action),
+        item.relative_path,
+        error
+    );
+    state.log_manager.log_with_category_and_event(
+        "error",
+        &message,
+        Some(task_id.to_string()),
+        LogCategory::Other,
+        app,
+    );
+}
+
+fn log_conflict_skip_on_close<R: tauri::Runtime>(
+    state: &AppState,
+    app: Option<&AppHandle<R>>,
+    task_id: &str,
+    session_id: &str,
+    item: &TargetNewerConflictItem,
+) {
+    let message = format!(
+        "Conflict review [{}] skipped pending item on close: {}",
+        session_id, item.relative_path
+    );
+    state.log_manager.log_with_category_and_event(
+        "warning",
+        &message,
+        Some(task_id.to_string()),
+        LogCategory::Other,
+        app,
+    );
+}
+
 fn session_id_for_task(task_id: &str, seq: u64) -> String {
     let ts = unix_now_ms();
     format!("conflict-{task_id}-{ts}-{seq}")
@@ -5154,6 +5246,15 @@ async fn resolve_conflict_items(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ConflictResolutionResult, String> {
+    resolve_conflict_items_internal(session_id, resolutions, Some(&app), state.inner()).await
+}
+
+async fn resolve_conflict_items_internal(
+    session_id: String,
+    resolutions: Vec<ConflictResolutionRequest>,
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+) -> Result<ConflictResolutionResult, String> {
     if resolutions.is_empty() {
         let pending_count = {
             let sessions = state.conflict_review_sessions.read().await;
@@ -5284,7 +5385,7 @@ async fn resolve_conflict_items(
                     producer_id.clone(),
                     RuntimeProducerKind::ConflictForceCopy,
                     target_key.clone(),
-                    state.inner(),
+                    state,
                 )
                 .await;
 
@@ -5301,8 +5402,8 @@ async fn resolve_conflict_items(
                     &producer_id,
                     &target_key,
                     apply_result.is_ok(),
-                    Some(&app),
-                    state.inner(),
+                    app,
+                    state,
                 )
                 .await;
 
@@ -5319,7 +5420,7 @@ async fn resolve_conflict_items(
                     producer_id.clone(),
                     RuntimeProducerKind::ConflictRenameThenCopy,
                     target_key.clone(),
-                    state.inner(),
+                    state,
                 )
                 .await;
 
@@ -5407,8 +5508,8 @@ async fn resolve_conflict_items(
                     &producer_id,
                     &target_key,
                     apply_result.is_ok(),
-                    Some(&app),
-                    state.inner(),
+                    app,
+                    state,
                 )
                 .await;
 
@@ -5419,6 +5520,7 @@ async fn resolve_conflict_items(
         match apply_result {
             Ok((next_status, note)) => {
                 processed_count += 1;
+                let note_for_log = note.clone();
                 let mut sessions = state.conflict_review_sessions.write().await;
                 if let Some(session) = sessions.get_mut(&session_id) {
                     if let Some(item) = session
@@ -5431,6 +5533,16 @@ async fn resolve_conflict_items(
                         item.resolved_at_unix_ms = Some(unix_now_ms());
                     }
                 }
+                drop(sessions);
+                log_conflict_resolution_success(
+                    state,
+                    app,
+                    &session_task_id,
+                    &session_id,
+                    &item_snapshot,
+                    &request.action,
+                    note_for_log.as_deref(),
+                );
             }
             Err(error) => {
                 failures.push(ConflictResolutionFailure {
@@ -5447,6 +5559,19 @@ async fn resolve_conflict_items(
                         item.note = Some(error);
                     }
                 }
+                drop(sessions);
+                log_conflict_resolution_failure(
+                    state,
+                    app,
+                    &session_task_id,
+                    &session_id,
+                    &item_snapshot,
+                    &request.action,
+                    failures
+                        .last()
+                        .map(|failure| failure.message.as_str())
+                        .unwrap_or("Conflict resolution failed"),
+                );
             }
         }
     }
@@ -5459,14 +5584,16 @@ async fn resolve_conflict_items(
         pending_conflict_count(&session.items)
     };
 
-    emit_conflict_review_queue_changed(&app, state.inner()).await;
-    let _ = app.emit(
-        "conflict-review-session-updated",
-        ConflictReviewSessionUpdatedEvent {
-            session_id: session_id.clone(),
-            pending_count,
-        },
-    );
+    if let Some(app) = app {
+        emit_conflict_review_queue_changed(app, state).await;
+        let _ = app.emit(
+            "conflict-review-session-updated",
+            ConflictReviewSessionUpdatedEvent {
+                session_id: session_id.clone(),
+                pending_count,
+            },
+        );
+    }
 
     Ok(ConflictResolutionResult {
         session_id,
@@ -5484,6 +5611,21 @@ async fn close_conflict_review_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<CloseConflictReviewSessionResult, String> {
+    close_conflict_review_session_internal(
+        session_id,
+        force_skip_pending,
+        Some(&app),
+        state.inner(),
+    )
+    .await
+}
+
+async fn close_conflict_review_session_internal(
+    session_id: String,
+    force_skip_pending: bool,
+    app: Option<&tauri::AppHandle>,
+    state: &AppState,
+) -> Result<CloseConflictReviewSessionResult, String> {
     let mut sessions = state.conflict_review_sessions.write().await;
     let Some(session) = sessions.get_mut(&session_id) else {
         return Err(format!("Conflict session not found: {session_id}"));
@@ -5498,6 +5640,7 @@ async fn close_conflict_review_session(
         });
     }
 
+    let session_task_id = session.task_id.clone();
     let mut skipped_count = 0usize;
     if had_pending && force_skip_pending {
         for item in &mut session.items {
@@ -5506,6 +5649,7 @@ async fn close_conflict_review_session(
                 item.note = Some("Skipped when session closed with pending items.".to_string());
                 item.resolved_at_unix_ms = Some(unix_now_ms());
                 skipped_count += 1;
+                log_conflict_skip_on_close(state, app, &session_task_id, &session_id, item);
             }
         }
     }
@@ -5513,14 +5657,16 @@ async fn close_conflict_review_session(
     sessions.remove(&session_id);
     drop(sessions);
 
-    emit_conflict_review_queue_changed(&app, state.inner()).await;
-    let _ = app.emit(
-        "conflict-review-session-updated",
-        ConflictReviewSessionUpdatedEvent {
-            session_id,
-            pending_count: 0,
-        },
-    );
+    if let Some(app) = app {
+        emit_conflict_review_queue_changed(app, state).await;
+        let _ = app.emit(
+            "conflict-review-session-updated",
+            ConflictReviewSessionUpdatedEvent {
+                session_id,
+                pending_count: 0,
+            },
+        );
+    }
 
     Ok(CloseConflictReviewSessionResult {
         closed: true,

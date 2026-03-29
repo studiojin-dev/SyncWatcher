@@ -86,8 +86,10 @@ function SyncTasksView({
   });
   const {
     cancelConfirm,
+    cancelPendingDryRun,
     clearCancelConfirm,
     closeForm,
+    confirmPendingDryRun,
     conflictSessions,
     conflictSessionsLoading,
     handleCancelConfirm,
@@ -103,6 +105,7 @@ function SyncTasksView({
     openEditTask,
     openLogsView,
     openOrphansView,
+    pendingDryRunTask,
     requestCancel,
     startDryRun,
     syncing,
@@ -172,6 +175,20 @@ function SyncTasksView({
         message={t('syncTasks.cancelConfirm', {
           defaultValue: '정말로 작업을 취소하시겠습니까?',
         })}
+      />
+
+      <CancelConfirmModal
+        opened={!!pendingDryRunTask}
+        onConfirm={() => {
+          void confirmPendingDryRun();
+        }}
+        onCancel={cancelPendingDryRun}
+        title={t('syncTasks.dryRun')}
+        message={t('syncTasks.confirmDryRun', {
+          defaultValue: 'Dry Run을 시작할까요?',
+        })}
+        confirmLabel={t('common.confirm', { defaultValue: '확인' })}
+        cancelLabel={t('common.cancel', { defaultValue: '취소' })}
       />
 
       <SyncTaskValidationErrorModal

@@ -191,10 +191,9 @@ fn parse_required_u64(name: &str, value: Option<String>) -> Result<u64, String> 
 
 fn parse_optional_u64(name: &str, value: Option<String>) -> Result<Option<u64>, String> {
     match value {
-        Some(raw) => raw
-            .parse::<u64>()
-            .map(Some)
-            .map_err(|_| format!("Invalid Lemon Squeezy config for {name}: expected unsigned integer")),
+        Some(raw) => raw.parse::<u64>().map(Some).map_err(|_| {
+            format!("Invalid Lemon Squeezy config for {name}: expected unsigned integer")
+        }),
         None => Ok(None),
     }
 }

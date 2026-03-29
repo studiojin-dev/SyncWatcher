@@ -92,6 +92,9 @@ export function useSyncTaskActions({
   >(new Set());
   const [cancelConfirm, setCancelConfirm] =
     useState<CancelConfirmState | null>(null);
+  const [pendingDryRunTask, setPendingDryRunTask] = useState<SyncTask | null>(
+    null,
+  );
   const [conflictSessions, setConflictSessions] = useState<
     ConflictSessionSummary[]
   >([]);
@@ -99,6 +102,10 @@ export function useSyncTaskActions({
 
   const clearCancelConfirm = useCallback(() => {
     setCancelConfirm(null);
+  }, []);
+
+  const cancelPendingDryRun = useCallback(() => {
+    setPendingDryRunTask(null);
   }, []);
 
   const requestCancel = useCallback(
@@ -554,21 +561,8 @@ export function useSyncTaskActions({
     [showToast, t, updateTask, watchTogglePendingIds],
   );
 
-  const startDryRun = useCallback(
+  const runDryRun = useCallback(
     async (task: SyncTask) => {
-      const confirmed = await ask(
-        t('syncTasks.confirmDryRun', {
-          defaultValue: 'Dry Run을 시작할까요?',
-        }),
-        {
-          title: t('syncTasks.dryRun'),
-          kind: 'warning',
-        },
-      );
-      if (!confirmed) {
-        return;
-      }
-
       const store = useSyncTaskStatusStore.getState();
       store.beginDryRunSession(task.id, task.name);
       store.setDryRunning(task.id, true);
@@ -609,6 +603,20 @@ export function useSyncTaskActions({
       t,
     ],
   );
+
+  const confirmPendingDryRun = useCallback(async () => {
+    if (!pendingDryRunTask) {
+      return;
+    }
+
+    const task = pendingDryRunTask;
+    setPendingDryRunTask(null);
+    await runDryRun(task);
+  }, [pendingDryRunTask, runDryRun]);
+
+  const startDryRun = useCallback((task: SyncTask) => {
+    setPendingDryRunTask(task);
+  }, []);
 
   const handleDryRun = useCallback(
     async (task: SyncTask) => {
@@ -701,9 +709,12 @@ export function useSyncTaskActions({
     syncing,
     watchTogglePendingIds,
     cancelConfirm,
+    pendingDryRunTask,
     conflictSessions,
     conflictSessionsLoading,
     clearCancelConfirm,
+    cancelPendingDryRun,
+    confirmPendingDryRun,
     requestCancel,
     closeForm,
     openCreateForm,
