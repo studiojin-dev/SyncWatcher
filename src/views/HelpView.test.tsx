@@ -7,9 +7,15 @@ vi.mock('react-i18next', () => ({
     t: vi.fn((key: string) => {
       const translations: Record<string, string> = {
         'help.title': 'Help & Documentation',
+        'help.recurringNotice.title': 'Recurring Schedule Runtime Rule',
+        'help.recurringNotice.description':
+          'Recurring schedules only run while the SyncWatcher process is alive.',
         'help.safetyChecklist.title': 'Core Safety Checklist',
         'help.safetyChecklist.checksumCost': 'Checksum mode compares full-file hashes when metadata matches, so CPU/IO cost can increase.',
         'help.safetyChecklist.deleteMissingRemoved': '`deleteMissing` automatic deletion is removed. Delete through Orphan workflow only.',
+        'help.sections.recurringSchedules.title': 'Recurring Schedule Engine',
+        'help.sections.recurringSchedules.runtimeOnly':
+          'Recurring schedules run only while the SyncWatcher process is running.',
         'help.sections.watchRuntime.title': 'Watch / Runtime Behavior',
         'help.sections.watchRuntime.queuedState': 'Watch-triggered syncs are queued and shown as QUEUED when waiting.',
         'help.sections.watchRuntime.systemMetadataAlwaysExcluded':
@@ -31,6 +37,14 @@ describe('HelpView', () => {
     render(<HelpView />);
 
     expect(screen.getByText('Core Safety Checklist')).toBeInTheDocument();
+    expect(screen.getByText('Recurring Schedule Runtime Rule')).toBeInTheDocument();
+    expect(
+      screen.getByText('Recurring schedules only run while the SyncWatcher process is alive.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('Recurring Schedule Engine')).toBeInTheDocument();
+    expect(
+      screen.getByText('Recurring schedules run only while the SyncWatcher process is running.')
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         'Checksum mode compares full-file hashes when metadata matches, so CPU/IO cost can increase.'

@@ -7,6 +7,7 @@ pub mod license_validation;
 pub mod logging;
 pub mod mcp_jobs;
 pub mod path_validation;
+pub mod recurring;
 pub mod sync_engine;
 pub mod system_integration;
 pub mod watcher;
@@ -20,6 +21,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime};
+use chrono::Utc;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
@@ -39,6 +41,7 @@ use system_integration::DiskMonitor;
 
 use config_store::{
     apply_sync_task_update, build_sync_task_record, default_config_dir,
+    default_app_support_dir,
     default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
     AppSettings, ConfigStore, ConfigStoreChangedEvent, DeleteResultEnvelope, ExclusionSetEnvelope,
     ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NewSyncTaskRecord,
@@ -50,6 +53,10 @@ use license::generate_licenses_report;
 use logging::LogManager;
 use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
 use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
+use recurring::{
+    next_scheduled_fire_at, supported_timezone_names, RecurringScheduleHistoryEntry,
+    RecurringScheduleHistoryStatus, RecurringScheduleHistoryStore, RecurringScheduleRecord,
+};
 
 use watcher::{WatchEvent, WatcherManager};
 
@@ -338,6 +345,10 @@ pub struct AppState {
     conflict_review_seq: Arc<AtomicU64>,
     /// task 단위의 상호배타 operation 락
     active_task_operations: Arc<RwLock<HashMap<String, TaskOperationKind>>>,
+    /// 정기 실행 히스토리 저장소
+    recurring_schedule_history_store: Arc<RecurringScheduleHistoryStore>,
+    /// 정기 실행 스케줄러 재평가 알림
+    recurring_scheduler_wakeup: Arc<Notify>,
     /// 로컬 MCP control plane listener 상태
     control_plane_handle: Arc<Mutex<Option<ControlPlaneHandle>>>,
     /// MCP 장기 작업 상태 저장소
@@ -2099,6 +2110,269 @@ fn resolve_runtime_exclude_patterns(
     resolved_patterns
 }
 
+#[derive(Debug, Clone)]
+struct DueRecurringSchedule {
+    task: SyncTaskRecord,
+    schedule: RecurringScheduleRecord,
+    scheduled_for: chrono::DateTime<Utc>,
+    dispatch_key: String,
+}
+
+fn recurring_schedule_dispatch_key(task_id: &str, schedule_id: &str) -> String {
+    format!("{task_id}:{schedule_id}")
+}
+
+fn recurring_schedule_history_summary(
+    execution: &SyncExecutionResult,
+    task_name: &str,
+) -> String {
+    if execution.has_pending_conflicts {
+        format!(
+            "Scheduled sync completed for '{task_name}' with {} conflict(s) pending review.",
+            execution.conflict_count
+        )
+    } else {
+        format!(
+            "Scheduled sync completed for '{task_name}'. Copied {} file(s).",
+            execution.sync_result.files_copied
+        )
+    }
+}
+
+async fn append_recurring_schedule_history_entry(
+    task_id: &str,
+    schedule: &RecurringScheduleRecord,
+    entry: RecurringScheduleHistoryEntry,
+    state: &AppState,
+) -> Result<(), String> {
+    state
+        .recurring_schedule_history_store
+        .append_entry(
+            task_id,
+            &schedule.id,
+            schedule.retention_count,
+            entry,
+        )
+        .map(|_| ())
+}
+
+async fn run_due_recurring_schedule(
+    task: SyncTaskRecord,
+    schedule: RecurringScheduleRecord,
+    scheduled_for: chrono::DateTime<Utc>,
+    app: tauri::AppHandle,
+    state: AppState,
+) {
+    let started_at = Utc::now();
+    let exclusion_sets = match state.config_store.load_exclusion_sets() {
+        Ok(sets) => sets,
+        Err(error) => {
+            let finished_at = Utc::now();
+            let _ = append_recurring_schedule_history_entry(
+                &task.id,
+                &schedule,
+                RecurringScheduleHistoryEntry {
+                    scheduled_for: scheduled_for.to_rfc3339(),
+                    started_at: started_at.to_rfc3339(),
+                    finished_at: finished_at.to_rfc3339(),
+                    status: RecurringScheduleHistoryStatus::Failure,
+                    checksum_mode: schedule.checksum_mode,
+                    cron_expression: schedule.cron_expression.clone(),
+                    timezone: schedule.timezone.clone(),
+                    message: "Scheduled sync could not load exclusion sets.".to_string(),
+                    error_detail: Some(config_store_error_to_string(error)),
+                    conflict_count: 0,
+                },
+                &state,
+            )
+            .await;
+            return;
+        }
+    };
+
+    let runtime_task = to_runtime_task_record(&task);
+    let runtime_sets: Vec<RuntimeExclusionSet> = exclusion_sets
+        .iter()
+        .map(to_runtime_exclusion_set_record)
+        .collect();
+    let exclude_patterns = resolve_runtime_exclude_patterns(&runtime_task, &runtime_sets);
+
+    let result = execute_sync_internal(
+        task.id.clone(),
+        task.name.clone(),
+        PathBuf::from(task.source.clone()),
+        PathBuf::from(task.target.clone()),
+        schedule.checksum_mode,
+        task.verify_after_copy,
+        exclude_patterns,
+        app,
+        state.clone(),
+        false,
+        SyncOrigin::Scheduled,
+        None,
+        None,
+    )
+    .await;
+
+    let finished_at = Utc::now();
+    let history_entry = match result {
+        Ok(execution) => RecurringScheduleHistoryEntry {
+            scheduled_for: scheduled_for.to_rfc3339(),
+            started_at: started_at.to_rfc3339(),
+            finished_at: finished_at.to_rfc3339(),
+            status: RecurringScheduleHistoryStatus::Success,
+            checksum_mode: schedule.checksum_mode,
+            cron_expression: schedule.cron_expression.clone(),
+            timezone: schedule.timezone.clone(),
+            message: recurring_schedule_history_summary(&execution, &task.name),
+            error_detail: None,
+            conflict_count: execution.conflict_count as u64,
+        },
+        Err(error_detail) => RecurringScheduleHistoryEntry {
+            scheduled_for: scheduled_for.to_rfc3339(),
+            started_at: started_at.to_rfc3339(),
+            finished_at: finished_at.to_rfc3339(),
+            status: RecurringScheduleHistoryStatus::Failure,
+            checksum_mode: schedule.checksum_mode,
+            cron_expression: schedule.cron_expression.clone(),
+            timezone: schedule.timezone.clone(),
+            message: format!("Scheduled sync failed for '{}'.", task.name),
+            error_detail: Some(error_detail),
+            conflict_count: 0,
+        },
+    };
+
+    if let Err(error) =
+        append_recurring_schedule_history_entry(&task.id, &schedule, history_entry, &state).await
+    {
+        eprintln!("[RecurringSchedule] Failed to store history: {error}");
+    }
+}
+
+fn prune_recurring_dispatch_state(
+    tasks: &[SyncTaskRecord],
+    last_dispatched: &mut HashMap<String, String>,
+) {
+    let valid_keys: HashSet<String> = tasks
+        .iter()
+        .flat_map(|task| {
+            task.recurring_schedules
+                .iter()
+                .map(move |schedule| recurring_schedule_dispatch_key(&task.id, &schedule.id))
+        })
+        .collect();
+    last_dispatched.retain(|key, _| valid_keys.contains(key));
+}
+
+fn compute_due_recurring_schedules(
+    tasks: &[SyncTaskRecord],
+    now: chrono::DateTime<Utc>,
+    last_dispatched: &HashMap<String, String>,
+) -> Result<(Vec<DueRecurringSchedule>, Option<chrono::DateTime<Utc>>), String> {
+    let mut due = Vec::new();
+    let mut next_fire: Option<chrono::DateTime<Utc>> = None;
+
+    for task in tasks {
+        for schedule in task.recurring_schedules.iter().filter(|schedule| schedule.enabled) {
+            let fire_at = match next_scheduled_fire_at(schedule, now)? {
+                Some(fire_at) => fire_at,
+                None => continue,
+            };
+
+            if next_fire.map(|current| fire_at < current).unwrap_or(true) {
+                next_fire = Some(fire_at);
+            }
+
+            if fire_at > now {
+                continue;
+            }
+
+            let dispatch_key = recurring_schedule_dispatch_key(&task.id, &schedule.id);
+            let dispatch_marker = fire_at.to_rfc3339();
+            if last_dispatched.get(&dispatch_key) == Some(&dispatch_marker) {
+                continue;
+            }
+
+            due.push(DueRecurringSchedule {
+                task: task.clone(),
+                schedule: schedule.clone(),
+                scheduled_for: fire_at,
+                dispatch_key,
+            });
+        }
+    }
+
+    Ok((due, next_fire))
+}
+
+async fn recurring_scheduler_loop(app: tauri::AppHandle, state: AppState) {
+    let mut last_dispatched: HashMap<String, String> = HashMap::new();
+
+    loop {
+        let now = Utc::now();
+        let tasks = match state.config_store.load_tasks() {
+            Ok(tasks) => tasks,
+            Err(error) => {
+                eprintln!(
+                    "[RecurringSchedule] Failed to load tasks: {}",
+                    config_store_error_to_string(error)
+                );
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(30)) => {},
+                    _ = state.recurring_scheduler_wakeup.notified() => {},
+                }
+                continue;
+            }
+        };
+
+        prune_recurring_dispatch_state(&tasks, &mut last_dispatched);
+
+        let (due_schedules, next_fire) =
+            match compute_due_recurring_schedules(&tasks, now, &last_dispatched) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("[RecurringSchedule] Failed to compute schedule: {error}");
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(30)) => {},
+                        _ = state.recurring_scheduler_wakeup.notified() => {},
+                    }
+                    continue;
+                }
+            };
+
+        if !due_schedules.is_empty() {
+            for due in due_schedules {
+                last_dispatched.insert(due.dispatch_key, due.scheduled_for.to_rfc3339());
+                let app_for_task = app.clone();
+                let state_for_task = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    run_due_recurring_schedule(
+                        due.task,
+                        due.schedule,
+                        due.scheduled_for,
+                        app_for_task,
+                        state_for_task,
+                    )
+                    .await;
+                });
+            }
+            continue;
+        }
+
+        if let Some(next_fire) = next_fire {
+            let wait_duration = (next_fire - now)
+                .to_std()
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0));
+            tokio::select! {
+                _ = tokio::time::sleep(wait_duration) => {},
+                _ = state.recurring_scheduler_wakeup.notified() => {},
+            }
+        } else {
+            state.recurring_scheduler_wakeup.notified().await;
+        }
+    }
+}
+
 fn normalize_path_components(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -2805,6 +3079,7 @@ fn runtime_sync_origin_producer_kind(sync_origin: SyncOrigin) -> RuntimeProducer
     match sync_origin {
         SyncOrigin::Manual => RuntimeProducerKind::ManualSync,
         SyncOrigin::Watch => RuntimeProducerKind::WatchSync,
+        SyncOrigin::Scheduled => RuntimeProducerKind::ManualSync,
     }
 }
 
@@ -2812,6 +3087,7 @@ fn runtime_sync_producer_id(task_id: &str, sync_origin: SyncOrigin) -> String {
     let scope = match sync_origin {
         SyncOrigin::Manual => "manual",
         SyncOrigin::Watch => "watch",
+        SyncOrigin::Scheduled => "scheduled",
     };
     format!("sync:{scope}:{task_id}")
 }
@@ -3507,6 +3783,7 @@ async fn apply_canonical_config_to_runtime(
     prune_auto_unmount_session_disabled_tasks(&valid_task_ids, &state).await;
 
     reconcile_runtime_watchers(app.clone(), state.clone()).await?;
+    state.recurring_scheduler_wakeup.notify_waiters();
 
     if state
         .runtime_initial_watch_bootstrapped
@@ -3532,6 +3809,7 @@ fn next_mcp_job_id(kind: McpJobKind, seq: u64) -> String {
 enum SyncOrigin {
     Manual,
     Watch,
+    Scheduled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5863,6 +6141,7 @@ struct SyncTaskUpdatePayload {
     source_uuid_type: Option<config_store::SourceUuidType>,
     source_sub_path: Option<String>,
     source_identity: Option<config_store::SourceIdentitySnapshot>,
+    recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
 }
 
 #[tauri::command]
@@ -5888,6 +6167,7 @@ async fn update_sync_task(
             source_uuid_type: updates.source_uuid_type,
             source_sub_path: updates.source_sub_path,
             source_identity: updates.source_identity,
+            recurring_schedules: updates.recurring_schedules,
         },
         app,
         state.inner(),
@@ -5904,6 +6184,38 @@ async fn delete_sync_task(
 ) -> Result<DeleteResultEnvelope, String> {
     let deleted = delete_sync_task_internal(id, app, state.inner()).await?;
     Ok(DeleteResultEnvelope { deleted })
+}
+
+#[tauri::command]
+async fn list_supported_timezones() -> Result<Vec<String>, String> {
+    Ok(supported_timezone_names())
+}
+
+#[tauri::command]
+async fn get_recurring_schedule_history(
+    task_id: String,
+    schedule_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RecurringScheduleHistoryEntry>, String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_task_id(&schedule_id).map_err(|e| e.to_string())?;
+    state
+        .recurring_schedule_history_store
+        .read_history(&task_id, &schedule_id)
+}
+
+#[tauri::command]
+async fn clear_recurring_schedule_history(
+    task_id: String,
+    schedule_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeleteResultEnvelope, String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    input_validation::validate_task_id(&schedule_id).map_err(|e| e.to_string())?;
+    state
+        .recurring_schedule_history_store
+        .clear_history(&task_id, &schedule_id)?;
+    Ok(DeleteResultEnvelope { deleted: true })
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -6673,6 +6985,11 @@ async fn patch_sync_task_internal(
     else {
         return Err(format!("Sync task not found: {}", update.task_id));
     };
+    let previous_schedule_ids: HashSet<String> = tasks[index]
+        .recurring_schedules
+        .iter()
+        .map(|schedule| schedule.id.clone())
+        .collect();
     let mut task = apply_sync_task_update(tasks[index].clone(), &update)
         .map_err(config_store_error_to_string)?;
     let current_volumes = DiskMonitor::new()
@@ -6685,6 +7002,16 @@ async fn patch_sync_task_internal(
         .config_store
         .save_tasks(&tasks)
         .map_err(config_store_error_to_string)?;
+    let next_schedule_ids: HashSet<String> = task
+        .recurring_schedules
+        .iter()
+        .map(|schedule| schedule.id.clone())
+        .collect();
+    if previous_schedule_ids != next_schedule_ids {
+        state
+            .recurring_schedule_history_store
+            .remove_deleted_schedule_history(&task.id, &next_schedule_ids)?;
+    }
     emit_config_store_changed(&app, &["syncTasks"]);
     let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
     Ok(task)
@@ -6708,6 +7035,9 @@ async fn delete_sync_task_internal(
             .config_store
             .save_tasks(&tasks)
             .map_err(config_store_error_to_string)?;
+        state
+            .recurring_schedule_history_store
+            .clear_all_task_history(&task_id)?;
         emit_config_store_changed(&app, &["syncTasks"]);
         let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
     }
@@ -7026,6 +7356,9 @@ pub fn run() {
     let managed_config_store = Arc::new(ConfigStore::from_config_dir(
         default_config_dir().expect("failed to resolve SyncWatcher config directory"),
     ));
+    let managed_recurring_history_store = Arc::new(RecurringScheduleHistoryStore::new(
+        default_app_support_dir().expect("failed to resolve SyncWatcher app support directory"),
+    ));
     let autostart_args = vec![AUTOSTART_ARG];
 
     let builder = tauri::Builder::default()
@@ -7339,6 +7672,13 @@ pub fn run() {
                 }
             });
 
+            let recurring_scheduler_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let state = recurring_scheduler_app.state::<AppState>();
+                let app_handle = recurring_scheduler_app.clone();
+                recurring_scheduler_loop(app_handle, state.inner().clone()).await;
+            });
+
             Ok(())
         })
         .manage(AppState {
@@ -7365,6 +7705,8 @@ pub fn run() {
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
             active_task_operations: Arc::new(RwLock::new(HashMap::new())),
+            recurring_schedule_history_store: managed_recurring_history_store,
+            recurring_scheduler_wakeup: Arc::new(Notify::new()),
             control_plane_handle: Arc::new(Mutex::new(None)),
             mcp_jobs: Arc::new(McpJobRegistry::new()),
             mcp_job_seq: Arc::new(AtomicU64::new(0)),
@@ -7397,6 +7739,9 @@ pub fn run() {
             create_sync_task,
             update_sync_task,
             delete_sync_task,
+            list_supported_timezones,
+            get_recurring_schedule_history,
+            clear_recurring_schedule_history,
             list_exclusion_sets,
             create_exclusion_set,
             update_exclusion_set,

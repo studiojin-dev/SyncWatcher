@@ -3,6 +3,7 @@ import enTranslation from '../locales/en/translation.json';
 import koTranslation from '../locales/ko/translation.json';
 import jaTranslation from '../locales/ja/translation.json';
 import zhTranslation from '../locales/zh/translation.json';
+import zhTwTranslation from '../locales/zh-TW/translation.json';
 import esTranslation from '../locales/es/translation.json';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -48,6 +49,7 @@ describe('help locale keys', () => {
     ['ko', koTranslation.translation.help as unknown],
     ['ja', jaTranslation.translation.help as unknown],
     ['zh', zhTranslation.translation.help as unknown],
+    ['zh-TW', zhTwTranslation.translation.help as unknown],
     ['es', esTranslation.translation.help as unknown],
   ];
 

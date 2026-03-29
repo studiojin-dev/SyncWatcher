@@ -29,6 +29,7 @@
     "nav": {
       "dashboard": "Volumes",
       "syncTasks": "Sync Tasks",
+      "recurringSchedules": "Recurring Schedules",
       "activityLog": "Activity Log",
       "settings": "Settings",
       "help": "Help",
@@ -116,6 +117,111 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed"
+    },
+    "recurringSchedules": {
+      "title": "Recurring Schedules",
+      "runtimeNotice": "Recurring schedules only run while the SyncWatcher process is alive. If the app is fully closed, missed runs are skipped and are not replayed. Background or tray mode still counts as running.",
+      "taskSummary": "{{count}} schedules",
+      "addSchedule": "Add schedule",
+      "enableAll": "Enable all schedules",
+      "disableAll": "Disable all schedules",
+      "deleteAll": "Delete all schedules",
+      "disableSchedule": "Disable schedule",
+      "enableSchedule": "Enable schedule",
+      "editSchedule": "Edit schedule",
+      "deleteSchedule": "Delete schedule",
+      "showRuntimeNotice": "Show recurring schedule runtime notice",
+      "empty": {
+        "title": "No Sync Tasks Yet",
+        "description": "Create a sync task first, then add one or more recurring schedules for it."
+      },
+      "emptyTaskSchedules": "No recurring schedules configured for this task yet.",
+      "badges": {
+        "checksumOn": "Checksum on",
+        "checksumOff": "Checksum off",
+        "enabled": "Enabled",
+        "disabled": "Disabled"
+      },
+      "toasts": {
+        "saved": "Recurring schedule saved.",
+        "saveFailed": "Failed to save recurring schedule.",
+        "updated": "Recurring schedule updated.",
+        "deleted": "Recurring schedule deleted.",
+        "deleteFailed": "Failed to delete recurring schedule.",
+        "deletedAll": "All recurring schedules were deleted.",
+        "enabledAll": "All recurring schedules were enabled.",
+        "disabledAll": "All recurring schedules were disabled.",
+        "historyCleared": "Recurring schedule history cleared.",
+        "clearHistoryFailed": "Failed to clear recurring schedule history."
+      },
+      "confirmDeleteTitle": "Delete recurring schedule",
+      "confirmDeleteMessage": "Delete this recurring schedule?\n\n{{summary}}",
+      "confirmDeleteAllTitle": "Delete all recurring schedules",
+      "confirmDeleteAllMessage": "Delete every recurring schedule for '{{taskName}}'?",
+      "clearHistoryConfirmTitle": "Clear recurring schedule history",
+      "clearHistoryConfirmMessage": "Delete all saved run history for this recurring schedule?",
+      "modal": {
+        "addTitle": "Add Recurring Schedule",
+        "editTitle": "Edit Recurring Schedule"
+      },
+      "fields": {
+        "enabled": "Enabled",
+        "checksumMode": "Checksum Mode",
+        "editorMode": "Editor Mode",
+        "frequency": "Frequency",
+        "time": "Time",
+        "timezone": "Timezone",
+        "weekdays": "Weekdays",
+        "dayOfMonth": "Day of month",
+        "cronExpression": "Cron Expression",
+        "retentionCount": "History Retention",
+        "cronPreview": "Cron Preview"
+      },
+      "editorModes": {
+        "guided": "Guided",
+        "advanced": "Advanced"
+      },
+      "presets": {
+        "hourly": "Hourly",
+        "daily": "Daily",
+        "weekly": "Weekly",
+        "monthly": "Monthly"
+      },
+      "weekdays": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
+      },
+      "summary": {
+        "hourly": "Every hour at :{{minute}}",
+        "daily": "Every day {{time}}",
+        "weekly": "Every week {{days}} {{time}}",
+        "monthly": "Every month day {{day}} {{time}}",
+        "custom": "Custom cron {{cron}}"
+      },
+      "errors": {
+        "cronFieldCount": "Cron expression must use 5 fields: minute hour day month weekday.",
+        "timezoneRequired": "Timezone is required.",
+        "saveFailed": "The recurring schedule could not be saved."
+      },
+      "history": {
+        "title": "Recent History",
+        "description": "Saved success and failure records for this recurring schedule.",
+        "reload": "Reload recurring schedule history",
+        "clear": "Clear recurring schedule history",
+        "empty": "No recorded runs yet.",
+        "startedAt": "Started",
+        "finishedAt": "Finished",
+        "conflictCount": "Conflicts",
+        "status": {
+          "success": "Success",
+          "failure": "Failure"
+        }
+      }
     },
     "dryRun": {
       "totalFiles": "Total files",
@@ -246,6 +352,10 @@
     },
     "help": {
       "title": "Help & Documentation",
+      "recurringNotice": {
+        "title": "Recurring Schedule Runtime Rule",
+        "description": "Recurring schedules only run while the SyncWatcher process is alive. If the app is fully closed, missed runs are skipped and are not replayed. Background or tray mode still counts as running."
+      },
       "safetyChecklist": {
         "title": "Core Safety Checklist",
         "description": "Review these constraints before enabling automation-heavy workflows.",
@@ -271,6 +381,14 @@
           "concurrencyLimit": "Runtime watch sync executes with max parallelism of 2 tasks.",
           "initialQueue": "When runtime config is first applied, watch-enabled tasks are queued for an initial sync.",
           "systemMetadataAlwaysExcluded": "Root metadata directories used by macOS (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) are always excluded from sync."
+        },
+        "recurringSchedules": {
+          "title": "Recurring Schedule Engine",
+          "description": "How cron-based recurring syncs are stored and executed.",
+          "runtimeOnly": "Recurring schedules run only while the SyncWatcher process is running. Missed runs are skipped after a full app quit.",
+          "timezoneRequired": "Every recurring schedule requires an explicit timezone. The default is the system timezone when you create one.",
+          "historyRetention": "Each recurring schedule writes success/failure history to its own file, with configurable retention and manual clear.",
+          "cronParity": "The stored expression uses the same 5-field cron format as standard cron."
         },
         "pathConflicts": {
           "title": "Path Conflict Rules",

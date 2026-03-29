@@ -29,6 +29,7 @@
     "nav": {
       "dashboard": "卷",
       "syncTasks": "同步任务",
+      "recurringSchedules": "定期执行",
       "activityLog": "活动日志",
       "settings": "设置",
       "help": "帮助",
@@ -119,6 +120,111 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed"
+    },
+    "recurringSchedules": {
+      "title": "定期执行",
+      "runtimeNotice": "定期执行只会在 SyncWatcher 进程仍在运行时触发。如果应用被完全关闭，错过的执行会被跳过且不会补跑。后台或托盘状态仍视为运行中。",
+      "taskSummary": "{{count}} 个周期",
+      "addSchedule": "添加周期",
+      "enableAll": "启用全部周期",
+      "disableAll": "禁用全部周期",
+      "deleteAll": "删除全部周期",
+      "disableSchedule": "禁用此周期",
+      "enableSchedule": "启用此周期",
+      "editSchedule": "编辑周期",
+      "deleteSchedule": "删除周期",
+      "showRuntimeNotice": "查看定期执行说明",
+      "empty": {
+        "title": "还没有同步任务",
+        "description": "请先创建同步任务，然后为该任务添加一个或多个定期执行。"
+      },
+      "emptyTaskSchedules": "这个任务还没有定期执行。",
+      "badges": {
+        "checksumOn": "校验和开启",
+        "checksumOff": "校验和关闭",
+        "enabled": "启用",
+        "disabled": "禁用"
+      },
+      "toasts": {
+        "saved": "已保存定期执行。",
+        "saveFailed": "保存定期执行失败。",
+        "updated": "已更新定期执行。",
+        "deleted": "已删除定期执行。",
+        "deleteFailed": "删除定期执行失败。",
+        "deletedAll": "已删除全部定期执行。",
+        "enabledAll": "已启用全部定期执行。",
+        "disabledAll": "已禁用全部定期执行。",
+        "historyCleared": "已清除定期执行历史。",
+        "clearHistoryFailed": "清除定期执行历史失败。"
+      },
+      "confirmDeleteTitle": "删除定期执行",
+      "confirmDeleteMessage": "确定要删除这个定期执行吗？\n\n{{summary}}",
+      "confirmDeleteAllTitle": "删除全部定期执行",
+      "confirmDeleteAllMessage": "确定要删除 '{{taskName}}' 的全部定期执行吗？",
+      "clearHistoryConfirmTitle": "清除定期执行历史",
+      "clearHistoryConfirmMessage": "确定要删除这个定期执行保存的所有运行历史吗？",
+      "modal": {
+        "addTitle": "添加定期执行",
+        "editTitle": "编辑定期执行"
+      },
+      "fields": {
+        "enabled": "启用",
+        "checksumMode": "校验和模式",
+        "editorMode": "编辑模式",
+        "frequency": "频率",
+        "time": "时间",
+        "timezone": "时区",
+        "weekdays": "星期",
+        "dayOfMonth": "每月日期",
+        "cronExpression": "Cron 表达式",
+        "retentionCount": "历史保留条数",
+        "cronPreview": "Cron 预览"
+      },
+      "editorModes": {
+        "guided": "向导",
+        "advanced": "高级"
+      },
+      "presets": {
+        "hourly": "每小时",
+        "daily": "每天",
+        "weekly": "每周",
+        "monthly": "每月"
+      },
+      "weekdays": {
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六",
+        "sun": "周日"
+      },
+      "summary": {
+        "hourly": "每小时 :{{minute}}",
+        "daily": "每天 {{time}}",
+        "weekly": "每周 {{days}} {{time}}",
+        "monthly": "每月 {{day}} 日 {{time}}",
+        "custom": "自定义 cron {{cron}}"
+      },
+      "errors": {
+        "cronFieldCount": "Cron 表达式必须使用 5 个字段：分 时 日 月 星期。",
+        "timezoneRequired": "时区为必填项。",
+        "saveFailed": "无法保存定期执行。"
+      },
+      "history": {
+        "title": "最近历史",
+        "description": "这个定期执行的成功/失败记录。",
+        "reload": "重新加载定期执行历史",
+        "clear": "清除定期执行历史",
+        "empty": "还没有记录的执行。",
+        "startedAt": "开始",
+        "finishedAt": "结束",
+        "conflictCount": "冲突数",
+        "status": {
+          "success": "成功",
+          "failure": "失败"
+        }
+      }
     },
     "dryRun": {
       "totalFiles": "文件总数",
@@ -249,6 +355,10 @@
     },
     "help": {
       "title": "帮助与文档",
+      "recurringNotice": {
+        "title": "定期执行运行规则",
+        "description": "定期执行只会在 SyncWatcher 进程仍在运行时触发。如果应用被完全关闭，错过的执行会被跳过且不会补跑。后台或托盘状态仍视为运行中。"
+      },
       "safetyChecklist": {
         "title": "核心安全检查清单",
         "description": "启用高自动化工作流前，请先确认以下限制。",
@@ -274,6 +384,14 @@
           "concurrencyLimit": "运行时监控同步最大并发为 2 个任务。",
           "initialQueue": "首次应用运行时配置时，已启用 watch 的任务会先入队执行一次初始同步。",
           "systemMetadataAlwaysExcluded": "macOS 根目录元数据目录（.fseventsd、.Spotlight-V100、.Trashes、.TemporaryItems）始终不会参与同步。"
+        },
+        "recurringSchedules": {
+          "title": "定期执行引擎",
+          "description": "基于 cron 的定期同步如何保存与执行。",
+          "runtimeOnly": "定期执行只会在 SyncWatcher 进程运行时触发。应用完全关闭期间错过的执行会被跳过。",
+          "timezoneRequired": "每个定期执行都必须明确指定时区，新建时默认使用系统时区。",
+          "historyRetention": "每个定期执行都会把成功/失败历史写入独立文件，并支持配置保留条数和手动清除。",
+          "cronParity": "保存的表达式使用与标准 cron 相同的 5 字段格式。"
         },
         "pathConflicts": {
           "title": "路径冲突规则",

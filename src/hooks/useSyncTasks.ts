@@ -1,6 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
+import {
+    normalizeRecurringSchedules,
+    type RecurringSchedule,
+} from '../utils/recurringSchedules';
 import type { YamlStoreError } from './useYamlStore';
 import { listenConfigStoreChanged, parseConfigError, readConfigCollection, readConfigRecord } from '../utils/configStore';
 
@@ -37,6 +41,7 @@ export interface SyncTask {
         lastSeenDiskUuid?: string;
         lastSeenVolumeUuid?: string;
     };
+    recurringSchedules?: RecurringSchedule[];
 }
 
 interface PersistedSyncTask extends SyncTask {
@@ -71,6 +76,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         sourceUuidType: task.sourceUuidType,
         sourceSubPath: task.sourceSubPath,
         sourceIdentity: task.sourceIdentity,
+        recurringSchedules: normalizeRecurringSchedules(task.recurringSchedules),
     };
 
     normalizedTask.autoUnmount = shouldEnableAutoUnmount(normalizedTask);
@@ -219,6 +225,7 @@ export function useSyncTasks() {
         const newTask: SyncTask = {
             ...task,
             id: crypto.randomUUID(),
+            recurringSchedules: normalizeRecurringSchedules(task.recurringSchedules),
         };
         newTask.autoUnmount = shouldEnableAutoUnmount(newTask);
         const mutationSeq = beginTaskMutation(newTask.id);
@@ -253,14 +260,20 @@ export function useSyncTasks() {
     const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
         const mutationSeq = beginTaskMutation(id);
         const previousTasks = tasksRef.current;
+        const normalizedUpdates = Object.prototype.hasOwnProperty.call(updates, 'recurringSchedules')
+            ? {
+                ...updates,
+                recurringSchedules: normalizeRecurringSchedules(updates.recurringSchedules),
+            }
+            : updates;
         const newTasks = previousTasks.map((t) =>
             t.id === id
                 ? {
                     ...t,
-                    ...updates,
+                    ...normalizedUpdates,
                     autoUnmount: shouldEnableAutoUnmount({
                         ...t,
-                        ...updates,
+                        ...normalizedUpdates,
                     }),
                 }
                 : t
@@ -268,7 +281,10 @@ export function useSyncTasks() {
         commitTasks(newTasks);
 
         try {
-            const response = await invoke<unknown>('update_sync_task', { id, updates });
+            const response = await invoke<unknown>('update_sync_task', {
+                id,
+                updates: normalizedUpdates,
+            });
             const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
             if (persistedTask && taskMutationSeqRef.current.get(id) === mutationSeq) {
                 const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);

@@ -29,6 +29,7 @@
     "nav": {
       "dashboard": "Volúmenes",
       "syncTasks": "Tareas de Sincronización",
+      "recurringSchedules": "Ejecuciones Programadas",
       "activityLog": "Registro de Actividad",
       "settings": "Configuración",
       "help": "Ayuda",
@@ -119,6 +120,111 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed"
+    },
+    "recurringSchedules": {
+      "title": "Ejecuciones Programadas",
+      "runtimeNotice": "Las ejecuciones programadas solo funcionan mientras el proceso de SyncWatcher siga activo. Si la app está completamente cerrada, las ejecuciones perdidas se omiten y no se reintentan. El modo en segundo plano o en la bandeja sigue contando como ejecución activa.",
+      "taskSummary": "{{count}} programaciones",
+      "addSchedule": "Agregar programación",
+      "enableAll": "Activar todas las programaciones",
+      "disableAll": "Desactivar todas las programaciones",
+      "deleteAll": "Eliminar todas las programaciones",
+      "disableSchedule": "Desactivar programación",
+      "enableSchedule": "Activar programación",
+      "editSchedule": "Editar programación",
+      "deleteSchedule": "Eliminar programación",
+      "showRuntimeNotice": "Mostrar aviso de ejecución programada",
+      "empty": {
+        "title": "Todavía no hay tareas de sincronización",
+        "description": "Primero crea una tarea de sincronización y luego agrega una o más programaciones periódicas."
+      },
+      "emptyTaskSchedules": "Esta tarea aún no tiene ejecuciones programadas.",
+      "badges": {
+        "checksumOn": "Checksum activo",
+        "checksumOff": "Checksum inactivo",
+        "enabled": "Activo",
+        "disabled": "Inactivo"
+      },
+      "toasts": {
+        "saved": "Programación guardada.",
+        "saveFailed": "No se pudo guardar la programación.",
+        "updated": "Programación actualizada.",
+        "deleted": "Programación eliminada.",
+        "deleteFailed": "No se pudo eliminar la programación.",
+        "deletedAll": "Se eliminaron todas las programaciones.",
+        "enabledAll": "Se activaron todas las programaciones.",
+        "disabledAll": "Se desactivaron todas las programaciones.",
+        "historyCleared": "Se borró el historial de la programación.",
+        "clearHistoryFailed": "No se pudo borrar el historial de la programación."
+      },
+      "confirmDeleteTitle": "Eliminar programación",
+      "confirmDeleteMessage": "¿Eliminar esta programación?\n\n{{summary}}",
+      "confirmDeleteAllTitle": "Eliminar todas las programaciones",
+      "confirmDeleteAllMessage": "¿Eliminar todas las programaciones de '{{taskName}}'?",
+      "clearHistoryConfirmTitle": "Borrar historial de la programación",
+      "clearHistoryConfirmMessage": "¿Eliminar todo el historial guardado de esta programación?",
+      "modal": {
+        "addTitle": "Agregar ejecución programada",
+        "editTitle": "Editar ejecución programada"
+      },
+      "fields": {
+        "enabled": "Activo",
+        "checksumMode": "Modo checksum",
+        "editorMode": "Modo de edición",
+        "frequency": "Frecuencia",
+        "time": "Hora",
+        "timezone": "Zona horaria",
+        "weekdays": "Días de la semana",
+        "dayOfMonth": "Día del mes",
+        "cronExpression": "Expresión Cron",
+        "retentionCount": "Retención de historial",
+        "cronPreview": "Vista previa Cron"
+      },
+      "editorModes": {
+        "guided": "Guiado",
+        "advanced": "Avanzado"
+      },
+      "presets": {
+        "hourly": "Cada hora",
+        "daily": "Cada día",
+        "weekly": "Cada semana",
+        "monthly": "Cada mes"
+      },
+      "weekdays": {
+        "mon": "Lun",
+        "tue": "Mar",
+        "wed": "Mié",
+        "thu": "Jue",
+        "fri": "Vie",
+        "sat": "Sáb",
+        "sun": "Dom"
+      },
+      "summary": {
+        "hourly": "Cada hora en :{{minute}}",
+        "daily": "Cada día {{time}}",
+        "weekly": "Cada semana {{days}} {{time}}",
+        "monthly": "Cada mes día {{day}} {{time}}",
+        "custom": "Cron personalizado {{cron}}"
+      },
+      "errors": {
+        "cronFieldCount": "La expresión Cron debe usar 5 campos: minuto hora día mes día-semana.",
+        "timezoneRequired": "La zona horaria es obligatoria.",
+        "saveFailed": "No se pudo guardar la ejecución programada."
+      },
+      "history": {
+        "title": "Historial reciente",
+        "description": "Registros de éxito y fallo para esta programación.",
+        "reload": "Recargar historial de la programación",
+        "clear": "Borrar historial de la programación",
+        "empty": "Todavía no hay ejecuciones registradas.",
+        "startedAt": "Inicio",
+        "finishedAt": "Fin",
+        "conflictCount": "Conflictos",
+        "status": {
+          "success": "Éxito",
+          "failure": "Fallo"
+        }
+      }
     },
     "dryRun": {
       "totalFiles": "Archivos totales",
@@ -249,6 +355,10 @@
     },
     "help": {
       "title": "Ayuda y Documentación",
+      "recurringNotice": {
+        "title": "Regla de ejecución programada",
+        "description": "Las ejecuciones programadas solo funcionan mientras el proceso de SyncWatcher siga activo. Si la app está completamente cerrada, las ejecuciones perdidas se omiten y no se reintentan. El modo en segundo plano o en la bandeja sigue contando como ejecución activa."
+      },
       "safetyChecklist": {
         "title": "Checklist de Seguridad Clave",
         "description": "Revise estas restricciones antes de activar flujos de trabajo muy automatizados.",
@@ -274,6 +384,14 @@
           "concurrencyLimit": "La sincronización runtime por watch se ejecuta con paralelismo máximo de 2 tareas.",
           "initialQueue": "Cuando se aplica runtime por primera vez, las tareas con watch activo se encolan para una sincronización inicial.",
           "systemMetadataAlwaysExcluded": "Los directorios de metadatos de raíz de macOS (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) siempre se excluyen de la sincronización."
+        },
+        "recurringSchedules": {
+          "title": "Motor de ejecuciones programadas",
+          "description": "Cómo se guardan y ejecutan las sincronizaciones periódicas basadas en cron.",
+          "runtimeOnly": "Las ejecuciones programadas solo se disparan mientras el proceso de SyncWatcher está activo. Las ejecuciones perdidas durante un cierre completo se omiten.",
+          "timezoneRequired": "Cada programación requiere una zona horaria explícita. Al crear una nueva, el valor por defecto es la zona horaria del sistema.",
+          "historyRetention": "Cada programación guarda su historial de éxito/fallo en un archivo propio, con retención configurable y borrado manual.",
+          "cronParity": "La expresión guardada usa el mismo formato cron estándar de 5 campos."
         },
         "pathConflicts": {
           "title": "Reglas de Conflicto de Rutas",
