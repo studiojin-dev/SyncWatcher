@@ -29,6 +29,7 @@
     "nav": {
       "dashboard": "ボリューム",
       "syncTasks": "同期タスク",
+      "recurringSchedules": "定期実行",
       "activityLog": "アクティビティログ",
       "settings": "設定",
       "help": "ヘルプ",
@@ -119,6 +120,111 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed"
+    },
+    "recurringSchedules": {
+      "title": "定期実行",
+      "runtimeNotice": "定期実行は SyncWatcher プロセスが動作中のときだけ実行されます。アプリを完全終了している間に逃した実行は再実行されません。バックグラウンドやトレイ状態は実行中として扱われます。",
+      "taskSummary": "{{count}} 件のスケジュール",
+      "addSchedule": "スケジュール追加",
+      "enableAll": "すべて有効化",
+      "disableAll": "すべて無効化",
+      "deleteAll": "すべて削除",
+      "disableSchedule": "このスケジュールを無効化",
+      "enableSchedule": "このスケジュールを有効化",
+      "editSchedule": "スケジュール編集",
+      "deleteSchedule": "スケジュール削除",
+      "showRuntimeNotice": "定期実行の案内を表示",
+      "empty": {
+        "title": "同期タスクがまだありません",
+        "description": "まず同期タスクを作成し、そのタスクに1つ以上の定期実行を追加してください。"
+      },
+      "emptyTaskSchedules": "このタスクにはまだ定期実行がありません。",
+      "badges": {
+        "checksumOn": "チェックサム ON",
+        "checksumOff": "チェックサム OFF",
+        "enabled": "有効",
+        "disabled": "無効"
+      },
+      "toasts": {
+        "saved": "定期実行を保存しました。",
+        "saveFailed": "定期実行の保存に失敗しました。",
+        "updated": "定期実行を更新しました。",
+        "deleted": "定期実行を削除しました。",
+        "deleteFailed": "定期実行の削除に失敗しました。",
+        "deletedAll": "すべての定期実行を削除しました。",
+        "enabledAll": "すべての定期実行を有効化しました。",
+        "disabledAll": "すべての定期実行を無効化しました。",
+        "historyCleared": "定期実行の履歴を削除しました。",
+        "clearHistoryFailed": "定期実行の履歴削除に失敗しました。"
+      },
+      "confirmDeleteTitle": "定期実行を削除",
+      "confirmDeleteMessage": "この定期実行を削除しますか？\n\n{{summary}}",
+      "confirmDeleteAllTitle": "すべての定期実行を削除",
+      "confirmDeleteAllMessage": "'{{taskName}}' のすべての定期実行を削除しますか？",
+      "clearHistoryConfirmTitle": "定期実行の履歴を削除",
+      "clearHistoryConfirmMessage": "この定期実行に保存された実行履歴をすべて削除しますか？",
+      "modal": {
+        "addTitle": "定期実行を追加",
+        "editTitle": "定期実行を編集"
+      },
+      "fields": {
+        "enabled": "有効",
+        "checksumMode": "チェックサムモード",
+        "editorMode": "編集モード",
+        "frequency": "頻度",
+        "time": "時刻",
+        "timezone": "タイムゾーン",
+        "weekdays": "曜日",
+        "dayOfMonth": "日付",
+        "cronExpression": "Cron 式",
+        "retentionCount": "履歴保持件数",
+        "cronPreview": "Cron プレビュー"
+      },
+      "editorModes": {
+        "guided": "ガイド",
+        "advanced": "詳細"
+      },
+      "presets": {
+        "hourly": "毎時",
+        "daily": "毎日",
+        "weekly": "毎週",
+        "monthly": "毎月"
+      },
+      "weekdays": {
+        "mon": "月",
+        "tue": "火",
+        "wed": "水",
+        "thu": "木",
+        "fri": "金",
+        "sat": "土",
+        "sun": "日"
+      },
+      "summary": {
+        "hourly": "毎時 :{{minute}}",
+        "daily": "毎日 {{time}}",
+        "weekly": "毎週 {{days}} {{time}}",
+        "monthly": "毎月 {{day}} 日 {{time}}",
+        "custom": "カスタム cron {{cron}}"
+      },
+      "errors": {
+        "cronFieldCount": "Cron 式は 5 フィールド（分 時 日 月 曜日）で指定してください。",
+        "timezoneRequired": "タイムゾーンは必須です。",
+        "saveFailed": "定期実行を保存できませんでした。"
+      },
+      "history": {
+        "title": "最近の履歴",
+        "description": "この定期実行の成功/失敗履歴です。",
+        "reload": "定期実行履歴を再読み込み",
+        "clear": "定期実行履歴を削除",
+        "empty": "記録された実行はまだありません。",
+        "startedAt": "開始",
+        "finishedAt": "終了",
+        "conflictCount": "競合数",
+        "status": {
+          "success": "成功",
+          "failure": "失敗"
+        }
+      }
     },
     "dryRun": {
       "totalFiles": "総ファイル数",
@@ -249,6 +355,10 @@
     },
     "help": {
       "title": "ヘルプとドキュメント",
+      "recurringNotice": {
+        "title": "定期実行の動作ルール",
+        "description": "定期実行は SyncWatcher プロセスが動作中のときだけ実行されます。アプリを完全終了している間に逃した実行は再実行されません。バックグラウンドやトレイ状態は実行中として扱われます。"
+      },
       "safetyChecklist": {
         "title": "重要な安全チェックリスト",
         "description": "自動化中心の運用を有効にする前に、次の制約を確認してください。",
@@ -274,6 +384,14 @@
           "concurrencyLimit": "ランタイム監視同期は最大2タスクまで並列実行されます。",
           "initialQueue": "ランタイム設定が最初に適用されたとき、watch 有効タスクは初期同期としてキューに登録されます。",
           "systemMetadataAlwaysExcluded": "macOS のルートメタデータディレクトリ（.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems）は同期対象から常に除外されます。"
+        },
+        "recurringSchedules": {
+          "title": "定期実行エンジン",
+          "description": "cron ベースの定期同期が保存・実行される仕組みです。",
+          "runtimeOnly": "定期実行は SyncWatcher プロセスが動作している間だけ実行されます。完全終了中に逃した実行はスキップされます。",
+          "timezoneRequired": "すべての定期実行には明示的なタイムゾーンが必要で、新規作成時の既定値はシステムタイムゾーンです。",
+          "historyRetention": "各定期実行は成功/失敗履歴を個別ファイルに保存し、保持件数と手動削除を設定できます。",
+          "cronParity": "保存される式は標準 cron と同じ 5 フィールド形式です。"
         },
         "pathConflicts": {
           "title": "パス競合ルール",

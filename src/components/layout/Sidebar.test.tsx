@@ -12,6 +12,7 @@ const mockState = vi.hoisted(() => ({
   translations: {
     appName: 'SyncWatcher',
     'nav.syncTasks': 'Sync Tasks',
+    'nav.recurringSchedules': 'Recurring Schedules',
     'nav.dashboard': 'Dashboard',
     'nav.activityLog': 'Activity Log',
     'nav.settings': 'Settings',
@@ -95,5 +96,6 @@ describe('Sidebar', () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
 
     expect(await screen.findByText('v1.2.0-beta')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recurring Schedules' })).toBeInTheDocument();
   });
 });

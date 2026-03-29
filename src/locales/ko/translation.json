@@ -29,6 +29,7 @@
     "nav": {
       "dashboard": "볼륨",
       "syncTasks": "동기화 작업",
+      "recurringSchedules": "정기 실행",
       "activityLog": "활동 로그",
       "settings": "설정",
       "help": "도움말",
@@ -119,6 +120,111 @@
       "autoUnmountConfirmedStatus": "Unmount 확인 완료",
       "autoUnmountSuppressedStatus": "이번 세션에서는 auto-unmount가 비활성화되어 마운트를 유지합니다.",
       "autoUnmountFailedStatus": "Unmount 실패"
+    },
+    "recurringSchedules": {
+      "title": "정기 실행",
+      "runtimeNotice": "정기 실행은 SyncWatcher 프로세스가 실행 중일 때만 동작하며, 완전히 종료된 동안의 실행은 누락되고 재실행되지 않는다. background/tray 상태는 실행 중으로 본다.",
+      "taskSummary": "{{count}}개 주기",
+      "addSchedule": "주기 추가",
+      "enableAll": "전체 주기 활성화",
+      "disableAll": "전체 주기 비활성화",
+      "deleteAll": "전체 주기 삭제",
+      "disableSchedule": "이 주기 비활성화",
+      "enableSchedule": "이 주기 활성화",
+      "editSchedule": "주기 편집",
+      "deleteSchedule": "주기 삭제",
+      "showRuntimeNotice": "정기 실행 안내 보기",
+      "empty": {
+        "title": "아직 동기화 작업이 없습니다",
+        "description": "먼저 동기화 작업을 만든 다음, 작업마다 하나 이상의 정기 실행을 추가하세요."
+      },
+      "emptyTaskSchedules": "이 작업에는 아직 정기 실행이 없습니다.",
+      "badges": {
+        "checksumOn": "체크섬 켜짐",
+        "checksumOff": "체크섬 꺼짐",
+        "enabled": "활성",
+        "disabled": "비활성"
+      },
+      "toasts": {
+        "saved": "정기 실행을 저장했습니다.",
+        "saveFailed": "정기 실행 저장에 실패했습니다.",
+        "updated": "정기 실행을 업데이트했습니다.",
+        "deleted": "정기 실행을 삭제했습니다.",
+        "deleteFailed": "정기 실행 삭제에 실패했습니다.",
+        "deletedAll": "모든 정기 실행을 삭제했습니다.",
+        "enabledAll": "모든 정기 실행을 활성화했습니다.",
+        "disabledAll": "모든 정기 실행을 비활성화했습니다.",
+        "historyCleared": "정기 실행 이력을 삭제했습니다.",
+        "clearHistoryFailed": "정기 실행 이력 삭제에 실패했습니다."
+      },
+      "confirmDeleteTitle": "정기 실행 삭제",
+      "confirmDeleteMessage": "이 정기 실행을 삭제하시겠습니까?\n\n{{summary}}",
+      "confirmDeleteAllTitle": "전체 정기 실행 삭제",
+      "confirmDeleteAllMessage": "'{{taskName}}'의 모든 정기 실행을 삭제하시겠습니까?",
+      "clearHistoryConfirmTitle": "정기 실행 이력 삭제",
+      "clearHistoryConfirmMessage": "이 정기 실행의 저장된 실행 이력을 모두 삭제하시겠습니까?",
+      "modal": {
+        "addTitle": "정기 실행 추가",
+        "editTitle": "정기 실행 편집"
+      },
+      "fields": {
+        "enabled": "활성",
+        "checksumMode": "체크섬 모드",
+        "editorMode": "편집 모드",
+        "frequency": "주기",
+        "time": "시간",
+        "timezone": "시간대",
+        "weekdays": "요일",
+        "dayOfMonth": "매월 일자",
+        "cronExpression": "Cron 표현식",
+        "retentionCount": "이력 보관 개수",
+        "cronPreview": "Cron 미리보기"
+      },
+      "editorModes": {
+        "guided": "가이드",
+        "advanced": "고급"
+      },
+      "presets": {
+        "hourly": "매 시간",
+        "daily": "매일",
+        "weekly": "매주",
+        "monthly": "매월"
+      },
+      "weekdays": {
+        "mon": "월",
+        "tue": "화",
+        "wed": "수",
+        "thu": "목",
+        "fri": "금",
+        "sat": "토",
+        "sun": "일"
+      },
+      "summary": {
+        "hourly": "매시 :{{minute}}",
+        "daily": "매일 {{time}}",
+        "weekly": "매주 {{days}} {{time}}",
+        "monthly": "매월 {{day}}일 {{time}}",
+        "custom": "사용자 지정 cron {{cron}}"
+      },
+      "errors": {
+        "cronFieldCount": "Cron 표현식은 5개 필드(분 시 일 월 요일)를 사용해야 합니다.",
+        "timezoneRequired": "시간대는 필수입니다.",
+        "saveFailed": "정기 실행을 저장할 수 없습니다."
+      },
+      "history": {
+        "title": "최근 이력",
+        "description": "이 정기 실행의 성공/실패 기록입니다.",
+        "reload": "정기 실행 이력 새로고침",
+        "clear": "정기 실행 이력 삭제",
+        "empty": "저장된 실행 기록이 없습니다.",
+        "startedAt": "시작",
+        "finishedAt": "종료",
+        "conflictCount": "충돌 수",
+        "status": {
+          "success": "성공",
+          "failure": "실패"
+        }
+      }
     },
     "dryRun": {
       "totalFiles": "총 파일 수",
@@ -249,6 +355,10 @@
     },
     "help": {
       "title": "도움말 및 문서",
+      "recurringNotice": {
+        "title": "정기 실행 동작 규칙",
+        "description": "정기 실행은 SyncWatcher 프로세스가 실행 중일 때만 동작하며, 완전히 종료된 동안의 실행은 누락되고 재실행되지 않는다. background/tray 상태는 실행 중으로 본다."
+      },
       "safetyChecklist": {
         "title": "핵심 안전 체크리스트",
         "description": "자동화 중심 작업을 켜기 전에 아래 제약을 먼저 확인하세요.",
@@ -274,6 +384,14 @@
           "concurrencyLimit": "런타임 감시 동기화는 최대 2개 작업까지 병렬 실행됩니다.",
           "initialQueue": "런타임 설정이 처음 적용될 때 watch 활성 작업은 초기 동기화 대상으로 큐에 등록됩니다.",
           "systemMetadataAlwaysExcluded": "macOS 루트 메타데이터 디렉토리(.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems)는 동기화에서 항상 제외됩니다."
+        },
+        "recurringSchedules": {
+          "title": "정기 실행 엔진",
+          "description": "cron 기반 정기 실행이 저장되고 실행되는 방식입니다.",
+          "runtimeOnly": "정기 실행은 SyncWatcher 프로세스가 살아 있는 동안만 동작합니다. 앱을 완전히 종료한 동안의 실행은 건너뜁니다.",
+          "timezoneRequired": "모든 정기 실행에는 명시적인 시간대가 필요하며, 생성 시 기본값은 시스템 시간대입니다.",
+          "historyRetention": "각 정기 실행은 성공/실패 이력을 별도 파일에 저장하며, 보관 개수와 수동 삭제를 설정할 수 있습니다.",
+          "cronParity": "저장되는 표현식은 표준 cron과 같은 5필드 포맷을 사용합니다."
         },
         "pathConflicts": {
           "title": "경로 충돌 규칙",

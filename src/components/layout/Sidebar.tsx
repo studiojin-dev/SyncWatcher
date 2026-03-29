@@ -8,6 +8,7 @@ import {
     IconDashboard,
     IconRefresh,
     IconHistory,
+    IconCalendarRepeat,
     IconSettings,
     IconHelp,
     IconInfoCircle,
@@ -26,6 +27,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
     { id: 'sync-tasks', labelKey: 'nav.syncTasks', icon: IconRefresh },
+    { id: 'recurring-schedules', labelKey: 'nav.recurringSchedules', icon: IconCalendarRepeat },
     { id: 'dashboard', labelKey: 'nav.dashboard', icon: IconDashboard },
     { id: 'activity-log', labelKey: 'nav.activityLog', icon: IconHistory },
     { id: 'settings', labelKey: 'nav.settings', icon: IconSettings },

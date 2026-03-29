@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ask, open } from '@tauri-apps/plugin-dialog';
 import SyncTasksView from './SyncTasksView';
+import type { SyncTask } from '../hooks/useSyncTasks';
 
 const {
   updateTaskMock,
@@ -31,7 +32,7 @@ const {
         autoUnmount: true,
         sourceType: 'uuid',
       },
-    ],
+    ] as SyncTask[],
   };
   const statusState = {
     statuses: new Map(),

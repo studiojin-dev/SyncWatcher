@@ -11,6 +11,9 @@ use tempfile::NamedTempFile;
 
 use crate::input_validation;
 use crate::license_validation;
+use crate::recurring::{
+    normalize_recurring_schedules, RecurringScheduleRecord,
+};
 use crate::DataUnitSystem;
 
 pub const APP_IDENTIFIER: &str = "dev.studiojin.syncwatcher";
@@ -199,6 +202,8 @@ pub struct SyncTaskRecord {
     pub source_sub_path: Option<String>,
     #[serde(default)]
     pub source_identity: Option<SourceIdentitySnapshot>,
+    #[serde(default)]
+    pub recurring_schedules: Vec<RecurringScheduleRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
@@ -252,6 +257,8 @@ pub struct CreateSyncTaskRequest {
     pub source_sub_path: Option<String>,
     #[serde(default)]
     pub source_identity: Option<SourceIdentitySnapshot>,
+    #[serde(default)]
+    pub recurring_schedules: Vec<RecurringScheduleRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -271,6 +278,7 @@ pub struct UpdateSyncTaskRequest {
     pub source_uuid_type: Option<SourceUuidType>,
     pub source_sub_path: Option<String>,
     pub source_identity: Option<SourceIdentitySnapshot>,
+    pub recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -721,6 +729,8 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
         normalized.source_sub_path = Some(normalize_uuid_sub_path(&sub_path));
     }
 
+    normalized.recurring_schedules = normalize_recurring_schedules(normalized.recurring_schedules)
+        .map_err(|message| ConfigStoreError::ValidationError { message })?;
     normalized
         .exclusion_sets
         .retain(|value| !value.trim().is_empty());
@@ -749,6 +759,7 @@ pub fn build_sync_task_record(
         source_uuid_type: request.source_uuid_type,
         source_sub_path: request.source_sub_path,
         source_identity: request.source_identity,
+        recurring_schedules: request.recurring_schedules,
     })
 }
 
@@ -791,6 +802,10 @@ pub fn apply_sync_task_update(
         source_uuid_type: update.source_uuid_type.clone().or(task.source_uuid_type),
         source_sub_path: update.source_sub_path.clone().or(task.source_sub_path),
         source_identity: update.source_identity.clone().or(task.source_identity),
+        recurring_schedules: update
+            .recurring_schedules
+            .clone()
+            .unwrap_or(task.recurring_schedules),
     };
     if update.source_identity.is_none() && source_changed {
         next.source_identity = None;
@@ -1305,6 +1320,7 @@ mod tests {
             source_uuid_type: Some(SourceUuidType::Disk),
             source_sub_path: Some("DCIM".to_string()),
             source_identity: None,
+            recurring_schedules: Vec::new(),
         })
         .expect("task should normalize");
 
@@ -1469,6 +1485,7 @@ mod tests {
             source_uuid_type: None,
             source_sub_path: None,
             source_identity: None,
+            recurring_schedules: Vec::new(),
         }];
 
         store

@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260328-0020-REC",
+    "title": "In-process recurring schedule engine and file-backed history",
+    "tags": [
+      "recurring-schedules",
+      "runtime",
+      "cron",
+      "timezone",
+      "history",
+      "config-store",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-03-28",
+    "tldr": "Store recurring schedules inside each sync task, execute them only while the running app process is alive, and persist per-schedule run history as separate files under app support state.",
+    "path": "docs/adr/ADR-20260328-0020-REC-in-process-recurring-schedule-engine-and-history.md"
+  },
+  {
     "id": "ADR-20260327-0019-WAC",
     "title": "Runtime watch activation re-enqueues initial sync",
     "tags": [
@@ -34,17 +51,10 @@
   {
     "id": "ADR-20260326-0018-CHN",
     "title": "Watch chain cycle gating and downstream settle window",
-    "tags": [
-      "sync-task",
-      "watch-mode",
-      "runtime",
-      "scheduling",
-      "reliability",
-      "macos"
-    ],
-    "status": "Accepted",
-    "date": "2026-03-26",
-    "tldr": "Allow acyclic watch chains, reject only true watch cycles, and delay downstream watch sync until upstream sync completes plus a short settle window.",
+    "tags": [],
+    "status": null,
+    "date": null,
+    "tldr": null,
     "path": "docs/adr/ADR-20260326-0018-CHN-watch-chain-cycle-gating-and-settle-window.md"
   },
   {

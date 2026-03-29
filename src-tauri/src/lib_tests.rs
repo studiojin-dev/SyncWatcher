@@ -6,6 +6,7 @@ mod integration_tests {
     };
     use crate::logging::LogManager;
     use crate::mcp_jobs::McpJobRegistry;
+    use crate::recurring::RecurringScheduleHistoryStore;
     use crate::sync_engine::types::{
         DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
     };
@@ -140,6 +141,7 @@ mod integration_tests {
             source_uuid_type: Some(source_uuid_type),
             source_sub_path: Some(normalize_uuid_sub_path(source_sub_path).unwrap()),
             source_identity,
+            recurring_schedules: Vec::new(),
         }
     }
 
@@ -191,6 +193,10 @@ mod integration_tests {
             control_plane_handle: Arc::new(Mutex::new(None)),
             mcp_jobs: Arc::new(McpJobRegistry::new()),
             mcp_job_seq: Arc::new(AtomicU64::new(0)),
+            recurring_schedule_history_store: Arc::new(RecurringScheduleHistoryStore::new(
+                temp_config_dir(),
+            )),
+            recurring_scheduler_wakeup: Arc::new(Notify::new()),
         }
     }
 
@@ -774,6 +780,7 @@ mod integration_tests {
                     source_uuid_type: None,
                     source_sub_path: None,
                     source_identity: None,
+                    recurring_schedules: Vec::new(),
                 },
                 SyncTaskRecord {
                     id: "task-b".to_string(),
@@ -790,6 +797,7 @@ mod integration_tests {
                     source_uuid_type: None,
                     source_sub_path: None,
                     source_identity: None,
+                    recurring_schedules: Vec::new(),
                 },
             ])
             .expect("tasks should save");

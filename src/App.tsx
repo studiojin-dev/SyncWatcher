@@ -29,6 +29,7 @@ import type {
 } from './types/runtime';
 const DashboardView = lazy(() => import('./views/DashboardView'));
 const ActivityLogView = lazy(() => import('./views/ActivityLogView'));
+const RecurringSchedulesView = lazy(() => import('./views/RecurringSchedulesView'));
 const SettingsView = lazy(() => import('./views/SettingsView'));
 const HelpView = lazy(() => import('./views/HelpView'));
 const AboutView = lazy(() => import('./views/AboutView'));
@@ -621,6 +622,8 @@ function AppContent() {
         );
       case 'activity-log':
         return <ActivityLogView />;
+      case 'recurring-schedules':
+        return <RecurringSchedulesView />;
       case 'settings':
         return <SettingsView />;
       case 'help':

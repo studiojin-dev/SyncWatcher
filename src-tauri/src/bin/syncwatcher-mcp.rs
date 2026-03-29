@@ -20,6 +20,7 @@ use syncwatcher_lib::control_plane::{
     default_socket_path, send_request, ControlPlaneRequest, ControlPlaneResponse,
 };
 use syncwatcher_lib::mcp_jobs::McpJobEnvelope;
+use syncwatcher_lib::recurring::RecurringScheduleRecord;
 use syncwatcher_lib::system_integration::VolumeInfo;
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -67,6 +68,8 @@ struct CreateSyncTaskInput {
     source_uuid: Option<String>,
     source_uuid_type: Option<String>,
     source_sub_path: Option<String>,
+    #[serde(default)]
+    recurring_schedules: Vec<RecurringScheduleRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -85,6 +88,7 @@ struct UpdateSyncTaskInput {
     source_uuid: Option<String>,
     source_uuid_type: Option<String>,
     source_sub_path: Option<String>,
+    recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
 }
 
 fn default_verify_after_copy() -> bool {

@@ -4,6 +4,7 @@ import {
   IconDatabase,
   IconFolder,
   IconRefresh,
+  IconCalendarRepeat,
   IconShield,
   IconEye,
   IconBrandGithub,
@@ -43,6 +44,18 @@ function HelpView() {
         t('help.sections.watchRuntime.concurrencyLimit'),
         t('help.sections.watchRuntime.initialQueue'),
         t('help.sections.watchRuntime.systemMetadataAlwaysExcluded'),
+      ],
+    },
+    {
+      id: 'recurringSchedules',
+      icon: IconCalendarRepeat,
+      title: t('help.sections.recurringSchedules.title'),
+      description: t('help.sections.recurringSchedules.description'),
+      features: [
+        t('help.sections.recurringSchedules.runtimeOnly'),
+        t('help.sections.recurringSchedules.timezoneRequired'),
+        t('help.sections.recurringSchedules.historyRetention'),
+        t('help.sections.recurringSchedules.cronParity'),
       ],
     },
     {
@@ -113,6 +126,22 @@ function HelpView() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="neo-box p-6 bg-sky-100 border-3 border-[var(--border-main)]">
+        <div className="flex items-start gap-3">
+          <div className="p-2 border-2 border-[var(--border-main)] bg-white">
+            <IconCalendarRepeat size={24} stroke={2} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold uppercase">
+              {t('help.recurringNotice.title')}
+            </h2>
+            <p className="text-sm text-[var(--text-secondary)]">
+              {t('help.recurringNotice.description')}
+            </p>
+          </div>
+        </div>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

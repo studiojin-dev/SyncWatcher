@@ -29,6 +29,7 @@
     "nav": {
       "dashboard": "磁碟區",
       "syncTasks": "同步任務",
+      "recurringSchedules": "定期執行",
       "activityLog": "活動日誌",
       "settings": "設定",
       "help": "幫助",
@@ -119,6 +120,111 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed"
+    },
+    "recurringSchedules": {
+      "title": "定期執行",
+      "runtimeNotice": "定期執行只會在 SyncWatcher 行程仍在運作時觸發。如果應用程式被完全關閉，錯過的執行會被跳過且不會補跑。背景或托盤狀態仍視為執行中。",
+      "taskSummary": "{{count}} 個週期",
+      "addSchedule": "新增週期",
+      "enableAll": "啟用全部週期",
+      "disableAll": "停用全部週期",
+      "deleteAll": "刪除全部週期",
+      "disableSchedule": "停用此週期",
+      "enableSchedule": "啟用此週期",
+      "editSchedule": "編輯週期",
+      "deleteSchedule": "刪除週期",
+      "showRuntimeNotice": "查看定期執行說明",
+      "empty": {
+        "title": "還沒有同步任務",
+        "description": "請先建立同步任務，再為該任務新增一個或多個定期執行。"
+      },
+      "emptyTaskSchedules": "這個任務還沒有定期執行。",
+      "badges": {
+        "checksumOn": "總和檢查碼開啟",
+        "checksumOff": "總和檢查碼關閉",
+        "enabled": "啟用",
+        "disabled": "停用"
+      },
+      "toasts": {
+        "saved": "已儲存定期執行。",
+        "saveFailed": "儲存定期執行失敗。",
+        "updated": "已更新定期執行。",
+        "deleted": "已刪除定期執行。",
+        "deleteFailed": "刪除定期執行失敗。",
+        "deletedAll": "已刪除全部定期執行。",
+        "enabledAll": "已啟用全部定期執行。",
+        "disabledAll": "已停用全部定期執行。",
+        "historyCleared": "已清除定期執行歷史。",
+        "clearHistoryFailed": "清除定期執行歷史失敗。"
+      },
+      "confirmDeleteTitle": "刪除定期執行",
+      "confirmDeleteMessage": "確定要刪除這個定期執行嗎？\n\n{{summary}}",
+      "confirmDeleteAllTitle": "刪除全部定期執行",
+      "confirmDeleteAllMessage": "確定要刪除 '{{taskName}}' 的全部定期執行嗎？",
+      "clearHistoryConfirmTitle": "清除定期執行歷史",
+      "clearHistoryConfirmMessage": "確定要刪除這個定期執行儲存的所有執行歷史嗎？",
+      "modal": {
+        "addTitle": "新增定期執行",
+        "editTitle": "編輯定期執行"
+      },
+      "fields": {
+        "enabled": "啟用",
+        "checksumMode": "總和檢查碼模式",
+        "editorMode": "編輯模式",
+        "frequency": "頻率",
+        "time": "時間",
+        "timezone": "時區",
+        "weekdays": "星期",
+        "dayOfMonth": "每月日期",
+        "cronExpression": "Cron 表達式",
+        "retentionCount": "歷史保留筆數",
+        "cronPreview": "Cron 預覽"
+      },
+      "editorModes": {
+        "guided": "引導",
+        "advanced": "進階"
+      },
+      "presets": {
+        "hourly": "每小時",
+        "daily": "每天",
+        "weekly": "每週",
+        "monthly": "每月"
+      },
+      "weekdays": {
+        "mon": "週一",
+        "tue": "週二",
+        "wed": "週三",
+        "thu": "週四",
+        "fri": "週五",
+        "sat": "週六",
+        "sun": "週日"
+      },
+      "summary": {
+        "hourly": "每小時 :{{minute}}",
+        "daily": "每天 {{time}}",
+        "weekly": "每週 {{days}} {{time}}",
+        "monthly": "每月 {{day}} 日 {{time}}",
+        "custom": "自訂 cron {{cron}}"
+      },
+      "errors": {
+        "cronFieldCount": "Cron 表達式必須使用 5 個欄位：分 時 日 月 星期。",
+        "timezoneRequired": "時區為必填項。",
+        "saveFailed": "無法儲存定期執行。"
+      },
+      "history": {
+        "title": "最近歷史",
+        "description": "這個定期執行的成功/失敗記錄。",
+        "reload": "重新載入定期執行歷史",
+        "clear": "清除定期執行歷史",
+        "empty": "還沒有記錄的執行。",
+        "startedAt": "開始",
+        "finishedAt": "結束",
+        "conflictCount": "衝突數",
+        "status": {
+          "success": "成功",
+          "failure": "失敗"
+        }
+      }
     },
     "dryRun": {
       "totalFiles": "檔案總數",
@@ -249,6 +355,10 @@
     },
     "help": {
       "title": "幫助與文件",
+      "recurringNotice": {
+        "title": "定期執行運作規則",
+        "description": "定期執行只會在 SyncWatcher 行程仍在運作時觸發。如果應用程式被完全關閉，錯過的執行會被跳過且不會補跑。背景或托盤狀態仍視為執行中。"
+      },
       "safetyChecklist": {
         "title": "核心安全檢查清單",
         "description": "啟用高自動化工作流程前，請先確認以下限制。",
@@ -274,6 +384,14 @@
           "concurrencyLimit": "執行階段監控同步最大並發為 2 個任務。",
           "initialQueue": "首次應用執行階段配置時，已啟用 watch 的任務會先入隊執行一次初始同步。",
           "systemMetadataAlwaysExcluded": "macOS 根目錄的中繼資料目錄（.fseventsd、.Spotlight-V100、.Trashes、.TemporaryItems）永遠不會參與同步。"
+        },
+        "recurringSchedules": {
+          "title": "定期執行引擎",
+          "description": "基於 cron 的定期同步如何儲存與執行。",
+          "runtimeOnly": "定期執行只會在 SyncWatcher 行程運作時觸發。應用程式完全關閉期間錯過的執行會被跳過。",
+          "timezoneRequired": "每個定期執行都必須明確指定時區，新建時預設使用系統時區。",
+          "historyRetention": "每個定期執行都會把成功/失敗歷史寫入獨立檔案，並支援設定保留筆數與手動清除。",
+          "cronParity": "儲存的表達式使用與標準 cron 相同的 5 欄位格式。"
         },
         "pathConflicts": {
           "title": "路徑衝突規則",
