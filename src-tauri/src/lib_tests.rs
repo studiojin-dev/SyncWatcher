@@ -6,7 +6,10 @@ mod integration_tests {
     };
     use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
-    use crate::recurring::{RecurringScheduleHistoryStore, RecurringScheduleRecord};
+    use crate::recurring::{
+        RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus,
+        RecurringScheduleHistoryStore, RecurringScheduleRecord,
+    };
     use crate::sync_engine::types::{
         DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
     };
@@ -17,7 +20,8 @@ mod integration_tests {
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
         compute_volume_mount_diff, create_sync_task_internal, decide_autostart_launch,
-        decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
+        decide_runtime_auto_unmount, dequeue_runtime_sync_task,
+        emit_task_log_with_recurring_detail, enqueue_runtime_sync_task_internal,
         enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
         find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
         find_runtime_task_validation_issue, find_runtime_watch_cycle,
@@ -26,7 +30,8 @@ mod integration_tests {
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         log_conflict_resolution_failure, log_conflict_resolution_success,
         log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
-        normalize_uuid_sub_path, parse_uuid_source_path, preflight_target_path,
+        normalize_uuid_sub_path, parse_uuid_source_path,
+        persist_patched_sync_task_and_collect_history_warnings, preflight_target_path,
         progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
         read_current_conflict_file_info, record_runtime_validation_issue,
         refresh_uuid_source_identity, remove_runtime_sync_task_state,
@@ -34,8 +39,8 @@ mod integration_tests {
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
         runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
         runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
-        set_auto_unmount_session_disabled_internal, sync_dry_run_internal,
-        take_runtime_pending_sync_task, unix_now_ms, validate_runtime_tasks,
+        set_auto_unmount_session_disabled_internal, snapshot_recurring_schedule_detail_entries,
+        sync_dry_run_internal, take_runtime_pending_sync_task, unix_now_ms, validate_runtime_tasks,
         volume_watch_next_tick_delay, AppState, CancelOperationType, ConflictFileInfo,
         ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
         ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
@@ -47,7 +52,7 @@ mod integration_tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64};
     use std::sync::mpsc::{sync_channel, Receiver};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex as StdMutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     use tauri::Listener;
     use tempfile::tempdir;
@@ -595,6 +600,128 @@ mod integration_tests {
             .load_tasks()
             .expect("tasks should remain readable");
         assert!(tasks.is_empty(), "invalid create must not persist any task");
+    }
+
+    #[test]
+    fn test_persist_patched_sync_task_keeps_save_when_history_maintenance_fails() {
+        let state = build_app_state();
+
+        state
+            .config_store
+            .save_tasks(&[SyncTaskRecord {
+                id: "task-1".to_string(),
+                name: "Original Task".to_string(),
+                source: "/tmp/source".to_string(),
+                target: "/tmp/target".to_string(),
+                checksum_mode: false,
+                verify_after_copy: true,
+                exclusion_sets: Vec::new(),
+                watch_mode: false,
+                auto_unmount: false,
+                source_type: Some(SourceType::Path),
+                source_uuid: None,
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+                recurring_schedules: vec![RecurringScheduleRecord {
+                    id: "schedule-1".to_string(),
+                    cron_expression: "0 9 * * *".to_string(),
+                    timezone: "UTC".to_string(),
+                    enabled: true,
+                    checksum_mode: false,
+                    retention_count: 5,
+                }],
+            }])
+            .expect("tasks should save");
+
+        let history_path = state
+            .recurring_schedule_history_store
+            .history_file_path("task-1", "schedule-1")
+            .expect("history path should resolve");
+        std::fs::create_dir_all(history_path.parent().expect("history dir should exist"))
+            .expect("history dir should be created");
+        std::fs::write(&history_path, "not: [valid").expect("malformed history should write");
+
+        let (updated, warnings) = persist_patched_sync_task_and_collect_history_warnings(
+            UpdateSyncTaskRequest {
+                task_id: "task-1".to_string(),
+                name: Some("Updated Task".to_string()),
+                ..Default::default()
+            },
+            &state,
+        )
+        .expect("task patch should succeed despite history maintenance failure");
+
+        assert_eq!(updated.name, "Updated Task");
+
+        let tasks = state
+            .config_store
+            .load_tasks()
+            .expect("tasks should remain readable");
+        assert_eq!(tasks[0].name, "Updated Task");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Recurring schedule history retention maintenance warning"));
+        assert!(warnings[0].contains("schedule 'schedule-1'"));
+    }
+
+    #[test]
+    fn test_recurring_detail_capture_is_not_limited_by_global_log_ring() {
+        let state = build_app_state();
+        let detail_buffer = Arc::new(StdMutex::new(Vec::new()));
+
+        for index in 0..150 {
+            emit_task_log_with_recurring_detail(
+                &state.log_manager,
+                Some(&detail_buffer),
+                "info",
+                &format!("Copy: /tmp/file-{index}.txt"),
+                Some("task-detail".to_string()),
+                crate::logging::LogCategory::FileCopied,
+                Option::<&tauri::AppHandle>::None,
+            );
+        }
+
+        let task_logs = state.log_manager.get_logs(Some("task-detail".to_string()));
+        assert_eq!(task_logs.len(), 100);
+
+        let detail_entries = snapshot_recurring_schedule_detail_entries(&detail_buffer);
+        assert_eq!(detail_entries.len(), 150);
+        assert_eq!(
+            detail_entries.first().map(|entry| entry.message.as_str()),
+            Some("Copy: /tmp/file-0.txt")
+        );
+        assert_eq!(
+            detail_entries.last().map(|entry| entry.message.as_str()),
+            Some("Copy: /tmp/file-149.txt")
+        );
+
+        state
+            .recurring_schedule_history_store
+            .write_history(
+                "task-detail",
+                "schedule-detail",
+                &[RecurringScheduleHistoryEntry {
+                    scheduled_for: "2026-03-30T01:00:00Z".to_string(),
+                    started_at: "2026-03-30T01:00:01Z".to_string(),
+                    finished_at: "2026-03-30T01:00:02Z".to_string(),
+                    status: RecurringScheduleHistoryStatus::Success,
+                    checksum_mode: false,
+                    cron_expression: "0 * * * *".to_string(),
+                    timezone: "UTC".to_string(),
+                    message: "detail capture".to_string(),
+                    error_detail: None,
+                    conflict_count: 0,
+                    detail_entries: detail_entries.clone(),
+                }],
+            )
+            .expect("history should write");
+
+        let history = state
+            .recurring_schedule_history_store
+            .read_history("task-detail", "schedule-detail")
+            .expect("history should read");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].detail_entries.len(), 150);
     }
 
     #[tokio::test]

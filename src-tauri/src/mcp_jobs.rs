@@ -172,7 +172,10 @@ impl McpJobRegistry {
     async fn prune_terminal_jobs(&self) {
         let active_token_ids = {
             let tokens = self.cancel_tokens.read().await;
-            tokens.keys().cloned().collect::<std::collections::HashSet<_>>()
+            tokens
+                .keys()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>()
         };
 
         let pruned_ids = {
@@ -289,7 +292,9 @@ mod tests {
         registry
             .insert_job(make_job("terminal-new", McpJobStatus::Failed, 20_000))
             .await;
-        registry.fail_job("terminal-new", "boom".to_string(), 20_000).await;
+        registry
+            .fail_job("terminal-new", "boom".to_string(), 20_000)
+            .await;
 
         let jobs = registry.jobs.read().await;
         assert!(jobs.contains_key("running-job"));

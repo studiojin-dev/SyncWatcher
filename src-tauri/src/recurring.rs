@@ -42,6 +42,15 @@ pub enum RecurringScheduleHistoryStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RecurringScheduleHistoryDetailEntry {
+    pub timestamp: String,
+    pub level: String,
+    pub category: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RecurringScheduleHistoryEntry {
     pub scheduled_for: String,
     pub started_at: String,
@@ -55,6 +64,8 @@ pub struct RecurringScheduleHistoryEntry {
     pub error_detail: Option<String>,
     #[serde(default)]
     pub conflict_count: u64,
+    #[serde(default)]
+    pub detail_entries: Vec<RecurringScheduleHistoryDetailEntry>,
 }
 
 pub fn default_recurring_schedule_enabled() -> bool {
@@ -337,6 +348,21 @@ impl RecurringScheduleHistoryStore {
         Ok(history)
     }
 
+    pub fn truncate_history(
+        &self,
+        task_id: &str,
+        schedule_id: &str,
+        retention_count: u32,
+    ) -> Result<(), String> {
+        let mut history = self.read_history(task_id, schedule_id)?;
+        if history.len() <= retention_count as usize {
+            return Ok(());
+        }
+
+        history.truncate(retention_count as usize);
+        self.write_history(task_id, schedule_id, &history)
+    }
+
     pub fn write_history(
         &self,
         task_id: &str,
@@ -550,6 +576,12 @@ mod tests {
                         message: format!("run-{index}"),
                         error_detail: None,
                         conflict_count: 0,
+                        detail_entries: vec![RecurringScheduleHistoryDetailEntry {
+                            timestamp: format!("2026-03-28T0{index}:00:01Z"),
+                            level: "info".to_string(),
+                            category: "FileCopied".to_string(),
+                            message: format!("Copy: /tmp/run-{index}.txt"),
+                        }],
                     },
                 )
                 .expect("history append should succeed");
@@ -561,5 +593,122 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].message, "run-3");
         assert_eq!(history[1].message, "run-2");
+        assert_eq!(history[0].detail_entries.len(), 1);
+    }
+
+    #[test]
+    fn history_store_reads_legacy_entries_without_details() {
+        let temp = tempdir().expect("tempdir should exist");
+        let store = RecurringScheduleHistoryStore::new(temp.path().to_path_buf());
+        let history_path = store
+            .history_file_path("task-1", "schedule-1")
+            .expect("history path should resolve");
+
+        let legacy_yaml = r#"
+- scheduledFor: 2026-03-28T01:00:00Z
+  startedAt: 2026-03-28T01:00:01Z
+  finishedAt: 2026-03-28T01:00:02Z
+  status: success
+  checksumMode: false
+  cronExpression: "0 * * * *"
+  timezone: UTC
+  message: legacy
+  errorDetail: null
+  conflictCount: 0
+"#;
+
+        fs::create_dir_all(history_path.parent().expect("history dir should exist"))
+            .expect("history dir should be created");
+        fs::write(&history_path, legacy_yaml).expect("legacy history should write");
+
+        let history = store
+            .read_history("task-1", "schedule-1")
+            .expect("legacy history should load");
+
+        assert_eq!(history.len(), 1);
+        assert!(history[0].detail_entries.is_empty());
+    }
+
+    #[test]
+    fn history_store_round_trips_failure_error_detail_with_detail_entries() {
+        let temp = tempdir().expect("tempdir should exist");
+        let store = RecurringScheduleHistoryStore::new(temp.path().to_path_buf());
+
+        let entry = RecurringScheduleHistoryEntry {
+            scheduled_for: "2026-03-28T09:00:00Z".to_string(),
+            started_at: "2026-03-28T09:00:01Z".to_string(),
+            finished_at: "2026-03-28T09:00:02Z".to_string(),
+            status: RecurringScheduleHistoryStatus::Failure,
+            checksum_mode: false,
+            cron_expression: "0 * * * *".to_string(),
+            timezone: "UTC".to_string(),
+            message: "failure".to_string(),
+            error_detail: Some("Permission denied".to_string()),
+            conflict_count: 0,
+            detail_entries: vec![RecurringScheduleHistoryDetailEntry {
+                timestamp: "2026-03-28T09:00:01Z".to_string(),
+                level: "error".to_string(),
+                category: "SyncError".to_string(),
+                message: "Sync failed: Permission denied".to_string(),
+            }],
+        };
+
+        store
+            .write_history("task-1", "schedule-1", &[entry])
+            .expect("history should write");
+
+        let history = store
+            .read_history("task-1", "schedule-1")
+            .expect("history should load");
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(
+            history[0].error_detail.as_deref(),
+            Some("Permission denied")
+        );
+        assert_eq!(history[0].detail_entries.len(), 1);
+        assert_eq!(
+            history[0].detail_entries[0].message,
+            "Sync failed: Permission denied"
+        );
+    }
+
+    #[test]
+    fn truncate_history_enforces_new_retention_limit() {
+        let temp = tempdir().expect("tempdir should exist");
+        let store = RecurringScheduleHistoryStore::new(temp.path().to_path_buf());
+
+        for index in 0..3 {
+            store
+                .append_entry(
+                    "task-1",
+                    "schedule-1",
+                    10,
+                    RecurringScheduleHistoryEntry {
+                        scheduled_for: format!("2026-03-28T0{index}:00:00Z"),
+                        started_at: format!("2026-03-28T0{index}:00:01Z"),
+                        finished_at: format!("2026-03-28T0{index}:00:02Z"),
+                        status: RecurringScheduleHistoryStatus::Success,
+                        checksum_mode: false,
+                        cron_expression: "0 * * * *".to_string(),
+                        timezone: "UTC".to_string(),
+                        message: format!("run-{index}"),
+                        error_detail: None,
+                        conflict_count: 0,
+                        detail_entries: Vec::new(),
+                    },
+                )
+                .expect("history append should succeed");
+        }
+
+        store
+            .truncate_history("task-1", "schedule-1", 1)
+            .expect("truncate should succeed");
+
+        let history = store
+            .read_history("task-1", "schedule-1")
+            .expect("history should load");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].message, "run-2");
     }
 }

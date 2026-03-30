@@ -12,8 +12,8 @@
       "tauri"
     ],
     "status": "Accepted",
-    "date": "2026-03-28",
-    "tldr": "Store recurring schedules inside each sync task, execute them only while the running app process is alive, and persist per-schedule run history as separate files under app support state.",
+    "date": "2026-03-30",
+    "tldr": "Store recurring schedules inside each sync task, execute them only while the running app process is alive, and persist per-schedule run history plus per-run detail entries as separate files under app support state.",
     "path": "docs/adr/ADR-20260328-0020-REC-in-process-recurring-schedule-engine-and-history.md"
   },
   {

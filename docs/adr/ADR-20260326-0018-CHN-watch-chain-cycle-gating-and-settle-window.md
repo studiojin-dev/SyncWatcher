@@ -1,9 +1,8 @@
 # ADR-20260326-0018-CHN: Watch chain cycle gating and downstream settle window
-
-- Status: Accepted
-- Date: 2026-03-26
-- Tags: sync-task, watch-mode, runtime, scheduling, reliability, macos
-- TL;DR: Allow acyclic watch chains, reject only true watch cycles, and delay downstream watch sync until upstream sync completes plus a short settle window.
+Status: Accepted
+Date: 2026-03-26
+Tags: sync-task, watch-mode, runtime, scheduling, reliability, macos
+TL;DR: Allow acyclic watch chains, reject only true watch cycles, and delay downstream watch sync until upstream sync completes plus a short settle window.
 
 ## Context
 

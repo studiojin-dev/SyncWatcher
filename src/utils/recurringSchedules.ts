@@ -13,6 +13,13 @@ export interface RecurringSchedule {
   retentionCount: number;
 }
 
+export interface RecurringScheduleHistoryDetailEntry {
+  timestamp: string;
+  level: string;
+  category: string;
+  message: string;
+}
+
 export interface RecurringScheduleHistoryEntry {
   scheduledFor: string;
   startedAt: string;
@@ -24,6 +31,7 @@ export interface RecurringScheduleHistoryEntry {
   message: string;
   errorDetail?: string | null;
   conflictCount: number;
+  detailEntries: RecurringScheduleHistoryDetailEntry[];
 }
 
 export interface ParsedRecurringScheduleBuilder {

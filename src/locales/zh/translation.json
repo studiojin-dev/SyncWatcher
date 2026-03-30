@@ -133,6 +133,7 @@
       "enableSchedule": "启用此周期",
       "editSchedule": "编辑周期",
       "deleteSchedule": "删除周期",
+      "viewLogs": "查看日志",
       "showRuntimeNotice": "查看定期执行说明",
       "empty": {
         "title": "还没有同步任务",
@@ -227,6 +228,16 @@
           "success": "成功",
           "failure": "失败"
         }
+      },
+      "logs": {
+        "title": "执行日志",
+        "runListTitle": "执行记录",
+        "detailTitle": "执行详情",
+        "emptyRuns": "还没有已记录的执行。",
+        "emptyDetails": "此执行没有保存详细的文件活动日志。",
+        "noRunSelected": "请选择一条执行记录查看详情。",
+        "runCount": "{{count}} 次执行",
+        "detailCount": "{{count}} 条详情"
       }
     },
     "dryRun": {
