@@ -42,6 +42,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "signingIdentity": "Developer ID Application: Jeongjin Kim (B75RUJT6KD)",
       "dmg": {
         "background": "resources/dmg/install-guide.png",
         "windowSize": {

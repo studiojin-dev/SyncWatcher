@@ -147,13 +147,22 @@ describe('RecurringSchedulesView', () => {
     vi.clearAllMocks();
     mockState.historyByScheduleId = {};
     vi.mocked(ask).mockResolvedValue(true);
-    vi.mocked(invoke).mockImplementation(async (command: string, payload?: { scheduleId?: string }) => {
+    vi.mocked(invoke).mockImplementation(async (...args: Parameters<typeof invoke>) => {
+      const [command, payload] = args;
+      const scheduleId =
+        typeof payload === 'object' &&
+        payload !== null &&
+        'scheduleId' in payload &&
+        typeof payload.scheduleId === 'string'
+          ? payload.scheduleId
+          : '';
+
       if (command === 'list_supported_timezones') {
         return ['Asia/Seoul', 'UTC'];
       }
 
       if (command === 'get_recurring_schedule_history') {
-        return mockState.historyByScheduleId[payload?.scheduleId ?? ''] ?? [];
+        return mockState.historyByScheduleId[scheduleId] ?? [];
       }
 
       if (command === 'clear_recurring_schedule_history') {

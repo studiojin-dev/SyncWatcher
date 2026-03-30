@@ -70,3 +70,8 @@ out/
 build/
 .pnpm-store/
 .codex/
+.cert/
+.claude/
+.env
+.env.local
+.env.development.local
