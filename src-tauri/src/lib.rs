@@ -54,8 +54,9 @@ use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_
 use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
 use recurring::{
     next_scheduled_fire_at, supported_timezone_names, validate_guided_preset_compatible_schedules,
-    validate_strict_recurring_schedule_ids, RecurringScheduleHistoryEntry,
-    RecurringScheduleHistoryStatus, RecurringScheduleHistoryStore, RecurringScheduleRecord,
+    validate_strict_recurring_schedule_ids, RecurringScheduleHistoryDetailEntry,
+    RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus, RecurringScheduleHistoryStore,
+    RecurringScheduleRecord,
 };
 
 use watcher::{WatchEvent, WatcherManager};
@@ -721,6 +722,23 @@ struct SyncExecutionResult {
     conflict_count: usize,
     has_pending_conflicts: bool,
     target_preflight: Option<TargetPreflightInfo>,
+    #[serde(skip_serializing)]
+    recurring_history_detail_entries: Vec<RecurringScheduleHistoryDetailEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct SyncExecutionFailure {
+    error_detail: String,
+    recurring_history_detail_entries: Vec<RecurringScheduleHistoryDetailEntry>,
+}
+
+impl SyncExecutionFailure {
+    fn new(error_detail: String) -> Self {
+        Self {
+            error_detail,
+            recurring_history_detail_entries: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2122,6 +2140,100 @@ fn recurring_schedule_dispatch_key(task_id: &str, schedule_id: &str) -> String {
     format!("{task_id}:{schedule_id}")
 }
 
+fn should_capture_recurring_schedule_detail_entry(level: &str, category: &LogCategory) -> bool {
+    matches!(
+        category,
+        LogCategory::FileCopied | LogCategory::FileDeleted | LogCategory::SyncError
+    ) || matches!(level, "warning" | "error")
+}
+
+fn recurring_schedule_detail_entry_from_log_entry(
+    entry: &logging::LogEntry,
+) -> Option<RecurringScheduleHistoryDetailEntry> {
+    if !should_capture_recurring_schedule_detail_entry(&entry.level, &entry.category) {
+        return None;
+    }
+
+    Some(RecurringScheduleHistoryDetailEntry {
+        timestamp: entry.timestamp.clone(),
+        level: entry.level.clone(),
+        category: format!("{:?}", entry.category),
+        message: entry.message.clone(),
+    })
+}
+
+fn capture_recurring_schedule_detail_entries(
+    detail_buffer: &Arc<StdMutex<Vec<RecurringScheduleHistoryDetailEntry>>>,
+    entries: &[logging::LogEntry],
+) {
+    let captured_entries: Vec<RecurringScheduleHistoryDetailEntry> = entries
+        .iter()
+        .filter_map(recurring_schedule_detail_entry_from_log_entry)
+        .collect();
+    if captured_entries.is_empty() {
+        return;
+    }
+
+    match detail_buffer.lock() {
+        Ok(mut buffer) => buffer.extend(captured_entries),
+        Err(error) => error.into_inner().extend(captured_entries),
+    }
+}
+
+fn snapshot_recurring_schedule_detail_entries(
+    detail_buffer: &Arc<StdMutex<Vec<RecurringScheduleHistoryDetailEntry>>>,
+) -> Vec<RecurringScheduleHistoryDetailEntry> {
+    match detail_buffer.lock() {
+        Ok(buffer) => buffer.clone(),
+        Err(error) => error.into_inner().clone(),
+    }
+}
+
+fn build_task_log_entry(
+    level: &str,
+    message: &str,
+    task_id: Option<String>,
+    category: LogCategory,
+) -> logging::LogEntry {
+    let now = chrono::Utc::now().to_rfc3339();
+    logging::LogEntry {
+        id: now.clone(),
+        timestamp: now,
+        level: level.to_string(),
+        message: message.to_string(),
+        task_id,
+        category,
+    }
+}
+
+fn emit_task_log_with_recurring_detail<R: tauri::Runtime>(
+    log_manager: &LogManager,
+    detail_buffer: Option<&Arc<StdMutex<Vec<RecurringScheduleHistoryDetailEntry>>>>,
+    level: &str,
+    message: &str,
+    task_id: Option<String>,
+    category: LogCategory,
+    app: Option<&tauri::AppHandle<R>>,
+) {
+    let entry = build_task_log_entry(level, message, task_id.clone(), category);
+    if let Some(detail_buffer) = detail_buffer {
+        capture_recurring_schedule_detail_entries(detail_buffer, std::slice::from_ref(&entry));
+    }
+    log_manager.log_batch_entries(vec![entry], task_id, app);
+}
+
+fn recurring_schedule_detail_error_entry(
+    timestamp: chrono::DateTime<Utc>,
+    message: String,
+) -> RecurringScheduleHistoryDetailEntry {
+    RecurringScheduleHistoryDetailEntry {
+        timestamp: timestamp.to_rfc3339(),
+        level: "error".to_string(),
+        category: "SyncError".to_string(),
+        message,
+    }
+}
+
 fn recurring_schedule_history_summary(execution: &SyncExecutionResult, task_name: &str) -> String {
     if execution.has_pending_conflicts {
         format!(
@@ -2174,6 +2286,10 @@ async fn run_due_recurring_schedule(
                     message: "Scheduled sync could not load exclusion sets.".to_string(),
                     error_detail: Some(config_store_error_to_string(error)),
                     conflict_count: 0,
+                    detail_entries: vec![recurring_schedule_detail_error_entry(
+                        finished_at,
+                        "Scheduled sync could not load exclusion sets.".to_string(),
+                    )],
                 },
                 &state,
             )
@@ -2219,19 +2335,31 @@ async fn run_due_recurring_schedule(
             message: recurring_schedule_history_summary(&execution, &task.name),
             error_detail: None,
             conflict_count: execution.conflict_count as u64,
+            detail_entries: execution.recurring_history_detail_entries,
         },
-        Err(error_detail) => RecurringScheduleHistoryEntry {
-            scheduled_for: scheduled_for.to_rfc3339(),
-            started_at: started_at.to_rfc3339(),
-            finished_at: finished_at.to_rfc3339(),
-            status: RecurringScheduleHistoryStatus::Failure,
-            checksum_mode: schedule.checksum_mode,
-            cron_expression: schedule.cron_expression.clone(),
-            timezone: schedule.timezone.clone(),
-            message: format!("Scheduled sync failed for '{}'.", task.name),
-            error_detail: Some(error_detail),
-            conflict_count: 0,
-        },
+        Err(error) => {
+            let mut detail_entries = error.recurring_history_detail_entries;
+            if detail_entries.is_empty() {
+                detail_entries.push(recurring_schedule_detail_error_entry(
+                    finished_at,
+                    error.error_detail.clone(),
+                ));
+            }
+
+            RecurringScheduleHistoryEntry {
+                scheduled_for: scheduled_for.to_rfc3339(),
+                started_at: started_at.to_rfc3339(),
+                finished_at: finished_at.to_rfc3339(),
+                status: RecurringScheduleHistoryStatus::Failure,
+                checksum_mode: schedule.checksum_mode,
+                cron_expression: schedule.cron_expression.clone(),
+                timezone: schedule.timezone.clone(),
+                message: format!("Scheduled sync failed for '{}'.", task.name),
+                error_detail: Some(error.error_detail),
+                conflict_count: 0,
+                detail_entries,
+            }
+        }
     };
 
     if let Err(error) =
@@ -3932,26 +4060,44 @@ async fn execute_sync_internal(
     sync_origin: SyncOrigin,
     external_cancel_token: Option<CancellationToken>,
     mcp_job_id: Option<String>,
-) -> Result<SyncExecutionResult, String> {
+) -> Result<SyncExecutionResult, SyncExecutionFailure> {
     if !sync_slot_pre_acquired && !acquire_sync_slot(&task_id, &state).await {
-        return Err("Task is already syncing".to_string());
+        return Err(SyncExecutionFailure::new(
+            "Task is already syncing".to_string(),
+        ));
     }
-    try_acquire_task_operation(&task_id, TaskOperationKind::Sync, &state).await?;
+    try_acquire_task_operation(&task_id, TaskOperationKind::Sync, &state)
+        .await
+        .map_err(SyncExecutionFailure::new)?;
     if sync_origin == SyncOrigin::Manual {
         emit_runtime_sync_state(&app, &task_id, true, None);
     }
 
+    let recurring_history_detail_entries = Arc::new(StdMutex::new(Vec::new()));
     let sync_result = async {
-        let source = resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-        let target = resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-        ensure_non_overlapping_paths(&source, &target)?;
+        let source = resolve_path_with_uuid(source.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())
+            .map_err(SyncExecutionFailure::new)?;
+        let target = resolve_path_with_uuid(target.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())
+            .map_err(SyncExecutionFailure::new)?;
+        ensure_non_overlapping_paths(&source, &target).map_err(SyncExecutionFailure::new)?;
 
         // Validate all inputs
-        input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-        input_validation::validate_exclude_patterns(&exclude_patterns).map_err(|e| e.to_string())?;
-        let target_key = resolved_path_key(target.to_str().unwrap_or(""))?;
+        input_validation::validate_task_id(&task_id)
+            .map_err(|e| e.to_string())
+            .map_err(SyncExecutionFailure::new)?;
+        input_validation::validate_path_argument(source.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())
+            .map_err(SyncExecutionFailure::new)?;
+        input_validation::validate_path_argument(target.to_str().unwrap_or(""))
+            .map_err(|e| e.to_string())
+            .map_err(SyncExecutionFailure::new)?;
+        input_validation::validate_exclude_patterns(&exclude_patterns)
+            .map_err(|e| e.to_string())
+            .map_err(SyncExecutionFailure::new)?;
+        let target_key = resolved_path_key(target.to_str().unwrap_or(""))
+            .map_err(SyncExecutionFailure::new)?;
         let producer_id = runtime_sync_producer_id(&task_id, sync_origin);
         register_runtime_producer(
             producer_id.clone(),
@@ -3961,7 +4107,9 @@ async fn execute_sync_internal(
         )
         .await;
         let sync_result = async {
-            let target_preflight = preflight_target_path(&target, true).await?;
+            let target_preflight = preflight_target_path(&target, true)
+                .await
+                .map_err(SyncExecutionFailure::new)?;
 
             // 취소 토큰 생성 및 등록
             let cancel_token = CancellationToken::new();
@@ -4004,7 +4152,8 @@ async fn execute_sync_internal(
             let target_newer_conflicts = engine
                 .target_newer_conflicts(&options)
                 .await
-                .map_err(|e| format!("{:#}", e))?;
+                .map_err(|e| format!("{:#}", e))
+                .map_err(SyncExecutionFailure::new)?;
 
             // 동기화 실행 (취소 토큰과 함께)
             let task_id_clone = task_id.clone();
@@ -4028,12 +4177,16 @@ async fn execute_sync_internal(
             let log_manager = state.log_manager.clone();
             let task_id_for_log = task_id.clone();
             let app_for_log = app.clone(); // For log events
+            let recurring_history_detail_entries_for_progress =
+                recurring_history_detail_entries.clone();
             let mcp_jobs = state.mcp_jobs.clone();
             let mcp_job_id_for_progress = mcp_job_id.clone();
 
             // Create clones for the closure
             let progress_state_closure = progress_state.clone();
             let log_manager_closure = log_manager.clone();
+            let recurring_history_detail_entries_closure =
+                recurring_history_detail_entries_for_progress.clone();
 
             let result = tokio::select! {
                 res = engine.sync_files(&options, move |progress| {
@@ -4060,6 +4213,10 @@ async fn execute_sync_internal(
                                 };
 
                                 if let Some(batch) = progress_state_closure.add_log(entry) {
+                                    capture_recurring_schedule_detail_entries(
+                                        &recurring_history_detail_entries_closure,
+                                        &batch,
+                                    );
                                     log_manager_closure.log_batch_entries(
                                         batch,
                                         Some(task_id_for_log.clone()),
@@ -4103,6 +4260,10 @@ async fn execute_sync_internal(
                 }) => {
                     // Flush remaining logs on completion
                     if let Some(batch) = progress_state.flush_logs() {
+                        capture_recurring_schedule_detail_entries(
+                            &recurring_history_detail_entries_for_progress,
+                            &batch,
+                        );
                         log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
                     }
                     res
@@ -4110,6 +4271,10 @@ async fn execute_sync_internal(
                 _ = cancel_token.cancelled() => {
                      // Flush logs on cancel too
                     if let Some(batch) = progress_state.flush_logs() {
+                        capture_recurring_schedule_detail_entries(
+                            &recurring_history_detail_entries_for_progress,
+                            &batch,
+                        );
                         log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
                     }
                     Err(anyhow::anyhow!("Operation cancelled by user"))
@@ -4159,27 +4324,46 @@ async fn execute_sync_internal(
                         conflict_count: target_newer_conflicts.len(),
                         has_pending_conflicts: !target_newer_conflicts.is_empty(),
                         target_preflight: Some(target_preflight.clone()),
+                        recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
+                            &recurring_history_detail_entries,
+                        ),
                     })
                 }
                 Err(e) => {
                     let err_text = format!("{:#}", e);
                     if err_text.contains("cancelled by user") || err_text.contains("Operation cancelled by user") {
-                        state.log_manager.log_with_category(
+                        emit_task_log_with_recurring_detail(
+                            &state.log_manager,
+                            Some(&recurring_history_detail_entries),
                             "warning",
                             "Sync cancelled by user",
                             Some(task_id.clone()),
                             LogCategory::SyncError,
+                            Some(&app),
                         );
-                        Err("Operation cancelled by user".to_string())
+                        Err(SyncExecutionFailure {
+                            error_detail: "Operation cancelled by user".to_string(),
+                            recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
+                                &recurring_history_detail_entries,
+                            ),
+                        })
                     } else {
                         let msg = format!("Sync failed: {err_text}");
-                        state.log_manager.log_with_category(
+                        emit_task_log_with_recurring_detail(
+                            &state.log_manager,
+                            Some(&recurring_history_detail_entries),
                             "error",
                             &msg,
                             Some(task_id.clone()),
                             LogCategory::SyncError,
+                            Some(&app),
                         );
-                        Err(err_text)
+                        Err(SyncExecutionFailure {
+                            error_detail: err_text,
+                            recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
+                                &recurring_history_detail_entries,
+                            ),
+                        })
                     }
                 }
             }
@@ -4199,7 +4383,10 @@ async fn execute_sync_internal(
     }
     .await;
 
-    let completion_reason = sync_result.as_ref().err().cloned();
+    let completion_reason = sync_result
+        .as_ref()
+        .err()
+        .map(|error| error.error_detail.clone());
     release_task_operation(&task_id, &state).await;
     release_sync_slot(&task_id, &state).await;
     if sync_origin == SyncOrigin::Manual {
@@ -4326,7 +4513,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         }
     }
 
-    let reason = result.err();
+    let reason = result.err().map(|error| error.error_detail);
     emit_runtime_sync_state(&app, &task.id, false, reason);
 
     let should_replay = take_runtime_pending_sync_task(&task.id, &state).await;
@@ -6072,7 +6259,8 @@ async fn start_sync(
         None,
         None,
     )
-    .await?;
+    .await
+    .map_err(|error| error.error_detail)?;
 
     Ok(result)
 }
@@ -6522,7 +6710,7 @@ async fn spawn_mcp_sync_job(
                 } else {
                     state_for_job
                         .mcp_jobs
-                        .fail_job(&job_id_for_job, error, unix_now_ms())
+                        .fail_job(&job_id_for_job, error.error_detail, unix_now_ms())
                         .await;
                 }
             }
@@ -6973,11 +7161,59 @@ async fn create_sync_task_internal(
     Ok(task)
 }
 
-async fn patch_sync_task_internal(
-    update: UpdateSyncTaskRequest,
-    app: tauri::AppHandle,
+fn recurring_schedule_history_maintenance_failures(
+    task: &SyncTaskRecord,
+    previous_schedule_ids: &HashSet<String>,
     state: &AppState,
-) -> Result<SyncTaskRecord, String> {
+) -> Vec<String> {
+    let next_schedule_ids: HashSet<String> = task
+        .recurring_schedules
+        .iter()
+        .map(|schedule| schedule.id.clone())
+        .collect();
+    let mut failures = Vec::new();
+
+    if previous_schedule_ids != &next_schedule_ids {
+        let deleted_schedule_ids: Vec<String> = previous_schedule_ids
+            .difference(&next_schedule_ids)
+            .cloned()
+            .collect();
+        if let Err(error) = state
+            .recurring_schedule_history_store
+            .remove_deleted_schedule_history(&task.id, &next_schedule_ids)
+        {
+            let deleted_label = if deleted_schedule_ids.is_empty() {
+                "none".to_string()
+            } else {
+                deleted_schedule_ids.join(", ")
+            };
+            failures.push(format!(
+                "Recurring schedule history cleanup warning for task '{}' deletedSchedules=[{}]: {}",
+                task.id, deleted_label, error
+            ));
+        }
+    }
+
+    for schedule in &task.recurring_schedules {
+        if let Err(error) = state.recurring_schedule_history_store.truncate_history(
+            &task.id,
+            &schedule.id,
+            schedule.retention_count,
+        ) {
+            failures.push(format!(
+                "Recurring schedule history retention maintenance warning for task '{}' schedule '{}': {}",
+                task.id, schedule.id, error
+            ));
+        }
+    }
+
+    failures
+}
+
+fn persist_patched_sync_task_and_collect_history_warnings(
+    update: UpdateSyncTaskRequest,
+    state: &AppState,
+) -> Result<(SyncTaskRecord, Vec<String>), String> {
     input_validation::validate_task_id(&update.task_id).map_err(|e| e.to_string())?;
     let mut tasks = state
         .config_store
@@ -7006,15 +7242,27 @@ async fn patch_sync_task_internal(
         .config_store
         .save_tasks(&tasks)
         .map_err(config_store_error_to_string)?;
-    let next_schedule_ids: HashSet<String> = task
-        .recurring_schedules
-        .iter()
-        .map(|schedule| schedule.id.clone())
-        .collect();
-    if previous_schedule_ids != next_schedule_ids {
-        state
-            .recurring_schedule_history_store
-            .remove_deleted_schedule_history(&task.id, &next_schedule_ids)?;
+
+    Ok((
+        task.clone(),
+        recurring_schedule_history_maintenance_failures(&task, &previous_schedule_ids, state),
+    ))
+}
+
+async fn patch_sync_task_internal(
+    update: UpdateSyncTaskRequest,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<SyncTaskRecord, String> {
+    let (task, warnings) = persist_patched_sync_task_and_collect_history_warnings(update, state)?;
+    for message in warnings {
+        state.log_manager.log_with_category_and_event(
+            "warning",
+            &message,
+            Some(task.id.clone()),
+            LogCategory::Other,
+            Some(&app),
+        );
     }
     emit_config_store_changed(&app, &["syncTasks"]);
     let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;

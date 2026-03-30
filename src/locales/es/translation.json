@@ -133,6 +133,7 @@
       "enableSchedule": "Activar programación",
       "editSchedule": "Editar programación",
       "deleteSchedule": "Eliminar programación",
+      "viewLogs": "Ver registros",
       "showRuntimeNotice": "Mostrar aviso de ejecución programada",
       "empty": {
         "title": "Todavía no hay tareas de sincronización",
@@ -227,6 +228,16 @@
           "success": "Éxito",
           "failure": "Fallo"
         }
+      },
+      "logs": {
+        "title": "Registros de ejecución",
+        "runListTitle": "Ejecuciones",
+        "detailTitle": "Detalles de la ejecución",
+        "emptyRuns": "Todavía no hay ejecuciones registradas.",
+        "emptyDetails": "No se guardó actividad detallada de archivos para esta ejecución.",
+        "noRunSelected": "Selecciona una ejecución para inspeccionar sus detalles.",
+        "runCount": "{{count}} ejecuciones",
+        "detailCount": "{{count}} entradas de detalle"
       }
     },
     "dryRun": {

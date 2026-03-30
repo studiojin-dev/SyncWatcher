@@ -133,6 +133,7 @@
       "enableSchedule": "啟用此週期",
       "editSchedule": "編輯週期",
       "deleteSchedule": "刪除週期",
+      "viewLogs": "查看日誌",
       "showRuntimeNotice": "查看定期執行說明",
       "empty": {
         "title": "還沒有同步任務",
@@ -227,6 +228,16 @@
           "success": "成功",
           "failure": "失敗"
         }
+      },
+      "logs": {
+        "title": "執行日誌",
+        "runListTitle": "執行記錄",
+        "detailTitle": "執行詳情",
+        "emptyRuns": "尚未有已記錄的執行。",
+        "emptyDetails": "此執行沒有儲存詳細的檔案活動日誌。",
+        "noRunSelected": "請選擇一筆執行記錄查看詳情。",
+        "runCount": "{{count}} 次執行",
+        "detailCount": "{{count}} 筆詳情"
       }
     },
     "dryRun": {

@@ -130,6 +130,7 @@
       "enableSchedule": "Enable schedule",
       "editSchedule": "Edit schedule",
       "deleteSchedule": "Delete schedule",
+      "viewLogs": "View logs",
       "showRuntimeNotice": "Show recurring schedule runtime notice",
       "empty": {
         "title": "No Sync Tasks Yet",
@@ -224,6 +225,16 @@
           "success": "Success",
           "failure": "Failure"
         }
+      },
+      "logs": {
+        "title": "Schedule Logs",
+        "runListTitle": "Runs",
+        "detailTitle": "Run Details",
+        "emptyRuns": "No recorded runs yet.",
+        "emptyDetails": "No detailed file activity was saved for this run.",
+        "noRunSelected": "Select a run to inspect its details.",
+        "runCount": "{{count}} runs",
+        "detailCount": "{{count}} detail entries"
       }
     },
     "dryRun": {

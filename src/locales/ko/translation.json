@@ -133,6 +133,7 @@
       "enableSchedule": "이 주기 활성화",
       "editSchedule": "주기 편집",
       "deleteSchedule": "주기 삭제",
+      "viewLogs": "로그 보기",
       "showRuntimeNotice": "정기 실행 안내 보기",
       "empty": {
         "title": "아직 동기화 작업이 없습니다",
@@ -227,6 +228,16 @@
           "success": "성공",
           "failure": "실패"
         }
+      },
+      "logs": {
+        "title": "실행 로그",
+        "runListTitle": "실행 기록",
+        "detailTitle": "상세 복사 내역",
+        "emptyRuns": "저장된 실행 기록이 없습니다.",
+        "emptyDetails": "이 실행에 저장된 상세 파일 작업 로그가 없습니다.",
+        "noRunSelected": "왼쪽에서 실행 기록을 선택하면 상세가 표시됩니다.",
+        "runCount": "{{count}}개 실행",
+        "detailCount": "{{count}}개 상세 항목"
       }
     },
     "dryRun": {

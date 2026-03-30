@@ -1,8 +1,8 @@
 # ADR-20260328-0020-REC: In-process recurring schedule engine and file-backed history
 Status: Accepted
-Date: 2026-03-28
+Date: 2026-03-30
 Tags: recurring-schedules, runtime, cron, timezone, history, config-store, tauri
-TL;DR: Store recurring schedules inside each sync task, execute them only while the running app process is alive, and persist per-schedule run history as separate files under app support state.
+TL;DR: Store recurring schedules inside each sync task, execute them only while the running app process is alive, and persist per-schedule run history plus per-run detail entries as separate files under app support state.
 
 ## Context
 
@@ -59,7 +59,17 @@ TL;DR: Store recurring schedules inside each sync task, execute them only while 
      - `message`
      - `errorDetail`
      - `conflictCount`
+   - `detailEntries[]`
+       - `timestamp`
+       - `level`
+       - `category`
+       - `message`
+   - `detailEntries` are captured from the scheduled run's own execution buffer, not by slicing the shared global task log ring after the run completes.
+   - `detailEntries` capture the file-level copy/delete activity and run-scoped warning/error lines needed for a per-run detail view.
+   - Top-level history summary remains the concise run card text; `detailEntries` are the drill-in payload.
    - Writes are atomic and truncated to the schedule’s `retentionCount`.
+   - If a schedule’s `retentionCount` is lowered later, existing history for that schedule is truncated immediately on task save rather than waiting for the next run.
+   - If recurring-history cleanup fails after a task save, the task config remains saved and the cleanup failure is logged as a warning rather than causing the save to roll back.
    - Deleting a schedule deletes its history file.
    - Deleting all recurring schedules for a task deletes that task’s recurring-history directory.
 7. Keep recurring history state separate from `settings.stateLocation`.
@@ -75,7 +85,10 @@ TL;DR: Store recurring schedules inside each sync task, execute them only while 
   - no surprise replay occurs after restart
 - Per-schedule checksum mode allows different integrity/cost trade-offs without duplicating whole sync tasks.
 - File-backed per-schedule history keeps config files small and avoids mixing operational logs with canonical task configuration.
+- Run detail persistence is no longer vulnerable to the shared in-memory log retention cap because scheduled-run history keeps its own per-run buffer until the history entry is written.
 - Users can inspect failures with detailed error text and clear history without touching the canonical task config.
+- Users can inspect a run list separately from the guided schedule editor and drill into file-level execution details for one selected run.
+- Malformed recurring-history files can still prevent history maintenance, but they no longer produce a false task-save failure after canonical task config has already been persisted.
 - The scheduler remains process-local, which avoids:
   - OS launch agents
   - cron installation

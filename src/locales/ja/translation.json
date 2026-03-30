@@ -133,6 +133,7 @@
       "enableSchedule": "このスケジュールを有効化",
       "editSchedule": "スケジュール編集",
       "deleteSchedule": "スケジュール削除",
+      "viewLogs": "ログを見る",
       "showRuntimeNotice": "定期実行の案内を表示",
       "empty": {
         "title": "同期タスクがまだありません",
@@ -227,6 +228,16 @@
           "success": "成功",
           "failure": "失敗"
         }
+      },
+      "logs": {
+        "title": "実行ログ",
+        "runListTitle": "実行履歴",
+        "detailTitle": "実行詳細",
+        "emptyRuns": "記録された実行はまだありません。",
+        "emptyDetails": "この実行には詳細なファイル操作ログが保存されていません。",
+        "noRunSelected": "詳細を確認する実行を選択してください。",
+        "runCount": "{{count}} 件の実行",
+        "detailCount": "{{count}} 件の詳細"
       }
     },
     "dryRun": {
