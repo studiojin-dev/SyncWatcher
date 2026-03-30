@@ -736,7 +736,6 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
     normalized
         .exclusion_sets
         .retain(|value| !value.trim().is_empty());
-    normalized.verify_after_copy = normalized.verify_after_copy;
     normalized.auto_unmount = should_enable_auto_unmount(&normalized);
 
     Ok(normalized)
