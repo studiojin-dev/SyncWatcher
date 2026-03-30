@@ -370,7 +370,7 @@ export function useSyncTaskActions({
           source: task.source,
           target: task.target,
           checksumMode: task.checksumMode,
-          verifyAfterCopy: true,
+          verifyAfterCopy: task.verifyAfterCopy ?? true,
           excludePatterns: getPatternsForSets(task.exclusionSets || []),
         });
         showTargetPreflightToast(execution.targetPreflight, showToast, t);

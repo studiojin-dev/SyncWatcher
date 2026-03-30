@@ -15,13 +15,13 @@ pub mod watcher;
 #[cfg(test)]
 mod lib_tests;
 
+use chrono::Utc;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime};
-use chrono::Utc;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
@@ -40,13 +40,12 @@ use sync_engine::{
 use system_integration::DiskMonitor;
 
 use config_store::{
-    apply_sync_task_update, build_sync_task_record, default_config_dir,
-    default_app_support_dir,
+    apply_sync_task_update, build_sync_task_record, default_app_support_dir, default_config_dir,
     default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
-    AppSettings, ConfigStore, ConfigStoreChangedEvent, DeleteResultEnvelope, ExclusionSetEnvelope,
-    ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NewSyncTaskRecord,
-    SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope,
-    UpdateSettingsPayload, UpdateSyncTaskRequest,
+    AppSettings, ConfigStore, ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope,
+    ExclusionSetEnvelope, ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch,
+    NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord,
+    SyncTasksEnvelope, UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use license::generate_licenses_report;
@@ -54,7 +53,8 @@ use logging::LogManager;
 use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
 use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
 use recurring::{
-    next_scheduled_fire_at, supported_timezone_names, RecurringScheduleHistoryEntry,
+    next_scheduled_fire_at, supported_timezone_names, validate_guided_preset_compatible_schedules,
+    validate_strict_recurring_schedule_ids, RecurringScheduleHistoryEntry,
     RecurringScheduleHistoryStatus, RecurringScheduleHistoryStore, RecurringScheduleRecord,
 };
 
@@ -2122,10 +2122,7 @@ fn recurring_schedule_dispatch_key(task_id: &str, schedule_id: &str) -> String {
     format!("{task_id}:{schedule_id}")
 }
 
-fn recurring_schedule_history_summary(
-    execution: &SyncExecutionResult,
-    task_name: &str,
-) -> String {
+fn recurring_schedule_history_summary(execution: &SyncExecutionResult, task_name: &str) -> String {
     if execution.has_pending_conflicts {
         format!(
             "Scheduled sync completed for '{task_name}' with {} conflict(s) pending review.",
@@ -2268,7 +2265,11 @@ fn compute_due_recurring_schedules(
     let mut next_fire: Option<chrono::DateTime<Utc>> = None;
 
     for task in tasks {
-        for schedule in task.recurring_schedules.iter().filter(|schedule| schedule.enabled) {
+        for schedule in task
+            .recurring_schedules
+            .iter()
+            .filter(|schedule| schedule.enabled)
+        {
             let fire_at = match next_scheduled_fire_at(schedule, now)? {
                 Some(fire_at) => fire_at,
                 None => continue,
@@ -6116,7 +6117,7 @@ async fn create_sync_task(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncTaskEnvelope, String> {
-    let task = create_sync_task_internal(task, app, state.inner()).await?;
+    let task = create_sync_task_internal(task, Some(&app), state.inner()).await?;
     Ok(SyncTaskEnvelope { task })
 }
 
@@ -6516,7 +6517,7 @@ async fn spawn_mcp_sync_job(
                 if cancel_token.is_cancelled() {
                     state_for_job
                         .mcp_jobs
-                        .set_status(&job_id_for_job, McpJobStatus::Cancelled, unix_now_ms())
+                        .mark_cancelled(&job_id_for_job, unix_now_ms())
                         .await;
                 } else {
                     state_for_job
@@ -6601,7 +6602,7 @@ async fn spawn_mcp_dry_run_job(
                 if cancel_token.is_cancelled() {
                     state_for_job
                         .mcp_jobs
-                        .set_status(&job_id_for_job, McpJobStatus::Cancelled, unix_now_ms())
+                        .mark_cancelled(&job_id_for_job, unix_now_ms())
                         .await;
                 } else {
                     state_for_job
@@ -6679,7 +6680,7 @@ async fn spawn_mcp_orphan_scan_job(task_id: String, state: AppState) -> Result<S
                 if cancel_token.is_cancelled() {
                     state_for_job
                         .mcp_jobs
-                        .set_status(&job_id_for_job, McpJobStatus::Cancelled, unix_now_ms())
+                        .mark_cancelled(&job_id_for_job, unix_now_ms())
                         .await;
                 } else {
                     state_for_job
@@ -6792,7 +6793,7 @@ async fn handle_control_plane_request(
                         .map_err(config_store_error_to_string);
                     match task {
                         Ok(task) => {
-                            match create_sync_task_internal(task, app.clone(), &state).await {
+                            match create_sync_task_internal(task, Some(&app), &state).await {
                                 Ok(task) => Ok(serde_json::json!({ "task": task })),
                                 Err(error) => Err(error),
                             }
@@ -6937,10 +6938,16 @@ async fn get_sync_task_internal_json(
 
 async fn create_sync_task_internal(
     task: SyncTaskRecord,
-    app: tauri::AppHandle,
+    app: Option<&tauri::AppHandle>,
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
     let mut task = normalize_sync_task_record(task);
+    validate_strict_recurring_schedule_ids(&task.recurring_schedules).map_err(|message| {
+        config_store_error_to_string(ConfigStoreError::ValidationError { message })
+    })?;
+    validate_guided_preset_compatible_schedules(&task.recurring_schedules).map_err(|message| {
+        config_store_error_to_string(ConfigStoreError::ValidationError { message })
+    })?;
     let current_volumes = DiskMonitor::new()
         .list_volumes()
         .map_err(|error| format!("Failed to list mounted volumes: {error}"))?;
@@ -6959,8 +6966,10 @@ async fn create_sync_task_internal(
         .config_store
         .save_tasks(&tasks)
         .map_err(config_store_error_to_string)?;
-    emit_config_store_changed(&app, &["syncTasks"]);
-    let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
+    if let Some(app) = app {
+        emit_config_store_changed(app, &["syncTasks"]);
+        let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
+    }
     Ok(task)
 }
 

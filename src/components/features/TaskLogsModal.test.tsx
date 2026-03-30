@@ -6,6 +6,29 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import TaskLogsModal from './TaskLogsModal';
 
+interface MockLogEntry {
+  id: string;
+  timestamp: string;
+  level: string;
+  message: string;
+  task_id?: string;
+  category?: string;
+}
+
+interface MockSingleLogEvent {
+  payload: {
+    task_id?: string;
+    entry: MockLogEntry;
+  };
+}
+
+interface MockBatchLogEvent {
+  payload: {
+    task_id?: string;
+    entries: MockLogEntry[];
+  };
+}
+
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
@@ -19,7 +42,13 @@ vi.mock('../ui/Animations', () => ({
 }));
 
 vi.mock('react-virtuoso', () => ({
-  Virtuoso: forwardRef<HTMLDivElement, { data: any[]; itemContent: (index: number, item: any) => ReactNode }>(
+  Virtuoso: forwardRef<
+    HTMLDivElement,
+    {
+      data: MockLogEntry[];
+      itemContent: (index: number, item: MockLogEntry) => ReactNode;
+    }
+  >(
     ({ data, itemContent }, _ref) => (
       <div data-testid="virtuoso-list">
         {data.map((item, index) => (
@@ -39,7 +68,8 @@ vi.mock('react-i18next', () => ({
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
 const mockListen = listen as unknown as ReturnType<typeof vi.fn>;
 
-type ListenerMap = Record<string, ((event: any) => void) | undefined>;
+type MockListenerEvent = MockSingleLogEvent | MockBatchLogEvent;
+type ListenerMap = Record<string, ((event: MockListenerEvent) => void) | undefined>;
 
 describe('TaskLogsModal', () => {
   let listeners: ListenerMap;
@@ -48,7 +78,7 @@ describe('TaskLogsModal', () => {
     vi.clearAllMocks();
     listeners = {};
 
-    mockListen.mockImplementation(async (eventName: string, handler: (event: any) => void) => {
+    mockListen.mockImplementation(async (eventName: string, handler: (event: MockListenerEvent) => void) => {
       listeners[eventName] = handler;
       return vi.fn();
     });

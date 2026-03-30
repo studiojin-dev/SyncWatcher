@@ -82,6 +82,35 @@ pub fn validate_task_id(task_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validate and sanitize recurring schedule ID
+///
+/// Applies the same policy as task IDs because schedule IDs are also used
+/// as stable identifiers and filesystem path segments.
+pub fn validate_recurring_schedule_id(schedule_id: &str) -> Result<()> {
+    const MAX_SCHEDULE_ID_LENGTH: usize = 100;
+
+    if schedule_id.is_empty() {
+        bail!("Recurring schedule id cannot be empty");
+    }
+
+    if schedule_id.len() > MAX_SCHEDULE_ID_LENGTH {
+        bail!(
+            "Recurring schedule id too long: {} chars (max: {})",
+            schedule_id.len(),
+            MAX_SCHEDULE_ID_LENGTH
+        );
+    }
+
+    if !schedule_id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        bail!("Recurring schedule id contains invalid characters");
+    }
+
+    Ok(())
+}
+
 /// Validate and sanitize path arguments
 ///
 /// Uses existing path_validation module for comprehensive checks.
@@ -176,6 +205,21 @@ mod tests {
     fn test_validate_task_id_too_long() {
         let long_id = "a".repeat(101);
         assert!(validate_task_id(&long_id).is_err());
+    }
+
+    #[test]
+    fn test_validate_recurring_schedule_id_valid() {
+        assert!(validate_recurring_schedule_id("schedule-123").is_ok());
+        assert!(validate_recurring_schedule_id("weekly_backup").is_ok());
+    }
+
+    #[test]
+    fn test_validate_recurring_schedule_id_invalid() {
+        assert!(validate_recurring_schedule_id("schedule with spaces").is_err());
+        assert!(validate_recurring_schedule_id("schedule/123").is_err());
+        assert!(validate_recurring_schedule_id("../../schedule").is_err());
+        assert!(validate_recurring_schedule_id("schedule:123").is_err());
+        assert!(validate_recurring_schedule_id("").is_err());
     }
 
     #[test]

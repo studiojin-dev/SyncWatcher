@@ -112,7 +112,8 @@ describe('FolderInput', () => {
 
   it('should log warning for unexpected dialog result type', async () => {
     // Return unexpected type (array)
-    mockOpen.mockResolvedValueOnce(['/unexpected', '/paths'] as any);
+    const unexpectedSelection: string[] = ['/unexpected', '/paths'];
+    mockOpen.mockResolvedValueOnce(unexpectedSelection);
 
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

@@ -125,6 +125,7 @@ function createDefaultTask(): SyncTask {
     source: '[DISK_UUID:disk-1]/DCIM',
     target: '/tmp/target',
     checksumMode: false,
+    verifyAfterCopy: true,
     watchMode: true,
     autoUnmount: true,
     sourceType: 'uuid',
@@ -244,6 +245,48 @@ describe('SyncTasksView sync and watch confirmations', () => {
     expect(invokeMock.mock.calls.some((call) => call[0] === 'start_sync')).toBe(
       false,
     );
+  });
+
+  it('passes through verifyAfterCopy=false for manual sync', async () => {
+    syncTasksState.tasks = [{ ...createDefaultTask(), verifyAfterCopy: false }];
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.startSync')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        'start_sync',
+        expect.objectContaining({
+          taskId: 'task-1',
+          verifyAfterCopy: false,
+        }),
+      );
+    });
+  });
+
+  it('falls back to verifyAfterCopy=true for legacy tasks', async () => {
+    syncTasksState.tasks = [{ ...createDefaultTask(), verifyAfterCopy: undefined }];
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.startSync')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        'start_sync',
+        expect.objectContaining({
+          taskId: 'task-1',
+          verifyAfterCopy: true,
+        }),
+      );
+    });
   });
 
   it('does not toggle watch off when confirmation is rejected', async () => {

@@ -6,7 +6,7 @@ mod integration_tests {
     };
     use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
-    use crate::recurring::RecurringScheduleHistoryStore;
+    use crate::recurring::{RecurringScheduleHistoryStore, RecurringScheduleRecord};
     use crate::sync_engine::types::{
         DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
     };
@@ -16,8 +16,8 @@ mod integration_tests {
         build_runtime_watch_upstreams, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
-        compute_volume_mount_diff, decide_autostart_launch, decide_runtime_auto_unmount,
-        dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
+        compute_volume_mount_diff, create_sync_task_internal, decide_autostart_launch,
+        decide_runtime_auto_unmount, dequeue_runtime_sync_task, enqueue_runtime_sync_task_internal,
         enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
         find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
         find_runtime_task_validation_issue, find_runtime_watch_cycle,
@@ -507,6 +507,94 @@ mod integration_tests {
         assert!(event.entry.message.contains(
             "Conflict review [session-skip-event] skipped pending item on close: photos/c.jpg"
         ));
+    }
+
+    #[tokio::test]
+    async fn test_create_sync_task_internal_rejects_unsupported_custom_recurring_cron() {
+        let state = build_app_state();
+
+        let error = create_sync_task_internal(
+            SyncTaskRecord {
+                id: "task-recurring-invalid".to_string(),
+                name: "Task".to_string(),
+                source: "/tmp/source".to_string(),
+                target: "/tmp/target".to_string(),
+                checksum_mode: false,
+                verify_after_copy: true,
+                exclusion_sets: Vec::new(),
+                watch_mode: false,
+                auto_unmount: false,
+                source_type: Some(SourceType::Path),
+                source_uuid: None,
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+                recurring_schedules: vec![RecurringScheduleRecord {
+                    id: "schedule-1".to_string(),
+                    cron_expression: "*/15 9-17 * * 1-5".to_string(),
+                    timezone: "Asia/Seoul".to_string(),
+                    enabled: true,
+                    checksum_mode: false,
+                    retention_count: 20,
+                }],
+            },
+            None,
+            &state,
+        )
+        .await
+        .expect_err("create should reject unsupported custom cron");
+
+        assert!(error.contains("guided preset-compatible"));
+
+        let tasks = state
+            .config_store
+            .load_tasks()
+            .expect("tasks should remain readable");
+        assert!(tasks.is_empty(), "invalid create must not persist any task");
+    }
+
+    #[tokio::test]
+    async fn test_create_sync_task_internal_rejects_invalid_recurring_schedule_id() {
+        let state = build_app_state();
+
+        let error = create_sync_task_internal(
+            SyncTaskRecord {
+                id: "task-recurring-invalid-id".to_string(),
+                name: "Task".to_string(),
+                source: "/tmp/source".to_string(),
+                target: "/tmp/target".to_string(),
+                checksum_mode: false,
+                verify_after_copy: true,
+                exclusion_sets: Vec::new(),
+                watch_mode: false,
+                auto_unmount: false,
+                source_type: Some(SourceType::Path),
+                source_uuid: None,
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+                recurring_schedules: vec![RecurringScheduleRecord {
+                    id: "../../schedule".to_string(),
+                    cron_expression: "15 9 * * 1,3".to_string(),
+                    timezone: "Asia/Seoul".to_string(),
+                    enabled: true,
+                    checksum_mode: false,
+                    retention_count: 20,
+                }],
+            },
+            None,
+            &state,
+        )
+        .await
+        .expect_err("create should reject invalid recurring schedule id");
+
+        assert!(error.contains("Recurring schedule id contains invalid characters"));
+
+        let tasks = state
+            .config_store
+            .load_tasks()
+            .expect("tasks should remain readable");
+        assert!(tasks.is_empty(), "invalid create must not persist any task");
     }
 
     #[tokio::test]

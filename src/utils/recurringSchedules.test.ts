@@ -31,7 +31,11 @@ describe('recurringSchedules utilities', () => {
       weekdays: ['1', '3'],
       dayOfMonth: '1',
     });
-    expect(buildCronExpressionFromPreset(parsed!)).toBe('15 9 * * 1,3');
+    expect(parsed).not.toBeNull();
+    if (!parsed) {
+      throw new Error('expected weekly cron to parse');
+    }
+    expect(buildCronExpressionFromPreset(parsed)).toBe('15 9 * * 1,3');
   });
 
   it('round-trips hourly presets through minute-only builder time', () => {

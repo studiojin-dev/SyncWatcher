@@ -13,7 +13,7 @@ use crate::input_validation;
 use crate::license_validation;
 use crate::recurring::{
     normalize_recurring_schedules, validate_guided_preset_compatible_schedules,
-    RecurringScheduleRecord,
+    validate_strict_recurring_schedule_ids, RecurringScheduleRecord,
 };
 use crate::DataUnitSystem;
 
@@ -764,6 +764,8 @@ pub fn build_sync_task_record(
         recurring_schedules: request.recurring_schedules,
     })?;
 
+    validate_strict_recurring_schedule_ids(&task.recurring_schedules)
+        .map_err(|message| ConfigStoreError::ValidationError { message })?;
     validate_guided_preset_compatible_schedules(&task.recurring_schedules)
         .map_err(|message| ConfigStoreError::ValidationError { message })?;
 
@@ -820,6 +822,8 @@ pub fn apply_sync_task_update(
     let next = normalize_sync_task(next)?;
 
     if update.recurring_schedules.is_some() {
+        validate_strict_recurring_schedule_ids(&next.recurring_schedules)
+            .map_err(|message| ConfigStoreError::ValidationError { message })?;
         validate_guided_preset_compatible_schedules(&next.recurring_schedules)
             .map_err(|message| ConfigStoreError::ValidationError { message })?;
     }
@@ -1636,6 +1640,47 @@ mod tests {
             },
         )
         .expect_err("explicit recurring schedule update should reject unsupported custom cron");
+
+        assert!(matches!(error, ConfigStoreError::ValidationError { .. }));
+    }
+
+    #[test]
+    fn update_rejects_invalid_recurring_schedule_id() {
+        let task = normalize_sync_task(SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        })
+        .expect("task should normalize");
+
+        let error = apply_sync_task_update(
+            task,
+            &UpdateSyncTaskRequest {
+                task_id: "task-1".to_string(),
+                recurring_schedules: Some(vec![RecurringScheduleRecord {
+                    id: "../../schedule".to_string(),
+                    cron_expression: "15 9 * * 1,3".to_string(),
+                    timezone: "Asia/Seoul".to_string(),
+                    enabled: true,
+                    checksum_mode: false,
+                    retention_count: 20,
+                }]),
+                ..UpdateSyncTaskRequest::default()
+            },
+        )
+        .expect_err("invalid recurring schedule id should be rejected");
 
         assert!(matches!(error, ConfigStoreError::ValidationError { .. }));
     }

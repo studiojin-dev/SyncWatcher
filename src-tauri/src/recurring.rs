@@ -11,6 +11,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
+use crate::input_validation;
+
 pub const DEFAULT_RECURRING_SCHEDULE_RETENTION_COUNT: u32 = 20;
 pub const MIN_RECURRING_SCHEDULE_RETENTION_COUNT: u32 = 1;
 pub const MAX_RECURRING_SCHEDULE_RETENTION_COUNT: u32 = 200;
@@ -102,7 +104,10 @@ fn is_plain_number(value: &str, min: u32, max: u32) -> bool {
 }
 
 fn parse_weekday_field(value: &str) -> Option<Vec<String>> {
-    let parts: Vec<&str> = value.split(',').filter(|segment| !segment.is_empty()).collect();
+    let parts: Vec<&str> = value
+        .split(',')
+        .filter(|segment| !segment.is_empty())
+        .collect();
     if parts.is_empty() {
         return None;
     }
@@ -153,7 +158,10 @@ pub fn validate_guided_preset_compatible_cron_expression(value: &str) -> Result<
     if compatible {
         Ok(())
     } else {
-        Err("Recurring schedule cronExpression must match a guided preset-compatible 5-field cron".to_string())
+        Err(
+            "Recurring schedule cronExpression must match a guided preset-compatible 5-field cron"
+                .to_string(),
+        )
     }
 }
 
@@ -169,6 +177,17 @@ pub fn validate_guided_preset_compatible_schedules(
                 )
             },
         )?;
+    }
+
+    Ok(())
+}
+
+pub fn validate_strict_recurring_schedule_ids(
+    schedules: &[RecurringScheduleRecord],
+) -> Result<(), String> {
+    for schedule in schedules {
+        input_validation::validate_recurring_schedule_id(schedule.id.trim())
+            .map_err(|error| error.to_string())?;
     }
 
     Ok(())
@@ -247,11 +266,17 @@ pub fn next_scheduled_fire_at(
     }
 
     let timezone = parse_timezone(&schedule.timezone)?;
-    let schedule_source = format!("0 {}", normalize_cron_expression(&schedule.cron_expression)?);
+    let schedule_source = format!(
+        "0 {}",
+        normalize_cron_expression(&schedule.cron_expression)?
+    );
     let parsed = Schedule::from_str(&schedule_source)
         .map_err(|error| format!("Invalid cron expression: {error}"))?;
     let reference = after_utc.with_timezone(&timezone) - Duration::seconds(1);
-    Ok(parsed.after(&reference).next().map(|dt| dt.with_timezone(&Utc)))
+    Ok(parsed
+        .after(&reference)
+        .next()
+        .map(|dt| dt.with_timezone(&Utc)))
 }
 
 #[derive(Debug, Clone)]
@@ -270,10 +295,15 @@ impl RecurringScheduleHistoryStore {
         &self.root_dir
     }
 
-    pub fn history_file_path(&self, task_id: &str, schedule_id: &str) -> PathBuf {
-        self.root_dir
+    pub fn history_file_path(&self, task_id: &str, schedule_id: &str) -> Result<PathBuf, String> {
+        input_validation::validate_task_id(task_id).map_err(|error| error.to_string())?;
+        input_validation::validate_recurring_schedule_id(schedule_id)
+            .map_err(|error| error.to_string())?;
+
+        Ok(self
+            .root_dir
             .join(task_id)
-            .join(format!("{schedule_id}.yaml"))
+            .join(format!("{schedule_id}.yaml")))
     }
 
     pub fn read_history(
@@ -281,13 +311,15 @@ impl RecurringScheduleHistoryStore {
         task_id: &str,
         schedule_id: &str,
     ) -> Result<Vec<RecurringScheduleHistoryEntry>, String> {
-        let path = self.history_file_path(task_id, schedule_id);
+        let path = self.history_file_path(task_id, schedule_id)?;
         match fs::read_to_string(&path) {
             Ok(raw) if raw.trim().is_empty() => Ok(Vec::new()),
             Ok(raw) => serde_yaml::from_str(&raw)
                 .map_err(|error| format!("Failed to parse recurring schedule history: {error}")),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(error) => Err(format!("Failed to read recurring schedule history: {error}")),
+            Err(error) => Err(format!(
+                "Failed to read recurring schedule history: {error}"
+            )),
         }
     }
 
@@ -311,16 +343,18 @@ impl RecurringScheduleHistoryStore {
         schedule_id: &str,
         entries: &[RecurringScheduleHistoryEntry],
     ) -> Result<(), String> {
-        let path = self.history_file_path(task_id, schedule_id);
+        let path = self.history_file_path(task_id, schedule_id)?;
         self.write_yaml_atomic(&path, entries)
     }
 
     pub fn clear_history(&self, task_id: &str, schedule_id: &str) -> Result<(), String> {
-        let path = self.history_file_path(task_id, schedule_id);
+        let path = self.history_file_path(task_id, schedule_id)?;
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!("Failed to clear recurring schedule history: {error}")),
+            Err(error) => Err(format!(
+                "Failed to clear recurring schedule history: {error}"
+            )),
         }
     }
 
@@ -377,22 +411,34 @@ impl RecurringScheduleHistoryStore {
         Ok(())
     }
 
-    fn write_yaml_atomic<T: Serialize + ?Sized>(&self, path: &Path, value: &T) -> Result<(), String> {
+    fn write_yaml_atomic<T: Serialize + ?Sized>(
+        &self,
+        path: &Path,
+        value: &T,
+    ) -> Result<(), String> {
         let bytes = serde_yaml::to_string(value)
             .map_err(|error| format!("Failed to serialize recurring schedule history: {error}"))?;
         let Some(parent) = path.parent() else {
             return Err("Recurring schedule history path has no parent".to_string());
         };
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to prepare recurring schedule history dir: {error}"))?;
-        let mut temp = NamedTempFile::new_in(parent)
-            .map_err(|error| format!("Failed to create temp recurring schedule history file: {error}"))?;
-        temp.write_all(bytes.as_bytes())
-            .map_err(|error| format!("Failed to write temp recurring schedule history file: {error}"))?;
-        temp.flush()
-            .map_err(|error| format!("Failed to flush temp recurring schedule history file: {error}"))?;
-        temp.persist(path)
-            .map_err(|error| format!("Failed to persist recurring schedule history file: {}", error.error))?;
+        fs::create_dir_all(parent).map_err(|error| {
+            format!("Failed to prepare recurring schedule history dir: {error}")
+        })?;
+        let mut temp = NamedTempFile::new_in(parent).map_err(|error| {
+            format!("Failed to create temp recurring schedule history file: {error}")
+        })?;
+        temp.write_all(bytes.as_bytes()).map_err(|error| {
+            format!("Failed to write temp recurring schedule history file: {error}")
+        })?;
+        temp.flush().map_err(|error| {
+            format!("Failed to flush temp recurring schedule history file: {error}")
+        })?;
+        temp.persist(path).map_err(|error| {
+            format!(
+                "Failed to persist recurring schedule history file: {}",
+                error.error
+            )
+        })?;
         Ok(())
     }
 }
@@ -415,7 +461,8 @@ mod tests {
 
     #[test]
     fn normalizes_and_validates_five_field_cron() {
-        let schedule = normalize_recurring_schedule(build_schedule()).expect("schedule should normalize");
+        let schedule =
+            normalize_recurring_schedule(build_schedule()).expect("schedule should normalize");
         assert_eq!(schedule.cron_expression, "15 9 * * 1,3");
     }
 
@@ -453,10 +500,32 @@ mod tests {
 
     #[test]
     fn guided_validator_rejects_custom_cron() {
-        let error =
-            validate_guided_preset_compatible_cron_expression("*/15 9-17 * * 1-5")
-                .expect_err("custom cron should be rejected");
+        let error = validate_guided_preset_compatible_cron_expression("*/15 9-17 * * 1-5")
+            .expect_err("custom cron should be rejected");
         assert!(error.contains("guided preset-compatible"));
+    }
+
+    #[test]
+    fn strict_schedule_id_validator_rejects_path_like_values() {
+        let error = validate_strict_recurring_schedule_ids(&[RecurringScheduleRecord {
+            id: "../../settings".to_string(),
+            ..build_schedule()
+        }])
+        .expect_err("path-like schedule id should be rejected");
+
+        assert!(error.contains("Recurring schedule id contains invalid characters"));
+    }
+
+    #[test]
+    fn history_file_path_rejects_invalid_schedule_id() {
+        let temp = tempdir().expect("tempdir should exist");
+        let store = RecurringScheduleHistoryStore::new(temp.path().to_path_buf());
+
+        let error = store
+            .history_file_path("task_1", "../../settings")
+            .expect_err("invalid schedule id should be rejected");
+
+        assert!(error.contains("Recurring schedule id contains invalid characters"));
     }
 
     #[test]
