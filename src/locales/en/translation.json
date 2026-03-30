@@ -140,7 +140,8 @@
         "checksumOn": "Checksum on",
         "checksumOff": "Checksum off",
         "enabled": "Enabled",
-        "disabled": "Disabled"
+        "disabled": "Disabled",
+        "unsupported": "Unsupported custom cron"
       },
       "toasts": {
         "saved": "Recurring schedule saved.",
@@ -167,19 +168,15 @@
       "fields": {
         "enabled": "Enabled",
         "checksumMode": "Checksum Mode",
-        "editorMode": "Editor Mode",
         "frequency": "Frequency",
         "time": "Time",
+        "minute": "Minute",
+        "hourlyMinuteHelp": "Enter only a minute value from 0 to 59.",
         "timezone": "Timezone",
         "weekdays": "Weekdays",
         "dayOfMonth": "Day of month",
-        "cronExpression": "Cron Expression",
         "retentionCount": "History Retention",
         "cronPreview": "Cron Preview"
-      },
-      "editorModes": {
-        "guided": "Guided",
-        "advanced": "Advanced"
       },
       "presets": {
         "hourly": "Hourly",
@@ -201,12 +198,18 @@
         "daily": "Every day {{time}}",
         "weekly": "Every week {{days}} {{time}}",
         "monthly": "Every month day {{day}} {{time}}",
-        "custom": "Custom cron {{cron}}"
+        "unsupportedCustom": "Unsupported custom cron {{cron}}"
       },
       "errors": {
-        "cronFieldCount": "Cron expression must use 5 fields: minute hour day month weekday.",
+        "hourlyMinuteRange": "Minute must be between 0 and 59.",
         "timezoneRequired": "Timezone is required.",
+        "unsupportedCustom": "This recurring schedule uses a custom cron expression and cannot be edited here.",
         "saveFailed": "The recurring schedule could not be saved."
+      },
+      "unsupported": {
+        "title": "Unsupported custom cron",
+        "description": "This schedule cannot be edited with the guided editor.",
+        "deleteHint": "Delete this schedule and recreate it with the guided editor."
       },
       "history": {
         "title": "Recent History",

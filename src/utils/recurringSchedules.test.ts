@@ -34,7 +34,7 @@ describe('recurringSchedules utilities', () => {
     expect(buildCronExpressionFromPreset(parsed!)).toBe('15 9 * * 1,3');
   });
 
-  it('handles hourly and monthly presets', () => {
+  it('round-trips hourly presets through minute-only builder time', () => {
     expect(parseCronExpressionToBuilder('5 * * * *')).toEqual({
       preset: 'hourly',
       time: '00:05',
@@ -42,6 +42,17 @@ describe('recurringSchedules utilities', () => {
       dayOfMonth: '1',
     });
 
+    expect(
+      buildCronExpressionFromPreset({
+        preset: 'hourly',
+        time: '00:05',
+        weekdays: [],
+        dayOfMonth: '1',
+      }),
+    ).toBe('5 * * * *');
+  });
+
+  it('handles monthly presets', () => {
     expect(
       buildCronExpressionFromPreset({
         preset: 'monthly',

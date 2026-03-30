@@ -12,7 +12,8 @@ use tempfile::NamedTempFile;
 use crate::input_validation;
 use crate::license_validation;
 use crate::recurring::{
-    normalize_recurring_schedules, RecurringScheduleRecord,
+    normalize_recurring_schedules, validate_guided_preset_compatible_schedules,
+    RecurringScheduleRecord,
 };
 use crate::DataUnitSystem;
 
@@ -731,6 +732,7 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
 
     normalized.recurring_schedules = normalize_recurring_schedules(normalized.recurring_schedules)
         .map_err(|message| ConfigStoreError::ValidationError { message })?;
+
     normalized
         .exclusion_sets
         .retain(|value| !value.trim().is_empty());
@@ -744,7 +746,7 @@ pub fn build_sync_task_record(
     id: String,
     request: CreateSyncTaskRequest,
 ) -> Result<SyncTaskRecord, ConfigStoreError> {
-    normalize_sync_task(SyncTaskRecord {
+    let task = normalize_sync_task(SyncTaskRecord {
         id,
         name: request.name,
         source: request.source,
@@ -760,7 +762,12 @@ pub fn build_sync_task_record(
         source_sub_path: request.source_sub_path,
         source_identity: request.source_identity,
         recurring_schedules: request.recurring_schedules,
-    })
+    })?;
+
+    validate_guided_preset_compatible_schedules(&task.recurring_schedules)
+        .map_err(|message| ConfigStoreError::ValidationError { message })?;
+
+    Ok(task)
 }
 
 pub fn apply_sync_task_update(
@@ -810,7 +817,14 @@ pub fn apply_sync_task_update(
     if update.source_identity.is_none() && source_changed {
         next.source_identity = None;
     }
-    normalize_sync_task(next)
+    let next = normalize_sync_task(next)?;
+
+    if update.recurring_schedules.is_some() {
+        validate_guided_preset_compatible_schedules(&next.recurring_schedules)
+            .map_err(|message| ConfigStoreError::ValidationError { message })?;
+    }
+
+    Ok(next)
 }
 
 pub fn validate_exclusion_sets(sets: &[ExclusionSetRecord]) -> Result<(), ConfigStoreError> {
@@ -1509,6 +1523,166 @@ mod tests {
         assert_eq!(
             loaded_tasks[0].exclusion_sets,
             vec![PROGRAM_SET_ID.to_string(), "custom".to_string()]
+        );
+    }
+
+    #[test]
+    fn load_tasks_allows_existing_unsupported_custom_recurring_cron() {
+        let temp = tempdir().expect("tempdir should be created");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+        let tasks = vec![SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: vec![RecurringScheduleRecord {
+                id: "schedule-1".to_string(),
+                cron_expression: "*/15 9-17 * * 1-5".to_string(),
+                timezone: "Asia/Seoul".to_string(),
+                enabled: true,
+                checksum_mode: false,
+                retention_count: 20,
+            }],
+        }];
+
+        store
+            .write_yaml_atomic(&store.tasks_file_path(), &tasks)
+            .expect("should write tasks");
+
+        let loaded_tasks = store.load_tasks().expect("should load tasks");
+        assert_eq!(
+            loaded_tasks[0].recurring_schedules[0].cron_expression,
+            "*/15 9-17 * * 1-5"
+        );
+    }
+
+    #[test]
+    fn create_rejects_unsupported_custom_recurring_cron() {
+        let error = build_sync_task_record(
+            "task-1".to_string(),
+            CreateSyncTaskRequest {
+                name: "Task".to_string(),
+                source: "/tmp/source".to_string(),
+                target: "/tmp/target".to_string(),
+                checksum_mode: false,
+                verify_after_copy: true,
+                exclusion_sets: Vec::new(),
+                watch_mode: false,
+                auto_unmount: false,
+                source_type: None,
+                source_uuid: None,
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+                recurring_schedules: vec![RecurringScheduleRecord {
+                    id: "schedule-1".to_string(),
+                    cron_expression: "*/15 9-17 * * 1-5".to_string(),
+                    timezone: "Asia/Seoul".to_string(),
+                    enabled: true,
+                    checksum_mode: false,
+                    retention_count: 20,
+                }],
+            },
+        )
+        .expect_err("create should reject unsupported custom cron");
+
+        assert!(matches!(error, ConfigStoreError::ValidationError { .. }));
+    }
+
+    #[test]
+    fn update_rejects_explicit_unsupported_custom_recurring_cron() {
+        let task = normalize_sync_task(SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        })
+        .expect("task should normalize");
+
+        let error = apply_sync_task_update(
+            task,
+            &UpdateSyncTaskRequest {
+                task_id: "task-1".to_string(),
+                recurring_schedules: Some(vec![RecurringScheduleRecord {
+                    id: "schedule-1".to_string(),
+                    cron_expression: "*/15 9-17 * * 1-5".to_string(),
+                    timezone: "Asia/Seoul".to_string(),
+                    enabled: true,
+                    checksum_mode: false,
+                    retention_count: 20,
+                }]),
+                ..UpdateSyncTaskRequest::default()
+            },
+        )
+        .expect_err("explicit recurring schedule update should reject unsupported custom cron");
+
+        assert!(matches!(error, ConfigStoreError::ValidationError { .. }));
+    }
+
+    #[test]
+    fn update_preserves_existing_unsupported_custom_recurring_cron_when_omitted() {
+        let task = normalize_sync_task(SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: vec![RecurringScheduleRecord {
+                id: "schedule-1".to_string(),
+                cron_expression: "*/15 9-17 * * 1-5".to_string(),
+                timezone: "Asia/Seoul".to_string(),
+                enabled: true,
+                checksum_mode: false,
+                retention_count: 20,
+            }],
+        })
+        .expect("task should normalize");
+
+        let updated = apply_sync_task_update(
+            task,
+            &UpdateSyncTaskRequest {
+                task_id: "task-1".to_string(),
+                name: Some("Task Updated".to_string()),
+                ..UpdateSyncTaskRequest::default()
+            },
+        )
+        .expect("update should preserve omitted recurring schedules");
+
+        assert_eq!(updated.name, "Task Updated");
+        assert_eq!(updated.recurring_schedules.len(), 1);
+        assert_eq!(
+            updated.recurring_schedules[0].cron_expression,
+            "*/15 9-17 * * 1-5"
         );
     }
 }

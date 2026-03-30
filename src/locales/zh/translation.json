@@ -143,7 +143,8 @@
         "checksumOn": "校验和开启",
         "checksumOff": "校验和关闭",
         "enabled": "启用",
-        "disabled": "禁用"
+        "disabled": "禁用",
+        "unsupported": "不支持的自定义 cron"
       },
       "toasts": {
         "saved": "已保存定期执行。",
@@ -170,19 +171,15 @@
       "fields": {
         "enabled": "启用",
         "checksumMode": "校验和模式",
-        "editorMode": "编辑模式",
         "frequency": "频率",
         "time": "时间",
+        "minute": "分钟",
+        "hourlyMinuteHelp": "只输入 0 到 59 之间的分钟值。",
         "timezone": "时区",
         "weekdays": "星期",
         "dayOfMonth": "每月日期",
-        "cronExpression": "Cron 表达式",
         "retentionCount": "历史保留条数",
         "cronPreview": "Cron 预览"
-      },
-      "editorModes": {
-        "guided": "向导",
-        "advanced": "高级"
       },
       "presets": {
         "hourly": "每小时",
@@ -204,12 +201,18 @@
         "daily": "每天 {{time}}",
         "weekly": "每周 {{days}} {{time}}",
         "monthly": "每月 {{day}} 日 {{time}}",
-        "custom": "自定义 cron {{cron}}"
+        "unsupportedCustom": "不支持的自定义 cron {{cron}}"
       },
       "errors": {
-        "cronFieldCount": "Cron 表达式必须使用 5 个字段：分 时 日 月 星期。",
+        "hourlyMinuteRange": "分钟必须在 0 到 59 之间。",
         "timezoneRequired": "时区为必填项。",
+        "unsupportedCustom": "这个定期执行使用了自定义 cron 表达式，不能在这里编辑。",
         "saveFailed": "无法保存定期执行。"
+      },
+      "unsupported": {
+        "title": "不支持的自定义 cron",
+        "description": "这个周期无法通过引导式编辑器修改。",
+        "deleteHint": "请删除这个周期，并使用引导式编辑器重新创建。"
       },
       "history": {
         "title": "最近历史",

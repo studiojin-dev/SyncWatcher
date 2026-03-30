@@ -143,7 +143,8 @@
         "checksumOn": "チェックサム ON",
         "checksumOff": "チェックサム OFF",
         "enabled": "有効",
-        "disabled": "無効"
+        "disabled": "無効",
+        "unsupported": "未対応のカスタム cron"
       },
       "toasts": {
         "saved": "定期実行を保存しました。",
@@ -170,19 +171,15 @@
       "fields": {
         "enabled": "有効",
         "checksumMode": "チェックサムモード",
-        "editorMode": "編集モード",
         "frequency": "頻度",
         "time": "時刻",
+        "minute": "分",
+        "hourlyMinuteHelp": "0 から 59 の分だけを入力してください。",
         "timezone": "タイムゾーン",
         "weekdays": "曜日",
         "dayOfMonth": "日付",
-        "cronExpression": "Cron 式",
         "retentionCount": "履歴保持件数",
         "cronPreview": "Cron プレビュー"
-      },
-      "editorModes": {
-        "guided": "ガイド",
-        "advanced": "詳細"
       },
       "presets": {
         "hourly": "毎時",
@@ -204,12 +201,18 @@
         "daily": "毎日 {{time}}",
         "weekly": "毎週 {{days}} {{time}}",
         "monthly": "毎月 {{day}} 日 {{time}}",
-        "custom": "カスタム cron {{cron}}"
+        "unsupportedCustom": "未対応のカスタム cron {{cron}}"
       },
       "errors": {
-        "cronFieldCount": "Cron 式は 5 フィールド（分 時 日 月 曜日）で指定してください。",
+        "hourlyMinuteRange": "分は 0 から 59 の範囲で指定してください。",
         "timezoneRequired": "タイムゾーンは必須です。",
+        "unsupportedCustom": "この定期実行はカスタム cron 式を使っているため、ここでは編集できません。",
         "saveFailed": "定期実行を保存できませんでした。"
+      },
+      "unsupported": {
+        "title": "未対応のカスタム cron",
+        "description": "このスケジュールはガイド付きエディタでは編集できません。",
+        "deleteHint": "このスケジュールを削除し、ガイド付きエディタで新しく作り直してください。"
       },
       "history": {
         "title": "最近の履歴",

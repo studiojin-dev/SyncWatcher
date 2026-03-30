@@ -342,7 +342,7 @@ impl SyncWatcherMcpServer {
 
     #[tool(
         name = "syncwatcher_create_sync_task",
-        description = "Create a new SyncWatcher sync task. The backend assigns the task id and validates all runtime safety constraints.",
+        description = "Create a new SyncWatcher sync task. The backend assigns the task id, validates runtime safety constraints, and only accepts guided preset-compatible recurringSchedules cron expressions.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -362,7 +362,7 @@ impl SyncWatcherMcpServer {
 
     #[tool(
         name = "syncwatcher_update_sync_task",
-        description = "Update an existing SyncWatcher sync task by taskId.",
+        description = "Update an existing SyncWatcher sync task by taskId. If recurringSchedules is provided, the backend only accepts guided preset-compatible cron expressions.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,

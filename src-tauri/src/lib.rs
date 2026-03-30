@@ -2147,12 +2147,7 @@ async fn append_recurring_schedule_history_entry(
 ) -> Result<(), String> {
     state
         .recurring_schedule_history_store
-        .append_entry(
-            task_id,
-            &schedule.id,
-            schedule.retention_count,
-            entry,
-        )
+        .append_entry(task_id, &schedule.id, schedule.retention_count, entry)
         .map(|_| ())
 }
 

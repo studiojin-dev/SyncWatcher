@@ -143,7 +143,8 @@
         "checksumOn": "체크섬 켜짐",
         "checksumOff": "체크섬 꺼짐",
         "enabled": "활성",
-        "disabled": "비활성"
+        "disabled": "비활성",
+        "unsupported": "미지원 사용자 지정 cron"
       },
       "toasts": {
         "saved": "정기 실행을 저장했습니다.",
@@ -170,22 +171,18 @@
       "fields": {
         "enabled": "활성",
         "checksumMode": "체크섬 모드",
-        "editorMode": "편집 모드",
         "frequency": "주기",
         "time": "시간",
+        "minute": "분",
+        "hourlyMinuteHelp": "0에서 59 사이의 분만 입력하세요.",
         "timezone": "시간대",
         "weekdays": "요일",
         "dayOfMonth": "매월 일자",
-        "cronExpression": "Cron 표현식",
         "retentionCount": "이력 보관 개수",
         "cronPreview": "Cron 미리보기"
       },
-      "editorModes": {
-        "guided": "가이드",
-        "advanced": "고급"
-      },
       "presets": {
-        "hourly": "매 시간",
+        "hourly": "매시간",
         "daily": "매일",
         "weekly": "매주",
         "monthly": "매월"
@@ -204,12 +201,18 @@
         "daily": "매일 {{time}}",
         "weekly": "매주 {{days}} {{time}}",
         "monthly": "매월 {{day}}일 {{time}}",
-        "custom": "사용자 지정 cron {{cron}}"
+        "unsupportedCustom": "미지원 사용자 지정 cron {{cron}}"
       },
       "errors": {
-        "cronFieldCount": "Cron 표현식은 5개 필드(분 시 일 월 요일)를 사용해야 합니다.",
+        "hourlyMinuteRange": "분은 0에서 59 사이여야 합니다.",
         "timezoneRequired": "시간대는 필수입니다.",
+        "unsupportedCustom": "이 정기 실행은 사용자 지정 cron 표현식을 사용하므로 여기서 편집할 수 없습니다.",
         "saveFailed": "정기 실행을 저장할 수 없습니다."
+      },
+      "unsupported": {
+        "title": "미지원 사용자 지정 cron",
+        "description": "이 주기는 가이드 편집기에서 수정할 수 없습니다.",
+        "deleteHint": "이 주기를 삭제하고 가이드 편집기로 새 주기를 다시 만드세요."
       },
       "history": {
         "title": "최근 이력",

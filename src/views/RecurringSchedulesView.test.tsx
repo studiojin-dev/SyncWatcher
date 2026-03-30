@@ -31,60 +31,49 @@ vi.mock('react-i18next', () => ({
         'recurringSchedules.enableSchedule': 'Enable schedule',
         'recurringSchedules.editSchedule': 'Edit schedule',
         'recurringSchedules.deleteSchedule': 'Delete schedule',
-        'recurringSchedules.showRuntimeNotice': 'Show recurring schedule runtime notice',
-        'recurringSchedules.history.clear': 'Clear recurring schedule history',
-        'recurringSchedules.history.reload': 'Reload recurring schedule history',
-        'recurringSchedules.history.title': 'Recent History',
-        'recurringSchedules.history.description': 'Saved success and failure records.',
-        'recurringSchedules.history.empty': 'No recorded runs yet.',
-        'recurringSchedules.history.status.success': 'Success',
-        'recurringSchedules.history.status.failure': 'Failure',
-        'recurringSchedules.history.startedAt': 'Started',
-        'recurringSchedules.history.finishedAt': 'Finished',
-        'recurringSchedules.history.conflictCount': 'Conflicts',
-        'recurringSchedules.badges.checksumOn': 'Checksum on',
-        'recurringSchedules.badges.checksumOff': 'Checksum off',
-        'recurringSchedules.badges.enabled': 'Enabled',
-        'recurringSchedules.badges.disabled': 'Disabled',
-        'recurringSchedules.modal.editTitle': 'Edit Recurring Schedule',
-        'recurringSchedules.confirmDeleteTitle': 'Delete recurring schedule',
-        'recurringSchedules.confirmDeleteMessage': 'Delete recurring schedule?',
-        'recurringSchedules.clearHistoryConfirmTitle': 'Clear recurring schedule history',
-        'recurringSchedules.clearHistoryConfirmMessage': 'Clear recurring schedule history?',
+        'recurringSchedules.addSchedule': 'Add schedule',
+        'recurringSchedules.deleteAll': 'Delete all schedules',
         'recurringSchedules.fields.enabled': 'Enabled',
         'recurringSchedules.fields.checksumMode': 'Checksum Mode',
-        'recurringSchedules.fields.editorMode': 'Editor Mode',
         'recurringSchedules.fields.frequency': 'Frequency',
         'recurringSchedules.fields.time': 'Time',
         'recurringSchedules.fields.timezone': 'Timezone',
         'recurringSchedules.fields.weekdays': 'Weekdays',
         'recurringSchedules.fields.dayOfMonth': 'Day of month',
-        'recurringSchedules.fields.cronExpression': 'Cron Expression',
+        'recurringSchedules.fields.minute': 'Minute',
+        'recurringSchedules.fields.hourlyMinuteHelp': 'Enter a minute from 0 to 59.',
         'recurringSchedules.fields.retentionCount': 'History Retention',
         'recurringSchedules.fields.cronPreview': 'Cron Preview',
-        'recurringSchedules.editorModes.guided': 'Guided',
-        'recurringSchedules.editorModes.advanced': 'Advanced',
         'recurringSchedules.presets.hourly': 'Hourly',
         'recurringSchedules.presets.daily': 'Daily',
         'recurringSchedules.presets.weekly': 'Weekly',
         'recurringSchedules.presets.monthly': 'Monthly',
-        'recurringSchedules.weekdays.mon': 'Mon',
-        'recurringSchedules.weekdays.tue': 'Tue',
-        'recurringSchedules.weekdays.wed': 'Wed',
-        'recurringSchedules.weekdays.thu': 'Thu',
-        'recurringSchedules.weekdays.fri': 'Fri',
-        'recurringSchedules.weekdays.sat': 'Sat',
-        'recurringSchedules.weekdays.sun': 'Sun',
-        'recurringSchedules.summary.weekly': `Every week ${options?.days ?? ''} ${options?.time ?? ''}`.trim(),
+        'recurringSchedules.modal.editTitle': 'Edit Recurring Schedule',
+        'recurringSchedules.modal.addTitle': 'Add Recurring Schedule',
         'recurringSchedules.summary.daily': `Every day ${options?.time ?? ''}`.trim(),
         'recurringSchedules.summary.hourly': `Every hour at :${options?.minute ?? ''}`.trim(),
-        'recurringSchedules.summary.monthly': `Every month day ${options?.day ?? ''} ${options?.time ?? ''}`.trim(),
-        'recurringSchedules.summary.custom': `Custom cron ${options?.cron ?? ''}`.trim(),
-        'recurringSchedules.toasts.updated': 'Recurring schedule updated.',
-        'recurringSchedules.toasts.historyCleared': 'Recurring schedule history cleared.',
+        'recurringSchedules.summary.unsupportedCustom': `Unsupported custom cron ${options?.cron ?? ''}`.trim(),
+        'recurringSchedules.badges.checksumOn': 'Checksum on',
+        'recurringSchedules.badges.checksumOff': 'Checksum off',
+        'recurringSchedules.badges.enabled': 'Enabled',
+        'recurringSchedules.badges.disabled': 'Disabled',
+        'recurringSchedules.badges.unsupported': 'Unsupported',
+        'recurringSchedules.errors.hourlyMinuteRange': 'Minute must be between 0 and 59.',
+        'recurringSchedules.errors.unsupportedCustom':
+          'This schedule uses a custom cron expression that can no longer be edited here.',
+        'recurringSchedules.unsupported.title': 'Unsupported custom cron',
+        'recurringSchedules.unsupported.description':
+          'This schedule cannot be edited in the guided editor.',
+        'recurringSchedules.unsupported.deleteHint':
+          'Delete this schedule and create a new guided schedule instead.',
+        'recurringSchedules.history.title': 'Recent History',
+        'recurringSchedules.history.description': 'Saved success and failure records.',
+        'recurringSchedules.history.empty': 'No recorded runs yet.',
+        'recurringSchedules.history.reload': 'Reload recurring schedule history',
+        'recurringSchedules.history.clear': 'Clear recurring schedule history',
         'common.loading': 'Loading...',
-        'common.cancel': 'Cancel',
         'common.save': 'Save',
+        'common.cancel': 'Cancel',
         'common.close': 'Close',
       };
       return translations[key] ?? key;
@@ -108,47 +97,14 @@ vi.mock('../components/ui/Toast', () => ({
 describe('RecurringSchedulesView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockState.tasks = [
-      {
-        id: 'task-1',
-        name: 'SyncTask 1',
-        source: '/Volumes/CARD',
-        target: '/Volumes/Backup',
-        checksumMode: false,
-        recurringSchedules: [
-          {
-            id: 'schedule-1',
-            cronExpression: '15 9 * * 1,3',
-            timezone: 'Asia/Seoul',
-            enabled: true,
-            checksumMode: true,
-            retentionCount: 20,
-          },
-        ],
-      },
-    ];
     vi.mocked(ask).mockResolvedValue(true);
-
     vi.mocked(invoke).mockImplementation(async (command: string) => {
       if (command === 'list_supported_timezones') {
         return ['Asia/Seoul', 'UTC'];
       }
 
       if (command === 'get_recurring_schedule_history') {
-        return [
-          {
-            scheduledFor: '2026-03-28T00:15:00Z',
-            startedAt: '2026-03-28T00:15:01Z',
-            finishedAt: '2026-03-28T00:15:05Z',
-            status: 'failure',
-            checksumMode: true,
-            cronExpression: '15 9 * * 1,3',
-            timezone: 'Asia/Seoul',
-            message: 'Scheduled sync failed for task.',
-            errorDetail: 'Disk is busy',
-            conflictCount: 0,
-          },
-        ];
+        return [];
       }
 
       if (command === 'clear_recurring_schedule_history') {
@@ -159,45 +115,112 @@ describe('RecurringSchedulesView', () => {
     });
   });
 
-  it('updates recurring schedule enabled state from the task card', async () => {
+  it('uses guided-only editing and saves hourly schedules with minute-only input', async () => {
+    mockState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Repo->evo',
+        source: '/src',
+        target: '/dst',
+        checksumMode: false,
+        recurringSchedules: [
+          {
+            id: 'schedule-1',
+            cronExpression: '0 11 * * *',
+            timezone: 'Asia/Seoul',
+            enabled: true,
+            checksumMode: false,
+            retentionCount: 20,
+          },
+        ],
+      },
+    ];
+
     render(<RecurringSchedulesView />);
 
-    const toggleButton = await screen.findByRole('button', { name: 'Disable schedule' });
-    fireEvent.click(toggleButton);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit schedule' }));
+
+    expect(screen.queryByText('Editor Mode')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hourly' }));
+
+    const minuteInput = screen.getByRole('spinbutton', { name: 'Minute' });
+    expect(minuteInput).toHaveValue(0);
+
+    fireEvent.change(minuteInput, { target: { value: '17' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(mockState.updateTask).toHaveBeenCalledWith('task-1', {
         recurringSchedules: [
           expect.objectContaining({
             id: 'schedule-1',
-            enabled: false,
+            cronExpression: '17 * * * *',
           }),
         ],
       });
     });
   });
 
-  it('loads history in the modal and clears it after confirmation', async () => {
-    render(<RecurringSchedulesView />);
+  it('rejects hourly minute values outside 0-59', async () => {
+    mockState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Repo->evo',
+        source: '/src',
+        target: '/dst',
+        checksumMode: false,
+        recurringSchedules: [
+          {
+            id: 'schedule-1',
+            cronExpression: '5 * * * *',
+            timezone: 'Asia/Seoul',
+            enabled: true,
+            checksumMode: false,
+            retentionCount: 20,
+          },
+        ],
+      },
+    ];
 
+    render(<RecurringSchedulesView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit schedule' }));
 
-    expect(await screen.findByText('Edit Recurring Schedule')).toBeInTheDocument();
-    expect(await screen.findByText('Scheduled sync failed for task.')).toBeInTheDocument();
+    const minuteInput = screen.getByRole('spinbutton', { name: 'Minute' });
+    fireEvent.change(minuteInput, { target: { value: '72' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show recurring schedule runtime notice' }));
+    expect(await screen.findByText('Minute must be between 0 and 59.')).toBeInTheDocument();
+    expect(mockState.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('shows unsupported custom cron guidance and blocks saving', async () => {
+    mockState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Repo->evo',
+        source: '/src',
+        target: '/dst',
+        checksumMode: false,
+        recurringSchedules: [
+          {
+            id: 'schedule-1',
+            cronExpression: '*/15 9-17 * * 1-5',
+            timezone: 'Asia/Seoul',
+            enabled: true,
+            checksumMode: false,
+            retentionCount: 20,
+          },
+        ],
+      },
+    ];
+
+    render(<RecurringSchedulesView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit schedule' }));
+
+    expect(await screen.findByText('Unsupported custom cron')).toBeInTheDocument();
     expect(
-      screen.getAllByText('Recurring schedules only run while the SyncWatcher process is alive.')[0]
+      screen.getByText('Delete this schedule and create a new guided schedule instead.')
     ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Clear recurring schedule history' }));
-
-    await waitFor(() => {
-      expect(ask).toHaveBeenCalled();
-      expect(invoke).toHaveBeenCalledWith('clear_recurring_schedule_history', {
-        taskId: 'task-1',
-        scheduleId: 'schedule-1',
-      });
-    });
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
   });
 });

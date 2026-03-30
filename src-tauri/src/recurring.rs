@@ -90,6 +90,90 @@ pub fn normalize_cron_expression(value: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
+fn is_plain_number(value: &str, min: u32, max: u32) -> bool {
+    if value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+
+    match value.parse::<u32>() {
+        Ok(parsed) => parsed >= min && parsed <= max,
+        Err(_) => false,
+    }
+}
+
+fn parse_weekday_field(value: &str) -> Option<Vec<String>> {
+    let parts: Vec<&str> = value.split(',').filter(|segment| !segment.is_empty()).collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut seen = HashSet::new();
+    let mut weekdays = Vec::with_capacity(parts.len());
+
+    for part in parts {
+        let normalized = if part == "7" { "0" } else { part };
+        if normalized.len() != 1 || !matches!(normalized, "0" | "1" | "2" | "3" | "4" | "5" | "6") {
+            return None;
+        }
+
+        if !seen.insert(normalized.to_string()) {
+            return None;
+        }
+
+        weekdays.push(normalized.to_string());
+    }
+
+    weekdays.sort_by_key(|day| day.parse::<u8>().unwrap_or(0));
+    Some(weekdays)
+}
+
+pub fn validate_guided_preset_compatible_cron_expression(value: &str) -> Result<(), String> {
+    let normalized = normalize_cron_expression(value)?;
+    let fields: Vec<&str> = normalized.split_whitespace().collect();
+    let [minute, hour, day_of_month, month, weekday] = fields.as_slice() else {
+        return Err("Cron expression must use 5 fields (min hour day month weekday)".to_string());
+    };
+
+    let compatible = if *hour == "*" && *day_of_month == "*" && *month == "*" && *weekday == "*" {
+        is_plain_number(minute, 0, 59)
+    } else if *day_of_month == "*" && *month == "*" && *weekday == "*" {
+        is_plain_number(minute, 0, 59) && is_plain_number(hour, 0, 23)
+    } else if *day_of_month == "*" && *month == "*" {
+        is_plain_number(minute, 0, 59)
+            && is_plain_number(hour, 0, 23)
+            && parse_weekday_field(weekday).is_some()
+    } else if *month == "*" && *weekday == "*" {
+        is_plain_number(minute, 0, 59)
+            && is_plain_number(hour, 0, 23)
+            && is_plain_number(day_of_month, 1, 31)
+    } else {
+        false
+    };
+
+    if compatible {
+        Ok(())
+    } else {
+        Err("Recurring schedule cronExpression must match a guided preset-compatible 5-field cron".to_string())
+    }
+}
+
+pub fn validate_guided_preset_compatible_schedules(
+    schedules: &[RecurringScheduleRecord],
+) -> Result<(), String> {
+    for schedule in schedules {
+        validate_guided_preset_compatible_cron_expression(&schedule.cron_expression).map_err(
+            |_| {
+                format!(
+                    "Recurring schedule '{}' must use a guided preset-compatible cron expression",
+                    schedule.id
+                )
+            },
+        )?;
+    }
+
+    Ok(())
+}
+
 pub fn validate_recurring_schedules(schedules: &[RecurringScheduleRecord]) -> Result<(), String> {
     let mut seen_ids = HashSet::new();
 
@@ -357,6 +441,22 @@ mod tests {
         .expect("schedule should produce next fire");
 
         assert_eq!(next.to_rfc3339(), "2026-03-29T00:15:00+00:00");
+    }
+
+    #[test]
+    fn guided_validator_accepts_supported_presets() {
+        for cron in ["5 * * * *", "15 9 * * *", "30 8 * * 1,3", "0 23 30 * *"] {
+            validate_guided_preset_compatible_cron_expression(cron)
+                .expect("guided preset should validate");
+        }
+    }
+
+    #[test]
+    fn guided_validator_rejects_custom_cron() {
+        let error =
+            validate_guided_preset_compatible_cron_expression("*/15 9-17 * * 1-5")
+                .expect_err("custom cron should be rejected");
+        assert!(error.contains("guided preset-compatible"));
     }
 
     #[test]

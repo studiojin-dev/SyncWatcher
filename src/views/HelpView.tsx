@@ -1,10 +1,10 @@
 import { useTranslation } from 'react-i18next';
 import {
   IconAlertTriangle,
+  IconCalendarRepeat,
   IconDatabase,
   IconFolder,
   IconRefresh,
-  IconCalendarRepeat,
   IconShield,
   IconEye,
   IconBrandGithub,

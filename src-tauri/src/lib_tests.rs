@@ -199,13 +199,13 @@ mod integration_tests {
             conflict_review_sessions: Arc::new(RwLock::new(HashMap::new())),
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
             active_task_operations: Arc::new(RwLock::new(HashMap::new())),
-            control_plane_handle: Arc::new(Mutex::new(None)),
-            mcp_jobs: Arc::new(McpJobRegistry::new()),
-            mcp_job_seq: Arc::new(AtomicU64::new(0)),
             recurring_schedule_history_store: Arc::new(RecurringScheduleHistoryStore::new(
                 temp_config_dir(),
             )),
             recurring_scheduler_wakeup: Arc::new(Notify::new()),
+            control_plane_handle: Arc::new(Mutex::new(None)),
+            mcp_jobs: Arc::new(McpJobRegistry::new()),
+            mcp_job_seq: Arc::new(AtomicU64::new(0)),
         }
     }
 

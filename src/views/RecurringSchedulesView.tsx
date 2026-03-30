@@ -3,7 +3,6 @@ import { ask } from '@tauri-apps/plugin-dialog';
 import {
   IconCalendarRepeat,
   IconEdit,
-  IconHelpCircle,
   IconPlayerPause,
   IconPlayerPlay,
   IconPlus,
@@ -15,13 +14,11 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
 import { useToast } from '../components/ui/Toast';
-import { Tooltip } from '../components/ui/Tooltip';
 import { useSyncTasksContext } from '../context/SyncTasksContext';
 import type { SyncTask } from '../hooks/useSyncTasks';
 import {
   buildCronExpressionFromPreset,
   getSystemTimezone,
-  normalizeCronExpression,
   normalizeRecurringSchedule,
   normalizeRecurringSchedules,
   parseCronExpressionToBuilder,
@@ -32,7 +29,6 @@ import {
 } from '../utils/recurringSchedules';
 
 type EditorMode = 'create' | 'edit';
-type ScheduleEditorPresentation = 'guided' | 'advanced';
 
 interface ScheduleModalState {
   mode: EditorMode;
@@ -75,15 +71,32 @@ function formatHistoryTimestamp(value: string, timezone: string): string {
   }).format(parsed);
 }
 
+function isSupportedGuidedSchedule(schedule: RecurringSchedule): boolean {
+  return parseCronExpressionToBuilder(schedule.cronExpression) !== null;
+}
+
+function isValidMinuteValue(value: string): boolean {
+  if (!/^\d{1,2}$/.test(value)) {
+    return false;
+  }
+
+  const numeric = Number(value);
+  return numeric >= 0 && numeric <= 59;
+}
+
+function formatMinuteValue(value: string): string {
+  return value.padStart(2, '0');
+}
+
 function describeRecurringSchedule(
   schedule: RecurringSchedule,
   t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   const parsed = parseCronExpressionToBuilder(schedule.cronExpression);
   if (!parsed) {
-    return t('recurringSchedules.summary.custom', {
+    return t('recurringSchedules.summary.unsupportedCustom', {
       cron: schedule.cronExpression,
-      defaultValue: `Custom cron ${schedule.cronExpression}`,
+      defaultValue: `Unsupported custom cron ${schedule.cronExpression}`,
     });
   }
 
@@ -410,74 +423,82 @@ function RecurringSchedulesView() {
                 </div>
               ) : (
                 <div className="divide-y-3 divide-[var(--border-main)]">
-                  {schedules.map((schedule) => (
-                    <div key={schedule.id} className="flex items-center gap-4 px-5 py-4">
-                      <button
-                        type="button"
-                        aria-label={
-                          schedule.enabled
-                            ? t('recurringSchedules.disableSchedule')
-                            : t('recurringSchedules.enableSchedule')
-                        }
-                        className={`h-10 w-10 shrink-0 border-3 border-[var(--border-main)] ${
-                          schedule.enabled ? 'bg-[var(--accent-main)]' : 'bg-white'
-                        }`}
-                        onClick={() => {
-                          void handleToggleSchedule(task, schedule.id);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => setModalState({
-                          mode: 'edit',
-                          task,
-                          schedule,
-                        })}
-                      >
-                        <div className="truncate text-2xl font-black leading-tight">
-                          {describeRecurringSchedule(schedule, t)}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs font-mono uppercase">
-                          <span className="border-2 border-[var(--border-main)] bg-white px-2 py-1">
-                            {schedule.timezone}
-                          </span>
-                          <span className="border-2 border-[var(--border-main)] bg-white px-2 py-1">
-                            {schedule.checksumMode
-                              ? t('recurringSchedules.badges.checksumOn')
-                              : t('recurringSchedules.badges.checksumOff')}
-                          </span>
-                          <span className="border-2 border-[var(--border-main)] bg-white px-2 py-1">
-                            {schedule.enabled
-                              ? t('recurringSchedules.badges.enabled')
-                              : t('recurringSchedules.badges.disabled')}
-                          </span>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={t('recurringSchedules.editSchedule')}
-                        className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
-                        onClick={() => setModalState({
-                          mode: 'edit',
-                          task,
-                          schedule,
-                        })}
-                      >
-                        <IconEdit size={18} />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={t('recurringSchedules.deleteSchedule')}
-                        className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
-                        onClick={() => {
-                          void handleDeleteSchedule(task, schedule.id);
-                        }}
-                      >
-                        <IconX size={18} stroke={3} />
-                      </button>
-                    </div>
-                  ))}
+                  {schedules.map((schedule) => {
+                    const supportedSchedule = isSupportedGuidedSchedule(schedule);
+                    return (
+                      <div key={schedule.id} className="flex items-center gap-4 px-5 py-4">
+                        <button
+                          type="button"
+                          aria-label={
+                            schedule.enabled
+                              ? t('recurringSchedules.disableSchedule')
+                              : t('recurringSchedules.enableSchedule')
+                          }
+                          className={`h-10 w-10 shrink-0 border-3 border-[var(--border-main)] ${
+                            schedule.enabled ? 'bg-[var(--accent-main)]' : 'bg-white'
+                          }`}
+                          onClick={() => {
+                            void handleToggleSchedule(task, schedule.id);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => setModalState({
+                            mode: 'edit',
+                            task,
+                            schedule,
+                          })}
+                        >
+                          <div className="truncate text-2xl font-black leading-tight">
+                            {describeRecurringSchedule(schedule, t)}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs font-mono uppercase">
+                            <span className="border-2 border-[var(--border-main)] bg-white px-2 py-1">
+                              {schedule.timezone}
+                            </span>
+                            <span className="border-2 border-[var(--border-main)] bg-white px-2 py-1">
+                              {schedule.checksumMode
+                                ? t('recurringSchedules.badges.checksumOn')
+                                : t('recurringSchedules.badges.checksumOff')}
+                            </span>
+                            <span className="border-2 border-[var(--border-main)] bg-white px-2 py-1">
+                              {schedule.enabled
+                                ? t('recurringSchedules.badges.enabled')
+                                : t('recurringSchedules.badges.disabled')}
+                            </span>
+                            {!supportedSchedule ? (
+                              <span className="border-2 border-[var(--accent-error)] bg-red-50 px-2 py-1 text-[var(--accent-error)]">
+                                {t('recurringSchedules.badges.unsupported')}
+                              </span>
+                            ) : null}
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={t('recurringSchedules.editSchedule')}
+                          className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
+                          onClick={() => setModalState({
+                            mode: 'edit',
+                            task,
+                            schedule,
+                          })}
+                        >
+                          <IconEdit size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={t('recurringSchedules.deleteSchedule')}
+                          className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
+                          onClick={() => {
+                            void handleDeleteSchedule(task, schedule.id);
+                          }}
+                        >
+                          <IconX size={18} stroke={3} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -510,9 +531,9 @@ function RecurringScheduleModal({
 }: RecurringScheduleModalProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
-  const [presentation, setPresentation] = useState<ScheduleEditorPresentation>('guided');
-  const [preset, setPreset] = useState<RecurringSchedulePreset>('daily');
+  const [preset, setPreset] = useState<Exclude<RecurringSchedulePreset, 'custom'>>('daily');
   const [timeValue, setTimeValue] = useState('09:00');
+  const [hourlyMinute, setHourlyMinute] = useState('00');
   const [weekdays, setWeekdays] = useState<string[]>(['1']);
   const [dayOfMonth, setDayOfMonth] = useState('1');
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
@@ -525,6 +546,7 @@ function RecurringScheduleModal({
   const [historyReloadNonce, setHistoryReloadNonce] = useState(0);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [unsupportedSchedule, setUnsupportedSchedule] = useState<RecurringSchedule | null>(null);
 
   useEffect(() => {
     if (!modalState) {
@@ -540,9 +562,10 @@ function RecurringScheduleModal({
       dayOfMonth: '1',
     };
 
-    setPresentation(parsed ? 'guided' : 'advanced');
-    setPreset(parsed?.preset ?? 'custom');
+    setUnsupportedSchedule(parsed ? null : schedule);
+    setPreset(builder.preset);
     setTimeValue(builder.time);
+    setHourlyMinute(builder.time.slice(3, 5));
     setWeekdays(builder.weekdays);
     setDayOfMonth(builder.dayOfMonth);
     setCronExpression(schedule.cronExpression);
@@ -602,33 +625,22 @@ function RecurringScheduleModal({
     nextTime: string,
     nextWeekdays: string[],
     nextDayOfMonth: string,
+    nextHourlyMinute: string,
   ) => {
+    const normalizedMinute = formatMinuteValue(nextHourlyMinute);
+    const builderTime = nextPreset === 'hourly' ? `00:${normalizedMinute}` : nextTime;
     const nextCron = buildCronExpressionFromPreset({
       preset: nextPreset,
-      time: nextTime,
+      time: builderTime,
       weekdays: nextWeekdays,
       dayOfMonth: nextDayOfMonth,
     });
     setPreset(nextPreset);
     setTimeValue(nextTime);
+    setHourlyMinute(normalizedMinute);
     setWeekdays(nextWeekdays);
     setDayOfMonth(nextDayOfMonth);
     setCronExpression(nextCron);
-    setErrorMessage(null);
-  };
-
-  const handleRawCronChange = (value: string) => {
-    const normalized = normalizeCronExpression(value);
-    setCronExpression(normalized);
-    const parsed = parseCronExpressionToBuilder(normalized);
-    if (parsed) {
-      setPreset(parsed.preset);
-      setTimeValue(parsed.time);
-      setWeekdays(parsed.weekdays);
-      setDayOfMonth(parsed.dayOfMonth);
-    } else {
-      setPreset('custom');
-    }
     setErrorMessage(null);
   };
 
@@ -636,17 +648,31 @@ function RecurringScheduleModal({
     const nextWeekdays = weekdays.includes(value)
       ? weekdays.filter((weekday) => weekday !== value)
       : [...weekdays, value];
-    applyGuidedCron('weekly', timeValue, nextWeekdays, dayOfMonth);
+    applyGuidedCron('weekly', timeValue, nextWeekdays, dayOfMonth, hourlyMinute);
   };
 
   const handleSave = async () => {
-    const normalizedCronExpression = normalizeCronExpression(cronExpression);
-    if (normalizedCronExpression.split(' ').filter(Boolean).length !== 5) {
-      setErrorMessage(t('recurringSchedules.errors.cronFieldCount'));
+    if (unsupportedSchedule) {
+      setErrorMessage(t('recurringSchedules.errors.unsupportedCustom'));
       return;
     }
     if (!timezone) {
       setErrorMessage(t('recurringSchedules.errors.timezoneRequired'));
+      return;
+    }
+    if (preset === 'hourly' && !isValidMinuteValue(hourlyMinute)) {
+      setErrorMessage(t('recurringSchedules.errors.hourlyMinuteRange'));
+      return;
+    }
+
+    const nextCron = buildCronExpressionFromPreset({
+      preset,
+      time: preset === 'hourly' ? `00:${formatMinuteValue(hourlyMinute)}` : timeValue,
+      weekdays,
+      dayOfMonth,
+    });
+    if (!parseCronExpressionToBuilder(nextCron)) {
+      setErrorMessage(t('recurringSchedules.errors.unsupportedCustom'));
       return;
     }
 
@@ -656,7 +682,7 @@ function RecurringScheduleModal({
         modalState.task,
         normalizeRecurringSchedule({
           id: modalState.schedule.id,
-          cronExpression: normalizedCronExpression,
+          cronExpression: nextCron,
           timezone,
           enabled,
           checksumMode,
@@ -710,25 +736,14 @@ function RecurringScheduleModal({
                   : t('recurringSchedules.modal.editTitle')}
               </h2>
             </div>
-            <div className="flex items-center gap-2">
-              <Tooltip content={t(RECURRING_RUNTIME_NOTICE_KEY)}>
-                <button
-                  type="button"
-                  aria-label={t('recurringSchedules.showRuntimeNotice')}
-                  className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
-                >
-                  <IconHelpCircle size={18} />
-                </button>
-              </Tooltip>
-              <button
-                type="button"
-                aria-label={t('common.close')}
-                className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
-                onClick={onClose}
-              >
-                <IconX size={18} />
-              </button>
-            </div>
+            <button
+              type="button"
+              aria-label={t('common.close')}
+              className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
+              onClick={onClose}
+            >
+              <IconX size={18} />
+            </button>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
@@ -739,6 +754,7 @@ function RecurringScheduleModal({
                     type="checkbox"
                     checked={enabled}
                     onChange={(event) => setEnabled(event.target.checked)}
+                    disabled={unsupportedSchedule !== null}
                   />
                   <span className="font-bold uppercase">{t('recurringSchedules.fields.enabled')}</span>
                 </label>
@@ -747,37 +763,32 @@ function RecurringScheduleModal({
                     type="checkbox"
                     checked={checksumMode}
                     onChange={(event) => setChecksumMode(event.target.checked)}
+                    disabled={unsupportedSchedule !== null}
                   />
                   <span className="font-bold uppercase">{t('recurringSchedules.fields.checksumMode')}</span>
                 </label>
               </div>
 
-              <div>
-                <div className="mb-2 text-sm font-bold uppercase">{t('recurringSchedules.fields.editorMode')}</div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={`px-4 py-2 border-2 border-[var(--border-main)] font-bold uppercase ${
-                      presentation === 'guided' ? 'bg-[var(--accent-main)] text-white' : 'bg-white'
-                    }`}
-                    onClick={() => setPresentation('guided')}
-                  >
-                    {t('recurringSchedules.editorModes.guided')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-4 py-2 border-2 border-[var(--border-main)] font-bold uppercase ${
-                      presentation === 'advanced' ? 'bg-[var(--accent-main)] text-white' : 'bg-white'
-                    }`}
-                    onClick={() => setPresentation('advanced')}
-                  >
-                    {t('recurringSchedules.editorModes.advanced')}
-                  </button>
-                </div>
-              </div>
-
-              {presentation === 'guided' ? (
+              {unsupportedSchedule ? (
                 <div className="space-y-4">
+                  <div className="border-2 border-[var(--accent-error)] bg-red-50 px-4 py-3 text-sm text-[var(--accent-error)]">
+                    <div className="font-bold uppercase">
+                      {t('recurringSchedules.unsupported.title')}
+                    </div>
+                    <p className="mt-2">{t('recurringSchedules.unsupported.description')}</p>
+                    <p className="mt-2 font-semibold">
+                      {t('recurringSchedules.unsupported.deleteHint')}
+                    </p>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-sm font-bold uppercase">{t('recurringSchedules.fields.cronPreview')}</div>
+                    <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] px-3 py-3 font-mono text-sm">
+                      {unsupportedSchedule.cronExpression}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
                   <div>
                     <div className="mb-2 text-sm font-bold uppercase">{t('recurringSchedules.fields.frequency')}</div>
                     <div className="flex flex-wrap gap-2">
@@ -788,7 +799,7 @@ function RecurringScheduleModal({
                           className={`px-4 py-2 border-2 border-[var(--border-main)] font-bold uppercase ${
                             preset === option ? 'bg-[var(--accent-warning)]' : 'bg-white'
                           }`}
-                          onClick={() => applyGuidedCron(option, timeValue, weekdays, dayOfMonth)}
+                          onClick={() => applyGuidedCron(option, timeValue, weekdays, dayOfMonth, hourlyMinute)}
                         >
                           {t(`recurringSchedules.presets.${option}`)}
                         </button>
@@ -796,21 +807,68 @@ function RecurringScheduleModal({
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.time')}</span>
+                  {preset === 'hourly' ? (
+                    <label className="block max-w-xs">
+                      <span className="mb-1 block text-sm font-bold uppercase">
+                        {t('recurringSchedules.fields.minute')}
+                      </span>
                       <input
-                        type="time"
-                        value={timeValue}
-                        onChange={(event) => applyGuidedCron(
-                          (preset === 'custom' ? 'daily' : preset) as Exclude<RecurringSchedulePreset, 'custom'>,
-                          event.target.value,
-                          weekdays,
-                          dayOfMonth,
-                        )}
+                        type="number"
+                        min={0}
+                        max={59}
+                        step={1}
+                        value={hourlyMinute}
+                        onChange={(event) => {
+                          const nextValue = event.target.value;
+                          setHourlyMinute(nextValue);
+                          if (isValidMinuteValue(nextValue)) {
+                            applyGuidedCron('hourly', timeValue, weekdays, dayOfMonth, nextValue);
+                          } else {
+                            setErrorMessage(t('recurringSchedules.errors.hourlyMinuteRange'));
+                          }
+                        }}
                         className="neo-input w-full"
+                        aria-label={t('recurringSchedules.fields.minute')}
                       />
+                      <span className="mt-1 block text-xs text-[var(--text-secondary)]">
+                        {t('recurringSchedules.fields.hourlyMinuteHelp')}
+                      </span>
                     </label>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.time')}</span>
+                        <input
+                          type="time"
+                          value={timeValue}
+                          onChange={(event) => applyGuidedCron(
+                            preset,
+                            event.target.value,
+                            weekdays,
+                            dayOfMonth,
+                            hourlyMinute,
+                          )}
+                          className="neo-input w-full"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.timezone')}</span>
+                        <select
+                          value={timezone}
+                          onChange={(event) => setTimezone(event.target.value)}
+                          className="neo-input w-full"
+                        >
+                          {timezones.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+
+                  {preset === 'hourly' ? (
                     <label className="block">
                       <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.timezone')}</span>
                       <select
@@ -825,7 +883,7 @@ function RecurringScheduleModal({
                         ))}
                       </select>
                     </label>
-                  </div>
+                  ) : null}
 
                   {preset === 'weekly' ? (
                     <div>
@@ -855,74 +913,32 @@ function RecurringScheduleModal({
                         min={1}
                         max={31}
                         value={dayOfMonth}
-                        onChange={(event) => applyGuidedCron('monthly', timeValue, weekdays, event.target.value)}
+                        onChange={(event) => applyGuidedCron('monthly', timeValue, weekdays, event.target.value, hourlyMinute)}
                         className="neo-input w-full"
                       />
                     </label>
                   ) : null}
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <label className="block">
-                    <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.cronExpression')}</span>
+
+                  <label className="block max-w-xs">
+                    <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.retentionCount')}</span>
                     <input
-                      type="text"
-                      value={cronExpression}
-                      onChange={(event) => handleRawCronChange(event.target.value)}
-                      className="neo-input w-full font-mono"
-                      placeholder="15 9 * * 1,3"
+                      type="number"
+                      min={1}
+                      max={200}
+                      value={retentionCount}
+                      onChange={(event) => setRetentionCount(event.target.value)}
+                      className="neo-input w-full"
                     />
                   </label>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.timezone')}</span>
-                      <select
-                        value={timezone}
-                        onChange={(event) => setTimezone(event.target.value)}
-                        className="neo-input w-full"
-                      >
-                        {timezones.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.retentionCount')}</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={200}
-                        value={retentionCount}
-                        onChange={(event) => setRetentionCount(event.target.value)}
-                        className="neo-input w-full"
-                      />
-                    </label>
+
+                  <div>
+                    <div className="mb-1 text-sm font-bold uppercase">{t('recurringSchedules.fields.cronPreview')}</div>
+                    <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] px-3 py-3 font-mono text-sm">
+                      {cronExpression}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
-
-              {presentation === 'guided' ? (
-                <label className="block max-w-xs">
-                  <span className="mb-1 block text-sm font-bold uppercase">{t('recurringSchedules.fields.retentionCount')}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={200}
-                    value={retentionCount}
-                    onChange={(event) => setRetentionCount(event.target.value)}
-                    className="neo-input w-full"
-                  />
-                </label>
-              ) : null}
-
-              <div>
-                <div className="mb-1 text-sm font-bold uppercase">{t('recurringSchedules.fields.cronPreview')}</div>
-                <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] px-3 py-3 font-mono text-sm">
-                  {cronExpression}
-                </div>
-              </div>
 
               {errorMessage ? (
                 <div className="border-2 border-[var(--accent-error)] bg-red-50 px-3 py-2 text-sm text-[var(--accent-error)]">
@@ -938,16 +954,18 @@ function RecurringScheduleModal({
                 >
                   {t('common.cancel')}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleSave();
-                  }}
-                  disabled={saving}
-                  className="px-4 py-2 font-bold uppercase bg-[var(--accent-main)] text-white border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] hover:shadow-[2px_2px_0_0_var(--shadow-color)] active:shadow-none disabled:opacity-60"
-                >
-                  {saving ? t('common.loading') : t('common.save')}
-                </button>
+                {!unsupportedSchedule ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSave();
+                    }}
+                    disabled={saving}
+                    className="px-4 py-2 font-bold uppercase bg-[var(--accent-main)] text-white border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] hover:shadow-[2px_2px_0_0_var(--shadow-color)] active:shadow-none disabled:opacity-60"
+                  >
+                    {saving ? t('common.loading') : t('common.save')}
+                  </button>
+                ) : null}
               </div>
             </div>
 
