@@ -115,7 +115,7 @@ describe('RecurringSchedulesView', () => {
     });
   });
 
-  it('uses guided-only editing and saves hourly schedules with minute-only input', async () => {
+  it('shows an unpadded hourly minute draft and saves normalized minute input', async () => {
     mockState.tasks = [
       {
         id: 'task-1',
@@ -126,7 +126,7 @@ describe('RecurringSchedulesView', () => {
         recurringSchedules: [
           {
             id: 'schedule-1',
-            cronExpression: '0 11 * * *',
+            cronExpression: '5 * * * *',
             timezone: 'Asia/Seoul',
             enabled: true,
             checksumMode: false,
@@ -141,12 +141,11 @@ describe('RecurringSchedulesView', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit schedule' }));
 
     expect(screen.queryByText('Editor Mode')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Hourly' }));
+    const minuteInput = screen.getByRole('textbox', { name: 'Minute' });
+    expect(minuteInput).toHaveValue('5');
 
-    const minuteInput = screen.getByRole('spinbutton', { name: 'Minute' });
-    expect(minuteInput).toHaveValue(0);
-
-    fireEvent.change(minuteInput, { target: { value: '17' } });
+    fireEvent.change(minuteInput, { target: { value: '0055' } });
+    expect(minuteInput).toHaveValue('55');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
@@ -154,14 +153,46 @@ describe('RecurringSchedulesView', () => {
         recurringSchedules: [
           expect.objectContaining({
             id: 'schedule-1',
-            cronExpression: '17 * * * *',
+            cronExpression: '55 * * * *',
           }),
         ],
       });
     });
   });
 
-  it('rejects hourly minute values outside 0-59', async () => {
+  it('filters non-digit input from hourly minute draft', async () => {
+    mockState.tasks = [
+      {
+        id: 'task-1',
+        name: 'Repo->evo',
+        source: '/src',
+        target: '/dst',
+        checksumMode: false,
+        recurringSchedules: [
+          {
+            id: 'schedule-1',
+            cronExpression: '0 * * * *',
+            timezone: 'Asia/Seoul',
+            enabled: true,
+            checksumMode: false,
+            retentionCount: 20,
+          },
+        ],
+      },
+    ];
+
+    render(<RecurringSchedulesView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit schedule' }));
+
+    const minuteInput = screen.getByRole('textbox', { name: 'Minute' });
+    expect(minuteInput).toHaveValue('0');
+    fireEvent.change(minuteInput, { target: { value: '5abc' } });
+
+    expect(minuteInput).toHaveValue('5');
+    expect(screen.queryByText('Minute must be between 0 and 59.')).not.toBeInTheDocument();
+  });
+
+  it('shows an error and disables save when the hourly minute is invalid', async () => {
     mockState.tasks = [
       {
         id: 'task-1',
@@ -185,11 +216,19 @@ describe('RecurringSchedulesView', () => {
     render(<RecurringSchedulesView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit schedule' }));
 
-    const minuteInput = screen.getByRole('spinbutton', { name: 'Minute' });
+    const minuteInput = screen.getByRole('textbox', { name: 'Minute' });
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+
+    fireEvent.change(minuteInput, { target: { value: '' } });
+    expect(await screen.findByText('Minute must be between 0 and 59.')).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+    expect(screen.getByText('5 * * * *')).toBeInTheDocument();
+
     fireEvent.change(minuteInput, { target: { value: '72' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(await screen.findByText('Minute must be between 0 and 59.')).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+    expect(screen.getByText('5 * * * *')).toBeInTheDocument();
     expect(mockState.updateTask).not.toHaveBeenCalled();
   });
 

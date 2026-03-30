@@ -75,8 +75,17 @@ function isSupportedGuidedSchedule(schedule: RecurringSchedule): boolean {
   return parseCronExpressionToBuilder(schedule.cronExpression) !== null;
 }
 
+function sanitizeMinuteDraftValue(value: string): string {
+  const digitsOnly = value.replace(/\D+/g, '');
+  if (!digitsOnly) {
+    return '';
+  }
+
+  return String(Number.parseInt(digitsOnly, 10));
+}
+
 function isValidMinuteValue(value: string): boolean {
-  if (!/^\d{1,2}$/.test(value)) {
+  if (!/^\d+$/.test(value)) {
     return false;
   }
 
@@ -533,7 +542,7 @@ function RecurringScheduleModal({
   const { showToast } = useToast();
   const [preset, setPreset] = useState<Exclude<RecurringSchedulePreset, 'custom'>>('daily');
   const [timeValue, setTimeValue] = useState('09:00');
-  const [hourlyMinute, setHourlyMinute] = useState('00');
+  const [hourlyMinute, setHourlyMinute] = useState('0');
   const [weekdays, setWeekdays] = useState<string[]>(['1']);
   const [dayOfMonth, setDayOfMonth] = useState('1');
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
@@ -565,7 +574,7 @@ function RecurringScheduleModal({
     setUnsupportedSchedule(parsed ? null : schedule);
     setPreset(builder.preset);
     setTimeValue(builder.time);
-    setHourlyMinute(builder.time.slice(3, 5));
+    setHourlyMinute(sanitizeMinuteDraftValue(builder.time.slice(3, 5)));
     setWeekdays(builder.weekdays);
     setDayOfMonth(builder.dayOfMonth);
     setCronExpression(schedule.cronExpression);
@@ -627,20 +636,25 @@ function RecurringScheduleModal({
     nextDayOfMonth: string,
     nextHourlyMinute: string,
   ) => {
-    const normalizedMinute = formatMinuteValue(nextHourlyMinute);
-    const builderTime = nextPreset === 'hourly' ? `00:${normalizedMinute}` : nextTime;
-    const nextCron = buildCronExpressionFromPreset({
-      preset: nextPreset,
-      time: builderTime,
-      weekdays: nextWeekdays,
-      dayOfMonth: nextDayOfMonth,
-    });
+    const normalizedMinuteDraft = sanitizeMinuteDraftValue(nextHourlyMinute);
+    const canBuildCron = nextPreset !== 'hourly' || isValidMinuteValue(normalizedMinuteDraft);
     setPreset(nextPreset);
     setTimeValue(nextTime);
-    setHourlyMinute(normalizedMinute);
+    setHourlyMinute(normalizedMinuteDraft);
     setWeekdays(nextWeekdays);
     setDayOfMonth(nextDayOfMonth);
-    setCronExpression(nextCron);
+    if (canBuildCron) {
+      const builderTime = nextPreset === 'hourly'
+        ? `00:${formatMinuteValue(normalizedMinuteDraft)}`
+        : nextTime;
+      const nextCron = buildCronExpressionFromPreset({
+        preset: nextPreset,
+        time: builderTime,
+        weekdays: nextWeekdays,
+        dayOfMonth: nextDayOfMonth,
+      });
+      setCronExpression(nextCron);
+    }
     setErrorMessage(null);
   };
 
@@ -720,6 +734,12 @@ function RecurringScheduleModal({
       showToast(t('recurringSchedules.toasts.clearHistoryFailed'), 'error');
     }
   };
+
+  const hourlyMinuteValidationMessage = preset === 'hourly' && !isValidMinuteValue(hourlyMinute)
+    ? t('recurringSchedules.errors.hourlyMinuteRange')
+    : null;
+  const displayedErrorMessage = hourlyMinuteValidationMessage ?? errorMessage;
+  const isSaveDisabled = saving || hourlyMinuteValidationMessage !== null;
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 backdrop-blur-sm p-4 overflow-y-auto">
@@ -813,22 +833,21 @@ function RecurringScheduleModal({
                         {t('recurringSchedules.fields.minute')}
                       </span>
                       <input
-                        type="number"
-                        min={0}
-                        max={59}
-                        step={1}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={2}
                         value={hourlyMinute}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setHourlyMinute(nextValue);
-                          if (isValidMinuteValue(nextValue)) {
-                            applyGuidedCron('hourly', timeValue, weekdays, dayOfMonth, nextValue);
-                          } else {
-                            setErrorMessage(t('recurringSchedules.errors.hourlyMinuteRange'));
-                          }
-                        }}
+                        onChange={(event) => applyGuidedCron(
+                          'hourly',
+                          timeValue,
+                          weekdays,
+                          dayOfMonth,
+                          event.target.value,
+                        )}
                         className="neo-input w-full"
                         aria-label={t('recurringSchedules.fields.minute')}
+                        aria-invalid={hourlyMinuteValidationMessage !== null}
                       />
                       <span className="mt-1 block text-xs text-[var(--text-secondary)]">
                         {t('recurringSchedules.fields.hourlyMinuteHelp')}
@@ -940,9 +959,9 @@ function RecurringScheduleModal({
                 </>
               )}
 
-              {errorMessage ? (
+              {displayedErrorMessage ? (
                 <div className="border-2 border-[var(--accent-error)] bg-red-50 px-3 py-2 text-sm text-[var(--accent-error)]">
-                  {errorMessage}
+                  {displayedErrorMessage}
                 </div>
               ) : null}
 
@@ -960,7 +979,7 @@ function RecurringScheduleModal({
                     onClick={() => {
                       void handleSave();
                     }}
-                    disabled={saving}
+                    disabled={isSaveDisabled}
                     className="px-4 py-2 font-bold uppercase bg-[var(--accent-main)] text-white border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] hover:shadow-[2px_2px_0_0_var(--shadow-color)] active:shadow-none disabled:opacity-60"
                   >
                     {saving ? t('common.loading') : t('common.save')}
