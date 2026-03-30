@@ -100,8 +100,6 @@ Optional license support purchases run through Lemon Squeezy, but app downloads 
 
 After purchase, Lemon Squeezy sends the license key by receipt email and exposes it on the customer order page. In SyncWatcher, open the license dialog from the sidebar or Settings and paste the key there.
 
-Depending on your macOS settings, Gatekeeper may show a warning for the DMG.
-
 ### Latest Installer Script
 
 ```bash

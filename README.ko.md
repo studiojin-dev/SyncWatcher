@@ -100,8 +100,6 @@ pnpm tauri build
 
 구매 후에는 Lemon Squeezy 영수증 메일과 주문 페이지에서 라이선스 키를 확인할 수 있습니다. SyncWatcher에서는 사이드바나 Settings의 라이선스 관리 화면에서 키를 붙여 넣으면 됩니다.
 
-macOS 설정에 따라 Gatekeeper 경고가 표시될 수 있습니다.
-
 ### 최신 설치 스크립트
 
 ```bash
