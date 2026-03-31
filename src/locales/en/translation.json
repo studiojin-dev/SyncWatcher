@@ -97,6 +97,8 @@
       "sourceTypePath": "Directory Path",
       "sourceTypeUuid": "Volume UUID",
       "selectVolume": "Select Volume",
+      "savedUuidSourceLabel": "Saved UUID source (not mounted)",
+      "savedUuidSourceHint": "This task keeps its saved UUID source. Mount the media again to browse inside it or pick a different volume.",
       "subPath": "Sub Path",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "Volume not mounted",

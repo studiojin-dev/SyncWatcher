@@ -260,14 +260,27 @@ export function useSyncTasks() {
     const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
         const mutationSeq = beginTaskMutation(id);
         const previousTasks = tasksRef.current;
+        const normalizedUpdates = Object.prototype.hasOwnProperty.call(updates, 'recurringSchedules')
+            ? updates.recurringSchedules == null
+                ? (() => {
+                    const { recurringSchedules: _ignored, ...rest } = updates;
+                    return rest;
+                })()
+                : Array.isArray(updates.recurringSchedules)
+                    ? {
+                        ...updates,
+                        recurringSchedules: normalizeRecurringSchedules(updates.recurringSchedules),
+                    }
+                    : updates
+            : updates;
         const newTasks = previousTasks.map((t) =>
             t.id === id
                 ? {
                     ...t,
-                    ...updates,
+                    ...normalizedUpdates,
                     autoUnmount: shouldEnableAutoUnmount({
                         ...t,
-                        ...updates,
+                        ...normalizedUpdates,
                     }),
                 }
                 : t
@@ -275,7 +288,10 @@ export function useSyncTasks() {
         commitTasks(newTasks);
 
         try {
-            const response = await invoke<unknown>('update_sync_task', { id, updates });
+            const response = await invoke<unknown>('update_sync_task', {
+                id,
+                updates: normalizedUpdates,
+            });
             const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
             if (persistedTask && taskMutationSeqRef.current.get(id) === mutationSeq) {
                 const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);

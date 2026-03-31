@@ -21,6 +21,7 @@ import {
   parseUuidSourceToken,
   toUuidSubPath,
   type SourceUuidType,
+  type UuidTokenType,
   type UuidSourceOption,
 } from '../syncTaskUuid';
 import type { ShowToastFn, TranslateFn, VolumeInfo } from './helpers';
@@ -48,6 +49,7 @@ export interface SyncTaskFormController {
   handleSourceTypeChange: (value: 'path' | 'uuid') => void;
   sourceUuid: string;
   sourceUuidType: SourceUuidType | '';
+  sourceTokenType: UuidTokenType | '';
   sourceSubPath: string;
   setSourceSubPath: Dispatch<SetStateAction<string>>;
   volumes: VolumeInfo[];
@@ -77,6 +79,7 @@ export function useSyncTaskFormController({
   const [sourceUuidType, setSourceUuidType] = useState<SourceUuidType | ''>(
     '',
   );
+  const [sourceTokenType, setSourceTokenType] = useState<UuidTokenType | ''>('');
   const [sourceSubPath, setSourceSubPath] = useState('');
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
   const [loadingVolumes, setLoadingVolumes] = useState(false);
@@ -93,14 +96,53 @@ export function useSyncTaskFormController({
     [dataUnitSystem, t],
   );
 
-  const uuidSourceOptions = useMemo(
+  const mountedUuidSourceOptions = useMemo(
     () => buildUuidSourceOptions(volumes, formatVolumeSize),
     [formatVolumeSize, volumes],
   );
   const selectedUuidOptionValue =
-    sourceUuid && sourceUuidType
-      ? buildUuidOptionValue(sourceUuidType, sourceUuid)
+    sourceUuid && sourceTokenType
+      ? buildUuidOptionValue(sourceTokenType, sourceUuid)
       : null;
+  const savedUuidSourceOption = useMemo(() => {
+    if (
+      !editingTask ||
+      sourceType !== 'uuid' ||
+      !sourceUuid ||
+      !sourceTokenType ||
+      mountedUuidSourceOptions.some(
+        (option) => option.value === selectedUuidOptionValue,
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      value: buildUuidOptionValue(sourceTokenType, sourceUuid),
+      label: `${t('syncTasks.savedUuidSourceLabel', {
+        defaultValue: 'Saved UUID source (not mounted)',
+      })} [${sourceTokenType.toUpperCase()} UUID: ${sourceUuid}]`,
+      uuidType: sourceTokenType,
+      uuid: sourceUuid,
+      mountPoint: null,
+      mounted: false,
+    } satisfies UuidSourceOption;
+  }, [
+    editingTask,
+    mountedUuidSourceOptions,
+    selectedUuidOptionValue,
+    sourceTokenType,
+    sourceType,
+    sourceUuid,
+    t,
+  ]);
+  const uuidSourceOptions = useMemo(
+    () =>
+      savedUuidSourceOption
+        ? [savedUuidSourceOption, ...mountedUuidSourceOptions]
+        : mountedUuidSourceOptions,
+    [mountedUuidSourceOptions, savedUuidSourceOption],
+  );
   const selectedUuidOption = useMemo(() => {
     if (!selectedUuidOptionValue) {
       return null;
@@ -132,6 +174,7 @@ export function useSyncTaskFormController({
         parsedSourceToken?.tokenType === 'volume'
           ? parsedSourceToken.tokenType
           : '';
+      const tokenType = parsedSourceToken?.tokenType || '';
       const resolvedSourceType: 'path' | 'uuid' =
         editingTask.sourceType || (parsedSourceToken ? 'uuid' : 'path');
       const resolvedSourceUuid =
@@ -152,6 +195,11 @@ export function useSyncTaskFormController({
           ? editingTask.sourceUuidType || tokenUuidType
           : '',
       );
+      setSourceTokenType(
+        resolvedSourceType === 'uuid'
+          ? tokenType || editingTask.sourceUuidType || ''
+          : '',
+      );
       setSourceSubPath(
         resolvedSourceType === 'uuid' ? resolvedSourceSubPath : '',
       );
@@ -166,19 +214,21 @@ export function useSyncTaskFormController({
     setSourceType('path');
     setSourceUuid('');
     setSourceUuidType('');
+    setSourceTokenType('');
     setSourceSubPath('');
   }, [editingTask, showForm]);
 
   useEffect(() => {
-    if (!showForm || sourceType !== 'uuid' || !sourceUuid || sourceUuidType) {
+    if (!showForm || sourceType !== 'uuid' || !sourceUuid || sourceTokenType) {
       return;
     }
 
     const inferredType = inferUuidTypeFromVolumes(sourceUuid, volumes);
     if (inferredType) {
       setSourceUuidType(inferredType);
+      setSourceTokenType(inferredType);
     }
-  }, [showForm, sourceType, sourceUuid, sourceUuidType, volumes]);
+  }, [showForm, sourceTokenType, sourceType, sourceUuid, volumes]);
 
   useEffect(() => {
     if (showForm) {
@@ -216,6 +266,7 @@ export function useSyncTaskFormController({
       if (!value) {
         setSourceUuid('');
         setSourceUuidType('');
+        setSourceTokenType('');
         return;
       }
 
@@ -223,13 +274,17 @@ export function useSyncTaskFormController({
       if (!parsedOption) {
         setSourceUuid('');
         setSourceUuidType('');
+        setSourceTokenType('');
         return;
       }
 
       setSourceUuid(parsedOption.uuid);
-      setSourceUuidType(parsedOption.uuidType);
+      setSourceUuidType(
+        parsedOption.uuidType === 'legacy' ? '' : parsedOption.uuidType,
+      );
+      setSourceTokenType(parsedOption.uuidType);
       const option = uuidSourceOptions.find((candidate) => candidate.value === value);
-      if (option) {
+      if (option?.mounted && option.mountPoint) {
         setSourcePath(option.mountPoint);
       }
     },
@@ -342,6 +397,7 @@ export function useSyncTaskFormController({
     handleSourceTypeChange,
     sourceUuid,
     sourceUuidType,
+    sourceTokenType,
     sourceSubPath,
     setSourceSubPath,
     volumes,

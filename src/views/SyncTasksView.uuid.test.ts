@@ -73,6 +73,7 @@ describe('SyncTasksView UUID helpers', () => {
     it('builds source token from selected UUID type', () => {
         expect(buildUuidSourceToken('disk', 'disk-a', '/DCIM')).toBe('[DISK_UUID:disk-a]/DCIM');
         expect(buildUuidSourceToken('volume', 'volume-a', '/DCIM')).toBe('[VOLUME_UUID:volume-a]/DCIM');
+        expect(buildUuidSourceToken('legacy', 'legacy-a', '/DCIM')).toBe('[UUID:legacy-a]/DCIM');
         expect(buildUuidSourceToken('volume', 'volume-a', 'DCIM')).toBe('[VOLUME_UUID:volume-a]/DCIM');
         expect(buildUuidSourceToken('volume', 'volume-a', '')).toBe('[VOLUME_UUID:volume-a]/');
     });

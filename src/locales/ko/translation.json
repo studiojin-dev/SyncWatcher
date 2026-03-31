@@ -100,6 +100,8 @@
       "sourceTypePath": "디렉토리 경로",
       "sourceTypeUuid": "볼륨 UUID",
       "selectVolume": "볼륨 선택",
+      "savedUuidSourceLabel": "저장된 UUID 소스(마운트되지 않음)",
+      "savedUuidSourceHint": "이 작업은 저장된 UUID 소스를 유지합니다. 볼륨 내부를 탐색하려면 미디어를 다시 마운트하거나 다른 볼륨을 선택하세요.",
       "subPath": "하위 경로",
       "subPathPlaceholder": "/DCIM/100MSDCF",
       "volumeNotMounted": "볼륨이 마운트되지 않음",

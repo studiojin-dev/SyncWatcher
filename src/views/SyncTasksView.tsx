@@ -107,6 +107,7 @@ function SyncTasksView({
     openOrphansView,
     pendingDryRunTask,
     requestCancel,
+    savingTask,
     startDryRun,
     syncing,
     watchTogglePendingIds,
@@ -234,6 +235,7 @@ function SyncTasksView({
         editingTask={editingTask}
         form={form}
         sets={sets}
+        savingTask={savingTask}
         onClose={closeForm}
         onSubmit={handleSubmit}
         t={t}

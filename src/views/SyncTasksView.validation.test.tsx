@@ -118,6 +118,16 @@ const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
 const askMock = ask as unknown as ReturnType<typeof vi.fn>;
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function createDefaultTask(): SyncTask {
   return {
     id: 'task-1',
@@ -127,6 +137,19 @@ function createDefaultTask(): SyncTask {
     checksumMode: false,
     watchMode: true,
     autoUnmount: true,
+    sourceType: 'uuid',
+  };
+}
+
+function createLegacyUuidTask(): SyncTask {
+  return {
+    id: 'task-legacy',
+    name: 'Legacy Task',
+    source: '[UUID:legacy-a]/DCIM',
+    target: '/tmp/legacy-target',
+    checksumMode: false,
+    watchMode: false,
+    autoUnmount: false,
     sourceType: 'uuid',
   };
 }
@@ -572,6 +595,101 @@ describe('SyncTasksView validation and orphan scan flows', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('allows saving an unmounted uuid task after changing only the name', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'Task 1 Renamed' },
+    });
+    expect(screen.getByTitle('syncTasks.subPath')).toBeDisabled();
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith(
+        'task-1',
+        expect.objectContaining({
+          name: 'Task 1 Renamed',
+          source: '[DISK_UUID:disk-1]/DCIM',
+          sourceType: 'uuid',
+        }),
+      );
+    });
+    expect(showToastMock).not.toHaveBeenCalledWith('syncTasks.selectVolume', 'warning');
+  });
+
+  it('allows saving an unmounted uuid task after changing only the target path', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/new-target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith(
+        'task-1',
+        expect.objectContaining({
+          source: '[DISK_UUID:disk-1]/DCIM',
+          target: '/tmp/new-target',
+          sourceType: 'uuid',
+        }),
+      );
+    });
+    expect(showToastMock).not.toHaveBeenCalledWith('syncTasks.selectVolume', 'warning');
+  });
+
+  it('allows saving an unmounted uuid task after changing only the sub path text', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.change(screen.getByDisplayValue('/DCIM'), {
+      target: { value: '/RAW' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith(
+        'task-1',
+        expect.objectContaining({
+          source: '[DISK_UUID:disk-1]/RAW',
+          sourceType: 'uuid',
+          sourceUuid: 'disk-1',
+          sourceUuidType: 'disk',
+          sourceSubPath: '/RAW',
+        }),
+      );
+    });
+    expect(showToastMock).not.toHaveBeenCalledWith('syncTasks.selectVolume', 'warning');
+  });
+
+  it('preserves legacy uuid token flavor when saving an unmounted source edit', async () => {
+    syncTasksState.tasks = [createLegacyUuidTask()];
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.change(screen.getByDisplayValue('/DCIM'), {
+      target: { value: '/RAW' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith(
+        'task-legacy',
+        expect.objectContaining({
+          source: '[UUID:legacy-a]/RAW',
+          sourceType: 'uuid',
+          sourceUuid: undefined,
+          sourceUuidType: undefined,
+          sourceSubPath: '/RAW',
+        }),
+      );
+    });
+    expect(showToastMock).not.toHaveBeenCalledWith('syncTasks.selectVolume', 'warning');
+  });
+
   it('creates a new task after successful validation and shows a success toast', async () => {
     renderWithMantine(<SyncTasksView />);
 
@@ -604,5 +722,160 @@ describe('SyncTasksView validation and orphan scan flows', () => {
     expect(
       screen.queryByText('syncTasks.validationModal.title'),
     ).not.toBeInTheDocument();
+  });
+
+  it('locks the whole form and prevents duplicate save clicks while save is pending', async () => {
+    const validationDeferred = createDeferred<{ ok: boolean; issue: null }>();
+    updateTaskMock.mockResolvedValue(undefined);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return validationDeferred.promise;
+      }
+      if (command === 'runtime_validate_orphan_scan') {
+        return { ok: true, issue: null };
+      }
+      return undefined;
+    });
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'Task 1 Pending' },
+    });
+
+    const saveButton = screen.getByRole('button', { name: 'syncTasks.save' });
+    const cancelButton = screen.getByRole('button', { name: 'syncTasks.cancel' });
+    const nameInput = screen.getByDisplayValue('Task 1 Pending');
+
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'common.loading' })).toBeDisabled();
+    });
+
+    expect(cancelButton).toBeDisabled();
+    expect(nameInput).toBeDisabled();
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'runtime_validate_tasks'),
+    ).toHaveLength(1);
+    expect(updateTaskMock).not.toHaveBeenCalled();
+
+    validationDeferred.resolve({ ok: true, issue: null });
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith(
+        'task-1',
+        expect.objectContaining({
+          name: 'Task 1 Pending',
+        }),
+      );
+    });
+  });
+
+  it('re-enables the form after validation failure', async () => {
+    const validationDeferred = createDeferred<{
+      ok: false;
+      issue: {
+        code: string;
+        taskId: string;
+        taskName: string;
+        conflictingTaskIds: string[];
+        conflictingTaskNames: string[];
+        source: null;
+        target: string;
+      };
+    }>();
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'runtime_validate_tasks') {
+        return validationDeferred.promise;
+      }
+      if (command === 'runtime_validate_orphan_scan') {
+        return { ok: true, issue: null };
+      }
+      return undefined;
+    });
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.click(screen.getByRole('button', { name: 'syncTasks.save' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'common.loading' })).toBeDisabled();
+    });
+
+    validationDeferred.resolve({
+      ok: false,
+      issue: {
+        code: 'duplicateTarget',
+        taskId: 'task-1',
+        taskName: 'Task 1',
+        conflictingTaskIds: ['task-2'],
+        conflictingTaskNames: ['Task 2'],
+        source: null,
+        target: '/tmp/target',
+      },
+    });
+
+    expect(
+      await screen.findByText('syncTasks.validationModal.title'),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'syncTasks.save' })).toBeEnabled();
+    });
+    expect(screen.getByRole('button', { name: 'syncTasks.cancel' })).toBeEnabled();
+    expect(screen.getByDisplayValue('Task 1')).toBeEnabled();
+  });
+
+  it('re-enables the form after save error', async () => {
+    updateTaskMock.mockRejectedValueOnce(new Error('save failed'));
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.click(screen.getByRole('button', { name: 'syncTasks.save' }));
+
+    await waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith('save failed', 'error');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'syncTasks.save' })).toBeEnabled();
+    });
+    expect(screen.getByRole('button', { name: 'syncTasks.cancel' })).toBeEnabled();
+    expect(screen.getByDisplayValue('Task 1')).toBeEnabled();
+  });
+
+  it('releases the save lock after success when the form is opened again', async () => {
+    updateTaskMock.mockResolvedValue(undefined);
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('EDIT'));
+    fireEvent.click(screen.getByRole('button', { name: 'syncTasks.save' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'syncTasks.save' })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('EDIT'));
+
+    expect(screen.getByRole('button', { name: 'syncTasks.save' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'syncTasks.cancel' })).toBeEnabled();
   });
 });

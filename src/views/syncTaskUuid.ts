@@ -1,6 +1,5 @@
 export type SourceUuidType = 'disk' | 'volume';
-
-type ParsedUuidTokenType = SourceUuidType | 'legacy';
+export type UuidTokenType = SourceUuidType | 'legacy';
 
 export interface UuidSelectableVolume {
     name: string;
@@ -12,13 +11,14 @@ export interface UuidSelectableVolume {
 export interface UuidSourceOption {
     value: string;
     label: string;
-    uuidType: SourceUuidType;
+    uuidType: UuidTokenType;
     uuid: string;
-    mountPoint: string;
+    mountPoint: string | null;
+    mounted: boolean;
 }
 
 export interface ParsedUuidSourceToken {
-    tokenType: ParsedUuidTokenType;
+    tokenType: UuidTokenType;
     uuid: string;
     subPath: string;
 }
@@ -43,7 +43,7 @@ function normalizeFsPath(path: string): string {
 function parseTokenWithPrefix(
     source: string,
     prefix: string,
-    tokenType: ParsedUuidTokenType
+    tokenType: UuidTokenType
 ): ParsedUuidSourceToken | null {
     if (!source.startsWith(prefix)) {
         return null;
@@ -61,11 +61,11 @@ function parseTokenWithPrefix(
     };
 }
 
-export function buildUuidOptionValue(uuidType: SourceUuidType, uuid: string): string {
+export function buildUuidOptionValue(uuidType: UuidTokenType, uuid: string): string {
     return `${uuidType}${UUID_OPTION_SEPARATOR}${uuid}`;
 }
 
-export function parseUuidOptionValue(value: string): { uuidType: SourceUuidType; uuid: string } | null {
+export function parseUuidOptionValue(value: string): { uuidType: UuidTokenType; uuid: string } | null {
     const separatorIndex = value.indexOf(UUID_OPTION_SEPARATOR);
     if (separatorIndex <= 0) {
         return null;
@@ -74,15 +74,20 @@ export function parseUuidOptionValue(value: string): { uuidType: SourceUuidType;
     const typeRaw = value.slice(0, separatorIndex);
     const uuid = value.slice(separatorIndex + UUID_OPTION_SEPARATOR.length);
 
-    if ((typeRaw !== 'disk' && typeRaw !== 'volume') || !uuid) {
+    if ((typeRaw !== 'disk' && typeRaw !== 'volume' && typeRaw !== 'legacy') || !uuid) {
         return null;
     }
 
-    return { uuidType: typeRaw, uuid };
+    return { uuidType: typeRaw as UuidTokenType, uuid };
 }
 
-export function buildUuidSourceToken(uuidType: SourceUuidType, uuid: string, subPath: string): string {
-    const prefix = uuidType === 'disk' ? DISK_UUID_PREFIX : VOLUME_UUID_PREFIX;
+export function buildUuidSourceToken(uuidType: UuidTokenType, uuid: string, subPath: string): string {
+    const prefix =
+        uuidType === 'disk'
+            ? DISK_UUID_PREFIX
+            : uuidType === 'volume'
+              ? VOLUME_UUID_PREFIX
+              : LEGACY_UUID_PREFIX;
     return `${prefix}${uuid}]${normalizeUuidSubPath(subPath)}`;
 }
 
@@ -173,6 +178,7 @@ export function buildUuidSourceOptions<T extends UuidSelectableVolume>(
                     uuidType: 'disk',
                     uuid: volume.disk_uuid,
                     mountPoint: volume.mount_point,
+                    mounted: true,
                 });
                 seen.add(value);
             }
@@ -187,6 +193,7 @@ export function buildUuidSourceOptions<T extends UuidSelectableVolume>(
                     uuidType: 'volume',
                     uuid: volume.volume_uuid,
                     mountPoint: volume.mount_point,
+                    mounted: true,
                 });
                 seen.add(value);
             }

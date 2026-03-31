@@ -11,6 +11,7 @@ interface SyncTaskFormModalProps {
   editingTask: SyncTask | null;
   form: SyncTaskFormController;
   sets: Array<{ id: string; name: string }>;
+  savingTask: boolean;
   onClose: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
   t: TranslateFn;
@@ -21,6 +22,7 @@ function SyncTaskFormModal({
   editingTask,
   form,
   sets,
+  savingTask,
   onClose,
   onSubmit,
   t,
@@ -32,7 +34,12 @@ function SyncTaskFormModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
       <CardAnimation>
-        <div className="neo-box p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] my-auto">
+        <div
+          aria-busy={savingTask}
+          className={`neo-box p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] my-auto ${
+            savingTask ? 'cursor-progress opacity-85' : ''
+          }`}
+        >
           <h3 className="text-xl font-heading font-bold mb-6 border-b-3 border-[var(--border-main)] pb-2 uppercase">
             {editingTask ? t('syncTasks.editTask') : t('syncTasks.addTask')}
           </h3>
@@ -45,6 +52,7 @@ function SyncTaskFormModal({
               name="name"
               defaultValue={editingTask?.name || ''}
               required
+              disabled={savingTask}
               className="neo-input"
               placeholder="MY_BACKUP_TASK"
             />
@@ -61,6 +69,7 @@ function SyncTaskFormModal({
                   name="sourceType"
                   checked={form.sourceType === 'path'}
                   onChange={() => form.handleSourceTypeChange('path')}
+                  disabled={savingTask}
                   className="w-4 h-4"
                 />
                 <span className="text-sm font-mono">
@@ -76,6 +85,7 @@ function SyncTaskFormModal({
                   name="sourceType"
                   checked={form.sourceType === 'uuid'}
                   onChange={() => form.handleSourceTypeChange('uuid')}
+                  disabled={savingTask}
                   className="w-4 h-4"
                 />
                 <span className="text-sm font-mono">
@@ -94,6 +104,7 @@ function SyncTaskFormModal({
                   value={form.sourcePath}
                   onChange={(event) => form.setSourcePath(event.target.value)}
                   required={form.sourceType === 'path'}
+                  disabled={savingTask}
                   className="neo-input font-mono text-sm flex-1"
                   placeholder="/path/to/source"
                 />
@@ -102,6 +113,7 @@ function SyncTaskFormModal({
                   onClick={() => {
                     void form.browseDirectory('source');
                   }}
+                  disabled={savingTask}
                   className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
                   title="Browse..."
                 >
@@ -127,6 +139,7 @@ function SyncTaskFormModal({
                   value={form.selectedUuidOptionValue}
                   onChange={form.handleUuidOptionChange}
                   searchable
+                  disabled={savingTask}
                   required={form.sourceType === 'uuid'}
                   styles={{
                     input: {
@@ -144,12 +157,22 @@ function SyncTaskFormModal({
                 {form.sourceUuid ? (
                   <div className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-secondary)] p-2 border-2 border-dashed border-[var(--border-main)]">
                     <span className="font-bold">
-                      {form.sourceUuidType === 'volume'
+                      {form.sourceTokenType === 'volume'
                         ? 'Volume UUID'
+                        : form.sourceTokenType === 'legacy'
+                          ? 'Legacy UUID'
                         : 'Disk UUID'}
                       :
                     </span>{' '}
                     {form.sourceUuid}
+                  </div>
+                ) : null}
+                {form.selectedUuidOption && !form.selectedUuidOption.mounted ? (
+                  <div className="text-xs font-mono text-[var(--text-secondary)] border-l-2 border-[var(--accent-warning)] pl-2">
+                    {t('syncTasks.savedUuidSourceHint', {
+                      defaultValue:
+                        'This task keeps its saved UUID source. Mount the media again to browse inside it or pick a different volume.',
+                    })}
                   </div>
                 ) : null}
                 <div>
@@ -165,6 +188,7 @@ function SyncTaskFormModal({
                       onChange={(event) =>
                         form.setSourceSubPath(event.target.value)
                       }
+                      disabled={savingTask}
                       className="neo-input font-mono text-sm flex-1"
                       placeholder={t('syncTasks.subPathPlaceholder', {
                         defaultValue: '/DCIM/100MSDCF',
@@ -179,7 +203,7 @@ function SyncTaskFormModal({
                       title={t('syncTasks.subPath', {
                         defaultValue: '하위 경로',
                       })}
-                      disabled={!form.selectedUuidOption}
+                      disabled={savingTask || !form.selectedUuidOption?.mounted}
                     >
                       <IconFolder size={18} />
                     </button>
@@ -198,6 +222,7 @@ function SyncTaskFormModal({
                 value={form.targetPath}
                 onChange={(event) => form.setTargetPath(event.target.value)}
                 required
+                disabled={savingTask}
                 className="neo-input font-mono text-sm flex-1"
                 placeholder="/path/to/target"
               />
@@ -206,6 +231,7 @@ function SyncTaskFormModal({
                 onClick={() => {
                   void form.browseDirectory('target');
                 }}
+                disabled={savingTask}
                 className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
                 title="Browse..."
               >
@@ -220,6 +246,7 @@ function SyncTaskFormModal({
                   type="checkbox"
                   name="checksumMode"
                   defaultChecked={editingTask?.checksumMode}
+                  disabled={savingTask}
                   className="peer sr-only"
                 />
                 <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-main)] transition-colors"></div>
@@ -246,6 +273,7 @@ function SyncTaskFormModal({
                   onChange={(event) =>
                     form.handleWatchModeChange(event.target.checked)
                   }
+                  disabled={savingTask}
                   className="peer sr-only"
                 />
                 <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-success)] transition-colors"></div>
@@ -270,6 +298,7 @@ function SyncTaskFormModal({
                     type="checkbox"
                     checked={form.autoUnmount}
                     onChange={(event) => form.setAutoUnmount(event.target.checked)}
+                    disabled={savingTask}
                     className="peer sr-only"
                   />
                   <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-main)] transition-colors"></div>
@@ -295,6 +324,7 @@ function SyncTaskFormModal({
               onChange={form.setSelectedSets}
               searchable
               clearable
+              disabled={savingTask}
               maxDropdownHeight={200}
               comboboxProps={{
                 position: 'bottom',
@@ -325,15 +355,21 @@ function SyncTaskFormModal({
             <button
               type="button"
               className="px-4 py-2 font-bold uppercase hover:underline"
+              disabled={savingTask}
               onClick={onClose}
             >
               {t('syncTasks.cancel')}
             </button>
             <button
               type="submit"
-              className="bg-[var(--text-primary)] text-[var(--bg-primary)] px-6 py-2 border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] font-bold uppercase hover:shadow-[3px_3px_0_0_var(--shadow-color)] transition-all"
+              disabled={savingTask}
+              className={`bg-[var(--text-primary)] text-[var(--bg-primary)] px-6 py-2 border-3 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] font-bold uppercase transition-all ${
+                savingTask
+                  ? 'cursor-progress opacity-70'
+                  : 'hover:shadow-[3px_3px_0_0_var(--shadow-color)]'
+              }`}
             >
-              {t('syncTasks.save')}
+              {savingTask ? t('common.loading') : t('syncTasks.save')}
             </button>
           </div>
           </form>

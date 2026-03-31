@@ -4,6 +4,7 @@ import {
   IconArrowLeft,
   IconCalendarRepeat,
   IconEdit,
+  IconHelpCircle,
   IconHistory,
   IconPlayerPause,
   IconPlayerPlay,
@@ -15,6 +16,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
+import { Tooltip } from '../components/ui/Tooltip';
 import { useToast } from '../components/ui/Toast';
 import { useSyncTasksContext } from '../context/SyncTasksContext';
 import type { SyncTask } from '../hooks/useSyncTasks';
@@ -1139,14 +1141,25 @@ function RecurringScheduleModal({
                   : t('recurringSchedules.modal.editTitle')}
               </h2>
             </div>
-            <button
-              type="button"
-              aria-label={t('common.close')}
-              className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
-              onClick={onClose}
-            >
-              <IconX size={18} />
-            </button>
+            <div className="flex items-center gap-2">
+              <Tooltip content={t(RECURRING_RUNTIME_NOTICE_KEY)}>
+                <button
+                  type="button"
+                  aria-label={t('recurringSchedules.showRuntimeNotice')}
+                  className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
+                >
+                  <IconHelpCircle size={18} />
+                </button>
+              </Tooltip>
+              <button
+                type="button"
+                aria-label={t('common.close')}
+                className="flex h-11 w-11 items-center justify-center border-3 border-[var(--border-main)] bg-white"
+                onClick={onClose}
+              >
+                <IconX size={18} />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-5">

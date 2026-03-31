@@ -29,7 +29,9 @@ import {
   buildUuidSourceToken,
   inferUuidTypeFromVolumes,
   normalizeUuidSubPath,
+  parseUuidSourceToken,
   type SourceUuidType,
+  type UuidTokenType,
 } from '../syncTaskUuid';
 import {
   getErrorMessage,
@@ -95,6 +97,7 @@ export function useSyncTaskActions({
   const [pendingDryRunTask, setPendingDryRunTask] = useState<SyncTask | null>(
     null,
   );
+  const [savingTask, setSavingTask] = useState(false);
   const [conflictSessions, setConflictSessions] = useState<
     ConflictSessionSummary[]
   >([]);
@@ -233,19 +236,71 @@ export function useSyncTaskActions({
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
+      if (savingTask) {
+        return;
+      }
       const formData = new FormData(event.currentTarget);
 
       let finalSource = form.sourcePath || (formData.get('source') as string);
-      const resolvedSourceUuidType: SourceUuidType | undefined =
+      const normalizedSourceSubPath = normalizeUuidSubPath(form.sourceSubPath);
+      const parsedEditingSourceToken =
+        editingTask?.sourceType === 'uuid'
+          ? parseUuidSourceToken(editingTask.source || '')
+          : null;
+      const editingSourceUuid =
+        editingTask?.sourceUuid || parsedEditingSourceToken?.uuid || '';
+      const editingSourceTokenType =
+        editingTask?.sourceUuidType ||
+        (parsedEditingSourceToken?.tokenType === 'disk' ||
+        parsedEditingSourceToken?.tokenType === 'volume'
+          ? parsedEditingSourceToken.tokenType
+          : parsedEditingSourceToken?.tokenType) ||
+        '';
+      const editingSourceSubPath = normalizeUuidSubPath(
+        editingTask?.sourceSubPath ?? parsedEditingSourceToken?.subPath ?? '/',
+      );
+      const resolvedSourceTokenType: UuidTokenType | undefined =
         form.sourceType === 'uuid'
-          ? form.sourceUuidType ||
+          ? form.sourceTokenType ||
             inferUuidTypeFromVolumes(form.sourceUuid, form.volumes) ||
+            (editingSourceTokenType as UuidTokenType | '') ||
             'disk'
           : undefined;
-      const normalizedSourceSubPath = normalizeUuidSubPath(form.sourceSubPath);
+      const selectedMountedUuidOption = form.selectedUuidOption?.mounted ?? false;
+      const isEditingExistingUuidSource = Boolean(
+        editingTask &&
+          (editingTask.sourceType === 'uuid' || parsedEditingSourceToken),
+      );
+      const sourceSelectionChanged =
+        form.sourceType === 'uuid' &&
+        isEditingExistingUuidSource &&
+        (form.sourceUuid !== editingSourceUuid ||
+          resolvedSourceTokenType !== editingSourceTokenType);
+      const sourceSubPathChanged =
+        form.sourceType === 'uuid' &&
+        isEditingExistingUuidSource &&
+        normalizedSourceSubPath !== editingSourceSubPath;
+      const shouldReuseExistingUuidSource = Boolean(
+        isEditingExistingUuidSource &&
+          !sourceSelectionChanged &&
+          !sourceSubPathChanged,
+      );
+      const resolvedSourceUuidType: SourceUuidType | undefined =
+        resolvedSourceTokenType === 'disk' || resolvedSourceTokenType === 'volume'
+          ? resolvedSourceTokenType
+          : undefined;
 
       if (form.sourceType === 'uuid') {
-        if (!form.sourceUuid) {
+        const canKeepUnmountedUuidSource =
+          Boolean(editingTask) &&
+          isEditingExistingUuidSource &&
+          !sourceSelectionChanged;
+
+        if (
+          !form.sourceUuid ||
+          !resolvedSourceTokenType ||
+          (!selectedMountedUuidOption && !canKeepUnmountedUuidSource)
+        ) {
           showToast(
             t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' }),
             'warning',
@@ -253,11 +308,13 @@ export function useSyncTaskActions({
           return;
         }
 
-        finalSource = buildUuidSourceToken(
-          resolvedSourceUuidType || 'disk',
-          form.sourceUuid,
-          normalizedSourceSubPath,
-        );
+        finalSource = shouldReuseExistingUuidSource && editingTask
+          ? editingTask.source
+          : buildUuidSourceToken(
+              resolvedSourceTokenType,
+              form.sourceUuid,
+              normalizedSourceSubPath,
+            );
       }
 
       const taskData = {
@@ -274,13 +331,29 @@ export function useSyncTaskActions({
           autoUnmount: form.autoUnmount,
         }),
         sourceType: form.sourceType,
-        sourceUuid: form.sourceType === 'uuid' ? form.sourceUuid : undefined,
+        sourceUuid:
+          form.sourceType === 'uuid'
+            ? shouldReuseExistingUuidSource
+              ? editingTask?.sourceUuid
+              : resolvedSourceUuidType
+                ? form.sourceUuid
+                : undefined
+            : undefined,
         sourceUuidType:
-          form.sourceType === 'uuid' ? resolvedSourceUuidType : undefined,
+          form.sourceType === 'uuid'
+            ? shouldReuseExistingUuidSource
+              ? editingTask?.sourceUuidType
+              : resolvedSourceUuidType
+            : undefined,
         sourceSubPath:
-          form.sourceType === 'uuid' ? normalizedSourceSubPath : undefined,
+          form.sourceType === 'uuid'
+            ? shouldReuseExistingUuidSource
+              ? editingTask?.sourceSubPath
+              : normalizedSourceSubPath
+            : undefined,
       };
 
+      setSavingTask(true);
       try {
         const provisionalTask: SyncTask = editingTask
           ? { ...editingTask, ...taskData }
@@ -321,6 +394,8 @@ export function useSyncTaskActions({
         closeForm();
       } catch (error) {
         showToast(getErrorMessage(error), 'error');
+      } finally {
+        setSavingTask(false);
       }
     },
     [
@@ -328,7 +403,9 @@ export function useSyncTaskActions({
       closeForm,
       editingTask,
       form,
+      savingTask,
       setValidationErrorModal,
+      setSavingTask,
       showToast,
       t,
       tasks,
@@ -710,6 +787,7 @@ export function useSyncTaskActions({
     watchTogglePendingIds,
     cancelConfirm,
     pendingDryRunTask,
+    savingTask,
     conflictSessions,
     conflictSessionsLoading,
     clearCancelConfirm,

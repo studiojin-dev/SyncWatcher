@@ -624,4 +624,78 @@ describe('useSyncTasks', () => {
             );
         });
     });
+
+    it('treats undefined recurringSchedules as an omitted update field', async () => {
+        mockInvoke.mockImplementation(async (command: string) => {
+            if (command === 'list_sync_tasks') {
+                return {
+                    syncTasks: [
+                        {
+                            id: 'task-1',
+                            name: 'Photos',
+                            source: '/Volumes/CARD',
+                            target: '/Volumes/Backup',
+                            checksumMode: false,
+                            recurringSchedules: [
+                                {
+                                    id: 'schedule-1',
+                                    cronExpression: '0 9 * * *',
+                                    timezone: 'Asia/Seoul',
+                                    enabled: true,
+                                    checksumMode: false,
+                                    retentionCount: 20,
+                                },
+                            ],
+                        },
+                    ],
+                };
+            }
+
+            return {
+                task: {
+                    id: 'task-1',
+                    name: 'Photos renamed',
+                    source: '/Volumes/CARD',
+                    target: '/Volumes/Backup',
+                    checksumMode: false,
+                    recurringSchedules: [
+                        {
+                            id: 'schedule-1',
+                            cronExpression: '0 9 * * *',
+                            timezone: 'Asia/Seoul',
+                            enabled: true,
+                            checksumMode: false,
+                            retentionCount: 20,
+                        },
+                    ],
+                },
+            };
+        });
+
+        const { result } = renderHook(() => useSyncTasks());
+
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+
+        await act(async () => {
+            await result.current.updateTask('task-1', {
+                name: 'Photos renamed',
+                recurringSchedules: undefined,
+            });
+        });
+
+        expect(mockInvoke).toHaveBeenCalledWith('update_sync_task', {
+            id: 'task-1',
+            updates: {
+                name: 'Photos renamed',
+            },
+        });
+        expect(result.current.tasks[0]?.recurringSchedules).toEqual([
+            expect.objectContaining({
+                id: 'schedule-1',
+                cronExpression: '0 9 * * *',
+            }),
+        ]);
+    });
 });
