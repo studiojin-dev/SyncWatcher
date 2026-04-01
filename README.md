@@ -124,7 +124,6 @@ This project is **Source-Available** software.
 The official app is free to use, including commercial and internal company use. Buying a license is optional and works as project support.
 
 ## Support
-https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97
 - License support purchase: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
 - Additional tip: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
 - Support email: [support@studiojin.dev](mailto:support@studiojin.dev)

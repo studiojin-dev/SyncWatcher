@@ -134,6 +134,12 @@ function AppContent() {
     };
   }, [distributionLoaded, settingsLoaded, updateSettings]);
 
+  const startupComplete =
+    settingsLoaded &&
+    tasksLoaded &&
+    setsLoaded &&
+    (initialRuntimeSync === 'success' || initialRuntimeSync === 'error');
+
   useEffect(() => {
     if (
       !startupComplete
@@ -684,11 +690,6 @@ function AppContent() {
     }
   };
 
-  const startupComplete =
-    settingsLoaded &&
-    tasksLoaded &&
-    setsLoaded &&
-    (initialRuntimeSync === 'success' || initialRuntimeSync === 'error');
   const canRenderAppShell = settingsLoaded && tasksLoaded && setsLoaded;
 
   return (
