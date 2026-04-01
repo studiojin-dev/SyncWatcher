@@ -1,5 +1,7 @@
+pub mod apple_bridge;
 pub mod config_store;
 pub mod control_plane;
+pub mod distribution;
 pub mod error_codes;
 pub mod input_validation;
 pub mod license;
@@ -8,6 +10,8 @@ pub mod logging;
 pub mod mcp_jobs;
 pub mod path_validation;
 pub mod recurring;
+pub mod security_scoped;
+pub mod supporter;
 pub mod sync_engine;
 pub mod system_integration;
 pub mod watcher;
@@ -40,14 +44,15 @@ use sync_engine::{
 use system_integration::DiskMonitor;
 
 use config_store::{
-    apply_sync_task_update, build_sync_task_record, default_app_support_dir, default_config_dir,
-    default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
-    AppSettings, ConfigStore, ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope,
-    ExclusionSetEnvelope, ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch,
-    NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord,
-    SyncTasksEnvelope, UpdateSettingsPayload, UpdateSyncTaskRequest,
+    apply_sync_task_update, build_sync_task_record, default_config_dir, default_exclusion_set_records,
+    settings_snapshot_from_store, validate_exclusion_sets, AppSettings, ConfigStore,
+    ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope, ExclusionSetEnvelope,
+    ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NewSyncTaskRecord,
+    SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope,
+    UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
+use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
 use license::generate_licenses_report;
 use logging::LogManager;
 use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
@@ -58,6 +63,7 @@ use recurring::{
     RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus, RecurringScheduleHistoryStore,
     RecurringScheduleRecord,
 };
+use security_scoped::{CapturedPathAccess, LegacyImportStatus, SecurityScopedAccessManager};
 
 use watcher::{WatchEvent, WatcherManager};
 
@@ -356,6 +362,8 @@ pub struct AppState {
     mcp_jobs: Arc<McpJobRegistry>,
     /// MCP job id 시퀀스
     mcp_job_seq: Arc<AtomicU64>,
+    /// App Sandbox security-scoped bookmark 활성화 상태
+    security_scoped_access_manager: Arc<SecurityScopedAccessManager>,
 }
 
 #[derive(Default)]
@@ -3803,6 +3811,39 @@ async fn release_task_operation(task_id: &str, state: &AppState) {
     active.remove(task_id);
 }
 
+async fn load_sync_task_by_id(
+    task_id: &str,
+    state: &AppState,
+) -> Result<SyncTaskRecord, String> {
+    input_validation::validate_task_id(task_id).map_err(|e| e.to_string())?;
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    tasks
+        .into_iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| format!("Sync task not found: {task_id}"))
+}
+
+fn maybe_activate_settings_path_access(
+    settings: &AppSettings,
+    state: &AppState,
+) -> Result<(), String> {
+    security_scoped::activate_settings_path_access(
+        settings,
+        state.security_scoped_access_manager.as_ref(),
+    )
+}
+
+async fn activate_task_path_access(task_id: &str, state: &AppState) -> Result<(), String> {
+    let task = load_sync_task_by_id(task_id, state).await?;
+    security_scoped::activate_sync_task_path_access(
+        &task,
+        state.security_scoped_access_manager.as_ref(),
+    )
+}
+
 async fn load_canonical_config(
     state: &AppState,
 ) -> Result<(AppSettings, Vec<SyncTaskRecord>, Vec<ExclusionSetRecord>), String> {
@@ -3818,6 +3859,22 @@ async fn load_canonical_config(
         .config_store
         .load_exclusion_sets()
         .map_err(config_store_error_to_string)?;
+
+    if let Err(error) = maybe_activate_settings_path_access(&settings, state) {
+        eprintln!("[Sandbox] Failed to activate settings bookmark: {error}");
+    }
+    for task in &tasks {
+        if let Err(error) = security_scoped::activate_sync_task_path_access(
+            task,
+            state.security_scoped_access_manager.as_ref(),
+        ) {
+            eprintln!(
+                "[Sandbox] Failed to activate task bookmark for '{}': {}",
+                task.id, error
+            );
+        }
+    }
+
     Ok((settings, tasks, exclusion_sets))
 }
 
@@ -4075,6 +4132,9 @@ async fn execute_sync_internal(
 
     let recurring_history_detail_entries = Arc::new(StdMutex::new(Vec::new()));
     let sync_result = async {
+        activate_task_path_access(&task_id, &state)
+            .await
+            .map_err(SyncExecutionFailure::new)?;
         let source = resolve_path_with_uuid(source.to_str().unwrap_or(""))
             .map_err(|e| e.to_string())
             .map_err(SyncExecutionFailure::new)?;
@@ -4436,6 +4496,17 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
 
     emit_runtime_sync_state(&app, &task.id, true, None);
 
+    if let Err(error) = activate_task_path_access(&task.id, &state).await {
+        state.log_manager.log(
+            "error",
+            &format!("Sandbox access failed: {error}"),
+            Some(task.id.clone()),
+        );
+        emit_runtime_sync_state(&app, &task.id, false, Some(error));
+        schedule_runtime_sync_dispatcher(app, state);
+        return;
+    }
+
     let exclude_patterns = resolve_runtime_exclude_patterns(&task, &runtime_config.exclusion_sets);
     let result = execute_sync_internal(
         task.id.clone(),
@@ -4540,6 +4611,7 @@ async fn start_watch_internal(
     state: AppState,
     runtime_owned: bool,
 ) -> Result<PathBuf, String> {
+    activate_task_path_access(&task_id, &state).await?;
     let source_path =
         resolve_path_with_uuid(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
 
@@ -4781,6 +4853,68 @@ async fn get_settings(
 ) -> Result<SettingsEnvelope, String> {
     let settings = current_settings_snapshot(&app, state.inner()).await?;
     Ok(SettingsEnvelope { settings })
+}
+
+#[tauri::command]
+async fn get_distribution_info(app: tauri::AppHandle) -> Result<DistributionInfo, String> {
+    Ok(distribution::distribution_info(
+        &app,
+        security_scoped::legacy_import_available(&app),
+    ))
+}
+
+#[tauri::command]
+async fn get_supporter_status(app: tauri::AppHandle) -> Result<supporter::SupporterStatus, String> {
+    supporter::get_supporter_status_for_app(app).await
+}
+
+#[tauri::command]
+async fn refresh_supporter_status(
+    app: tauri::AppHandle,
+) -> Result<supporter::SupporterStatus, String> {
+    supporter::refresh_supporter_status_for_app(app).await
+}
+
+#[tauri::command]
+async fn purchase_lifetime_supporter(
+    app: tauri::AppHandle,
+) -> Result<supporter::SupporterPurchaseResponse, String> {
+    supporter::purchase_supporter_for_app(app).await
+}
+
+#[tauri::command]
+async fn restore_lifetime_supporter(
+    app: tauri::AppHandle,
+) -> Result<supporter::SupporterPurchaseResponse, String> {
+    supporter::restore_supporter_for_app(app).await
+}
+
+#[tauri::command]
+async fn capture_path_access(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<CapturedPathAccess, String> {
+    security_scoped::capture_path_access(&app, path)
+}
+
+#[tauri::command]
+async fn import_legacy_channel_data(
+    app: tauri::AppHandle,
+) -> Result<LegacyImportStatus, String> {
+    let result = security_scoped::import_legacy_channel_data(&app)?;
+    if result.imported {
+        emit_config_store_changed(&app, &["settings", "syncTasks", "exclusionSets"]);
+        let state = app.state::<AppState>();
+        let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+async fn check_app_store_update(
+    app: tauri::AppHandle,
+) -> Result<AppStoreUpdateCheckResult, String> {
+    Ok(distribution::check_app_store_update(&app).await)
 }
 
 #[tauri::command]
@@ -5540,6 +5674,7 @@ async fn sync_dry_run(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
+    activate_task_path_access(&task_id, state.inner()).await?;
     sync_dry_run_internal(
         Some(app),
         task_id,
@@ -5562,6 +5697,7 @@ async fn find_orphan_files(
     exclude_patterns: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<OrphanFile>, String> {
+    activate_task_path_access(&task_id, state.inner()).await?;
     find_orphan_files_internal(
         task_id,
         source,
@@ -5580,6 +5716,7 @@ async fn delete_orphan_files(
     paths: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DeleteOrphanResult, String> {
+    activate_task_path_access(&task_id, state.inner()).await?;
     let target =
         resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -6244,6 +6381,7 @@ async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncExecutionResult, String> {
+    activate_task_path_access(&task_id, state.inner()).await?;
     let result = execute_sync_internal(
         task_id,
         task_name.unwrap_or_else(|| "Manual Sync".to_string()),
@@ -6314,7 +6452,9 @@ async fn create_sync_task(
 struct SyncTaskUpdatePayload {
     name: Option<String>,
     source: Option<String>,
+    source_bookmark: Option<String>,
     target: Option<String>,
+    target_bookmark: Option<String>,
     checksum_mode: Option<bool>,
     verify_after_copy: Option<bool>,
     exclusion_sets: Option<Vec<String>>,
@@ -6340,7 +6480,9 @@ async fn update_sync_task(
             task_id: id,
             name: updates.name,
             source: updates.source,
+            source_bookmark: updates.source_bookmark,
             target: updates.target,
+            target_bookmark: updates.target_bookmark,
             checksum_mode: updates.checksum_mode,
             verify_after_copy: updates.verify_after_copy,
             exclusion_sets: updates.exclusion_sets,
@@ -7602,18 +7744,23 @@ fn adjust_window_if_mostly_offscreen(window: &WebviewWindow) -> tauri::Result<()
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    let context_identifier = context.config().identifier.clone();
     let shared_log_manager = Arc::new(LogManager::new(DEFAULT_MAX_LOG_LINES));
     let setup_log_manager = shared_log_manager.clone();
     let managed_log_manager = shared_log_manager;
     let managed_config_store = Arc::new(ConfigStore::from_config_dir(
-        default_config_dir().expect("failed to resolve SyncWatcher config directory"),
+        config_store::config_dir_for_identifier(&context_identifier)
+            .expect("failed to resolve SyncWatcher config directory"),
     ));
     let managed_recurring_history_store = Arc::new(RecurringScheduleHistoryStore::new(
-        default_app_support_dir().expect("failed to resolve SyncWatcher app support directory"),
+        config_store::app_support_dir_for_identifier(&context_identifier)
+            .expect("failed to resolve SyncWatcher app support directory"),
     ));
     let autostart_args = vec![AUTOSTART_ARG];
+    let distribution_channel = distribution::detect_distribution_channel(None);
 
-    let builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
@@ -7623,7 +7770,6 @@ pub fn run() {
             Some(autostart_args),
         ))
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .on_menu_event(|app, event| {
             eprintln!("[App] Menu event: {}", event.id.as_ref());
@@ -7642,8 +7788,13 @@ pub fn run() {
                 eprintln!("[App] Menu event mapped to cmd-quit");
                 emit_close_requested(app, CloseRequestSource::CmdQuit);
             }
-        })
-        .setup(move |app| {
+        });
+
+    if distribution_channel == distribution::DistributionChannel::Github {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    let builder = builder.setup(move |app| {
             app.set_menu(build_app_menu(app)?)?;
 
             let autostart_arg_present = is_autostart_launch();
@@ -7930,7 +8081,6 @@ pub fn run() {
                 let app_handle = recurring_scheduler_app.clone();
                 recurring_scheduler_loop(app_handle, state.inner().clone()).await;
             });
-
             Ok(())
         })
         .manage(AppState {
@@ -7962,12 +8112,21 @@ pub fn run() {
             control_plane_handle: Arc::new(Mutex::new(None)),
             mcp_jobs: Arc::new(McpJobRegistry::new()),
             mcp_job_seq: Arc::new(AtomicU64::new(0)),
+            security_scoped_access_manager: Arc::new(SecurityScopedAccessManager::default()),
         })
         .manage(AppExitControl::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             get_app_version,
             get_settings,
+            get_distribution_info,
+            get_supporter_status,
+            refresh_supporter_status,
+            purchase_lifetime_supporter,
+            restore_lifetime_supporter,
+            capture_path_access,
+            import_legacy_channel_data,
+            check_app_store_update,
             set_launch_at_login,
             update_settings,
             reset_settings,
@@ -8032,7 +8191,7 @@ pub fn run() {
         ]);
 
     let app = builder
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {

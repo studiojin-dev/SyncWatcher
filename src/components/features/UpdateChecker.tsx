@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { useDistribution } from '../../hooks/useDistribution';
 import { useToast } from '../ui/Toast';
 
 /**
@@ -16,6 +18,17 @@ interface UpdateInfo {
     version: string;
     body: string | null;
     date: string | null;
+    storeUrl?: string | null;
+    manualOnly?: boolean;
+}
+
+interface AppStoreUpdateCheckResult {
+    available: boolean;
+    currentVersion: string;
+    latestVersion?: string | null;
+    storeUrl?: string | null;
+    manualOnly: boolean;
+    error?: string | null;
 }
 
 interface UpdateCheckerProps {
@@ -31,6 +44,7 @@ interface UpdateCheckerProps {
  */
 function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateCheckerProps) {
     const { t } = useTranslation();
+    const { info: distribution } = useDistribution();
     const { showToast } = useToast();
     const [state, setState] = useState<UpdateState>('idle');
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -58,6 +72,43 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
             setState('checking');
             setErrorMessage('');
             setProgress(0);
+
+            if (distribution.channel === 'app_store') {
+                const update = await invoke<AppStoreUpdateCheckResult>('check_app_store_update');
+                if (update.available) {
+                    updateRef.current = null;
+                    setUpdateInfo({
+                        version: update.latestVersion ?? update.currentVersion,
+                        body: null,
+                        date: null,
+                        storeUrl: update.storeUrl ?? distribution.appStoreUrl ?? null,
+                        manualOnly: false,
+                    });
+                    setDismissed(false);
+                    setState('available');
+                } else if (update.manualOnly && (update.storeUrl ?? distribution.appStoreUrl)) {
+                    updateRef.current = null;
+                    setUpdateInfo({
+                        version: update.latestVersion ?? '',
+                        body: null,
+                        date: null,
+                        storeUrl: update.storeUrl ?? distribution.appStoreUrl ?? null,
+                        manualOnly: true,
+                    });
+                    setErrorMessage(update.error ?? '');
+                    setDismissed(false);
+                    setState('available');
+                } else {
+                    updateRef.current = null;
+                    setUpdateInfo(null);
+                    setState('idle');
+                    if (mode === 'manual') {
+                        showToast(t('update.noneAvailable'), 'success');
+                    }
+                }
+                return;
+            }
+
             const update = await check();
 
             if (update) {
@@ -66,6 +117,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                     version: update.version,
                     body: update.body ?? null,
                     date: update.date ?? null,
+                    storeUrl: null,
                 });
                 setDismissed(false);
                 setState('available');
@@ -86,7 +138,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 showToast(t('update.checkFailed'), 'error');
             }
         }
-    }, [showToast, state, t]);
+    }, [distribution.appStoreUrl, distribution.channel, showToast, state, t]);
 
     const handleUpdate = useCallback(async () => {
         const update = updateRef.current;
@@ -159,9 +211,17 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                     {state === 'available' && updateInfo && (
                         <>
                             <p className="text-sm font-bold text-[var(--text-primary)]">
-                                {t('update.available', { version: updateInfo.version })}
+                                {distribution.channel === 'app_store'
+                                    ? updateInfo.manualOnly
+                                        ? (errorMessage || t('update.appStoreDescription'))
+                                        : t('update.appStoreAvailable', { version: updateInfo.version })
+                                    : t('update.available', { version: updateInfo.version })}
                             </p>
-                            {updateInfo.body && (
+                            {distribution.channel === 'app_store' ? (
+                                <p className="text-xs text-[var(--text-secondary)]">
+                                    {t('update.appStoreDescription')}
+                                </p>
+                            ) : updateInfo.body && (
                                 <div className="max-h-32 overflow-y-auto border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3">
                                     <p className="whitespace-pre-wrap font-mono text-xs text-[var(--text-secondary)]">
                                         {updateInfo.body}
@@ -216,12 +276,23 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                             >
                                 {t('update.later')}
                             </button>
-                            <button
-                                onClick={() => void handleUpdate()}
-                                className="border-2 border-[var(--border-main)] bg-[var(--accent-success)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:opacity-90 shadow-[3px_3px_0_0_var(--shadow-color)] transition-all"
-                            >
-                                {t('update.updateNow')}
-                            </button>
+                            {distribution.channel === 'app_store' ? (
+                                <a
+                                    href={updateInfo?.storeUrl ?? distribution.appStoreUrl ?? '#'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="border-2 border-[var(--border-main)] bg-[var(--accent-success)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:opacity-90 shadow-[3px_3px_0_0_var(--shadow-color)] transition-all"
+                                >
+                                    {t('update.openAppStore')}
+                                </a>
+                            ) : (
+                                <button
+                                    onClick={() => void handleUpdate()}
+                                    className="border-2 border-[var(--border-main)] bg-[var(--accent-success)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:opacity-90 shadow-[3px_3px_0_0_var(--shadow-color)] transition-all"
+                                >
+                                    {t('update.updateNow')}
+                                </button>
+                            )}
                         </>
                     )}
 

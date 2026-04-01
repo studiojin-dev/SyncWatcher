@@ -10,6 +10,7 @@ mod integration_tests {
         RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus,
         RecurringScheduleHistoryStore, RecurringScheduleRecord,
     };
+    use crate::security_scoped::SecurityScopedAccessManager;
     use crate::sync_engine::types::{
         DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
     };
@@ -145,6 +146,8 @@ mod integration_tests {
                 normalize_uuid_sub_path(source_sub_path).unwrap()
             ),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -211,6 +214,7 @@ mod integration_tests {
             control_plane_handle: Arc::new(Mutex::new(None)),
             mcp_jobs: Arc::new(McpJobRegistry::new()),
             mcp_job_seq: Arc::new(AtomicU64::new(0)),
+            security_scoped_access_manager: Arc::new(SecurityScopedAccessManager::default()),
         }
     }
 
@@ -524,6 +528,8 @@ mod integration_tests {
                 name: "Task".to_string(),
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
+                source_bookmark: None,
+                target_bookmark: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -568,6 +574,8 @@ mod integration_tests {
                 name: "Task".to_string(),
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
+                source_bookmark: None,
+                target_bookmark: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -613,6 +621,8 @@ mod integration_tests {
                 name: "Original Task".to_string(),
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
+                source_bookmark: None,
+                target_bookmark: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -1481,6 +1491,8 @@ mod integration_tests {
                     name: "Task A".to_string(),
                     source: "/src/a".to_string(),
                     target: "/dst/shared".to_string(),
+                    source_bookmark: None,
+                    target_bookmark: None,
                     checksum_mode: false,
                     verify_after_copy: true,
                     exclusion_sets: Vec::new(),
@@ -1498,6 +1510,8 @@ mod integration_tests {
                     name: "Task B".to_string(),
                     source: "/src/b".to_string(),
                     target: "/dst/shared".to_string(),
+                    source_bookmark: None,
+                    target_bookmark: None,
                     checksum_mode: false,
                     verify_after_copy: true,
                     exclusion_sets: Vec::new(),

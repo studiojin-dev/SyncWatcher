@@ -23,6 +23,10 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(),
 }));
 
+vi.mock('../utils/pathAccess', () => ({
+  capturePathAccess: vi.fn(),
+}));
+
 vi.mock('../hooks/useSettings', () => ({
   useSettings: () => ({
     settings: {
@@ -41,6 +45,14 @@ vi.mock('../hooks/useSettings', () => ({
     updateSettings: updateSettingsMock,
     setLaunchAtLogin: setLaunchAtLoginMock,
     resetSettings: resetSettingsMock,
+  }),
+}));
+
+vi.mock('../hooks/useDistribution', () => ({
+  useDistribution: () => ({
+    info: {
+      channel: 'github',
+    },
   }),
 }));
 

@@ -24,7 +24,9 @@
       "firstRunIntroSettingsHint": "Puedes cambiar esto más tarde en Configuración > Comportamiento.",
       "firstRunIntroLater": "Más tarde",
       "firstRunIntroEnable": "Activar inicio al iniciar sesión",
-      "loadingView": "Cargando vista..."
+      "loadingView": "Cargando vista...",
+      "importLegacyPromptTitle": "Importar ajustes de la versión de GitHub",
+      "importLegacyPromptMessage": "Se encontró una configuración previa del GitHub DMG. ¿Importar ahora los ajustes, las tareas de sincronización y los conjuntos de exclusión a la versión de Mac App Store?"
     },
     "nav": {
       "dashboard": "Volúmenes",
@@ -323,6 +325,7 @@
       "sectionSystem": "Sistema",
       "sectionBehavior": "Comportamiento",
       "sectionLicense": "Soporte de licencia",
+      "sectionLegal": "Legal",
       "stateLocation": "Ubicación del estado",
       "stateLocationPlaceholder": "Predeterminado: Tauri AppData",
       "maxLogLines": "Líneas máximas de registro",
@@ -337,6 +340,8 @@
       "notifications": "Notificaciones",
       "deleteConfirmation": "Confirmación de Eliminación",
       "verifyAfterCopy": "Verificar después de copiar",
+      "termsLink": "Términos del servicio",
+      "privacyLink": "Política de privacidad",
       "saveSettings": "Guardar Configuración",
       "resetDefaults": "Restablecer Valores"
     },
@@ -477,6 +482,7 @@
       "openSourceDescription": "SyncWatcher usa varias bibliotecas de código abierto. Puedes ver la información de sus licencias con el botón de abajo.",
       "viewLicenses": "Ver licencias de código abierto",
       "viewOnGithub": "Ver en GitHub",
+      "openAppStore": "Abrir en App Store",
       "unregistered": "Uso gratis (personal y comercial)",
       "registered": "Patrocinador con licencia",
       "thankYou": "¡Gracias por mantener vivo este proyecto!",
@@ -543,7 +549,10 @@
       "checkingAlready": "Ya se está comprobando si hay actualizaciones.",
       "checkFailed": "No se pudieron comprobar las actualizaciones.",
       "later": "Más tarde",
-      "updateNow": "Actualizar ahora"
+      "updateNow": "Actualizar ahora",
+      "appStoreAvailable": "La versión {{version}} está disponible en Mac App Store",
+      "appStoreDescription": "SyncWatcher no puede instalar actualizaciones directamente desde la versión de Mac App Store. Abre App Store para actualizar allí.",
+      "openAppStore": "Abrir App Store"
     },
     "license": {
       "title": "Activar licencia",
@@ -560,7 +569,20 @@
       "remove": "Quitar licencia",
       "removing": "Quitando...",
       "removed": "Licencia eliminada.",
-      "removeFailed": "No se pudo eliminar la licencia."
+      "removeFailed": "No se pudo eliminar la licencia.",
+      "appStoreTitle": "Lifetime Supporter",
+      "appStoreDescription": "Esta es una compra única opcional dentro de la app para apoyar el desarrollo. No desbloquea funciones extra.",
+      "appStoreSupportStatus": "Apoyo de Mac App Store",
+      "appStorePurchase": "Hazte patrocinador",
+      "appStorePurchasing": "Procesando compra...",
+      "appStorePurchased": "¡Gracias por apoyar SyncWatcher!",
+      "appStoreRestoreFailed": "No se pudo restaurar ninguna compra de App Store.",
+      "appStoreRestored": "Compra de App Store restaurada.",
+      "appStoreRestoring": "Restaurando...",
+      "appStorePurchaseFailed": "No se pudo completar la compra en App Store.",
+      "appStorePending": "La compra de App Store sigue pendiente de aprobación.",
+      "appStoreSupporterActive": "Patrocinio de App Store activo",
+      "restore": "Restaurar compra"
     }
   }
 }

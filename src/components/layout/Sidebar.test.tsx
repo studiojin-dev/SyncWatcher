@@ -45,6 +45,14 @@ vi.mock('../../hooks/useSettings', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useDistribution', () => ({
+  useDistribution: () => ({
+    info: {
+      channel: 'github',
+    },
+  }),
+}));
+
 vi.mock('../features/LicenseActivation', () => ({
   default: ({ open }: { open: boolean }) => (
     open ? <div data-testid="license-activation-modal">License Activation Modal</div> : null

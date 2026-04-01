@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettings } from '../../hooks/useSettings';
+import { useDistribution } from '../../hooks/useDistribution';
 import { useAppVersion } from '../../hooks/useAppVersion';
 import { buyMeACoffeeUrl, lemonSqueezyCheckoutUrl } from '../../config/appLinks';
 import LicenseActivation from '../features/LicenseActivation';
@@ -44,10 +45,12 @@ const navItems: NavItem[] = [
  */
 function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const { t } = useTranslation();
+    const { info: distribution } = useDistribution();
     const { settings } = useSettings();
     const appVersion = useAppVersion();
     const isRegistered = settings.isRegistered;
     const [showLicenseModal, setShowLicenseModal] = useState(false);
+    const isAppStoreBuild = distribution.channel === 'app_store';
 
     return (
         <aside className="flex flex-col h-full bg-[var(--bg-primary)] border-r-4 border-[var(--border-main)] overflow-hidden">
@@ -123,19 +126,28 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                                 </span>
                                 <div className="w-2 h-2 rounded-full bg-[var(--accent-error)] animate-pulse" />
                             </div>
-                            <a
-                                href={lemonSqueezyCheckoutUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
-                            >
-                                {t('about.purchaseLicense')}
-                            </a>
+                            {isAppStoreBuild ? (
+                                <button
+                                    onClick={() => setShowLicenseModal(true)}
+                                    className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
+                                >
+                                    {t('license.appStorePurchase')}
+                                </button>
+                            ) : (
+                                <a
+                                    href={lemonSqueezyCheckoutUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
+                                >
+                                    {t('about.purchaseLicense')}
+                                </a>
+                            )}
                             <button
                                 onClick={() => setShowLicenseModal(true)}
                                 className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-[var(--bg-secondary)] text-[var(--text-primary)] py-2 border-t border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
                             >
-                                {t('license.enterLicense')}
+                                {isAppStoreBuild ? t('license.restore') : t('license.enterLicense')}
                             </button>
                         </div>
                     ) : (
@@ -146,20 +158,26 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                                 </span>
                                 <div className="w-2 h-2 rounded-full bg-[var(--accent-success)]" />
                             </div>
-                            <a
-                                href={buyMeACoffeeUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full flex items-center justify-center gap-1.5 text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
-                            >
-                                <span>{t('about.supportButton')}</span>
-                                <span aria-hidden="true" className="text-xs leading-none">🍕</span>
-                            </a>
+                            {!isAppStoreBuild ? (
+                                <a
+                                    href={buyMeACoffeeUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="w-full flex items-center justify-center gap-1.5 text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2 hover:bg-[var(--accent-warning)] hover:text-black transition-all transform hover:-translate-y-1 hover:shadow-[0_4px_0_0_black] active:translate-y-0 active:shadow-none"
+                                >
+                                    <span>{t('about.supportButton')}</span>
+                                    <span aria-hidden="true" className="text-xs leading-none">🍕</span>
+                                </a>
+                            ) : (
+                                <div className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-black text-[var(--accent-warning)] py-2">
+                                    {t('license.appStoreSupporterActive')}
+                                </div>
+                            )}
                             <button
                                 onClick={() => setShowLicenseModal(true)}
                                 className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-[var(--bg-secondary)] text-[var(--text-primary)] py-2 border-t border-[var(--border-main)] hover:bg-[var(--bg-primary)] transition-colors"
                             >
-                                {t('license.manage')}
+                                {isAppStoreBuild ? t('license.restore') : t('license.manage')}
                             </button>
                         </div>
                     )}

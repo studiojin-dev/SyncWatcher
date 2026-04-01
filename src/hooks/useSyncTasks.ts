@@ -12,7 +12,9 @@ export interface SyncTask {
     id: string;
     name: string;
     source: string;
+    sourceBookmark?: string | null;
     target: string;
+    targetBookmark?: string | null;
     checksumMode: boolean;
     verifyAfterCopy?: boolean;
     exclusionSets?: string[];
@@ -65,7 +67,9 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         id: task.id,
         name: task.name,
         source: task.source,
+        sourceBookmark: task.sourceBookmark ?? null,
         target: task.target,
+        targetBookmark: task.targetBookmark ?? null,
         checksumMode: task.checksumMode ?? false,
         verifyAfterCopy: task.verifyAfterCopy ?? true,
         exclusionSets: task.exclusionSets ?? [],

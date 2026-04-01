@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch, Select } from '@mantine/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
+import { useDistribution } from '../hooks/useDistribution';
 import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DataUnitSystem } from '../utils/formatBytes';
+import { capturePathAccess } from '../utils/pathAccess';
 import LicenseActivation from '../components/features/LicenseActivation';
-import { lemonSqueezyCheckoutUrl } from '../config/appLinks';
+import { lemonSqueezyCheckoutUrl, privacyPolicyUrl, termsOfServiceUrl } from '../config/appLinks';
 
 const languages = [
     { value: 'en', label: 'English' },
@@ -23,8 +25,10 @@ const languages = [
  */
 function SettingsView() {
     const { t } = useTranslation();
+    const { info: distribution } = useDistribution();
     const { settings, updateSettings, setLaunchAtLogin, resetSettings, loaded } = useSettings();
     const [showLicenseModal, setShowLicenseModal] = useState(false);
+    const isAppStoreBuild = distribution.channel === 'app_store';
     const themes = [
         { value: 'system', label: t('settings.themeSystem') },
         { value: 'light', label: t('settings.themeLight') },
@@ -46,8 +50,12 @@ function SettingsView() {
     const handleBrowseFolder = async (settingKey: 'stateLocation') => {
         try {
             const selected = await open({ directory: true });
-            if (selected) {
-                updateSettings({ [settingKey]: selected as string });
+            if (selected && typeof selected === 'string') {
+                const captured = await capturePathAccess(selected);
+                updateSettings({
+                    [settingKey]: captured.path,
+                    stateLocationBookmark: captured.bookmark ?? '',
+                });
             }
         } catch (err) {
             console.error('Failed to open folder dialog:', err);
@@ -173,7 +181,11 @@ function SettingsView() {
                             <div className="flex gap-2">
                                 <input
                                     value={settings.stateLocation}
-                                    onChange={(e) => updateSettings({ stateLocation: e.target.value })}
+                                    onChange={(e) => updateSettings({
+                                        stateLocation: e.target.value,
+                                        stateLocationBookmark: '',
+                                    })}
+                                    readOnly={isAppStoreBuild}
                                     className="neo-input flex-1 font-mono text-sm"
                                     placeholder={t('settings.stateLocationPlaceholder')}
                                 />
@@ -309,22 +321,54 @@ function SettingsView() {
                         </div>
 
                         <div className="flex flex-col gap-3 sm:flex-row">
-                            <a
-                                href={lemonSqueezyCheckoutUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center border-3 border-[var(--border-main)] bg-black px-4 py-3 text-xs font-bold uppercase tracking-wider text-[var(--accent-warning)] shadow-[4px_4px_0_0_var(--shadow-color)] transition-all hover:opacity-90"
-                            >
-                                {t('about.purchaseLicense')}
-                            </a>
+                            {!isAppStoreBuild ? (
+                                <a
+                                    href={lemonSqueezyCheckoutUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-center border-3 border-[var(--border-main)] bg-black px-4 py-3 text-xs font-bold uppercase tracking-wider text-[var(--accent-warning)] shadow-[4px_4px_0_0_var(--shadow-color)] transition-all hover:opacity-90"
+                                >
+                                    {t('about.purchaseLicense')}
+                                </a>
+                            ) : null}
                             <button
                                 type="button"
                                 onClick={() => setShowLicenseModal(true)}
                                 className="border-3 border-[var(--border-main)] bg-[var(--bg-primary)] px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-[var(--bg-secondary)]"
                             >
-                                {settings.isRegistered ? t('license.manage') : t('license.enterLicense')}
+                                {isAppStoreBuild
+                                    ? settings.isRegistered
+                                        ? t('license.restore')
+                                        : t('license.appStorePurchase')
+                                    : settings.isRegistered
+                                        ? t('license.manage')
+                                        : t('license.enterLicense')}
                             </button>
                         </div>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-bold uppercase mb-4 pl-2 border-l-4 border-[var(--accent-main)]">
+                        {t('settings.sectionLegal')}
+                    </h2>
+                    <div className="neo-box p-6 space-y-3">
+                        <a
+                            href={termsOfServiceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center border-3 border-[var(--border-main)] bg-[var(--bg-primary)] px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-[var(--bg-secondary)]"
+                        >
+                            {t('settings.termsLink')}
+                        </a>
+                        <a
+                            href={privacyPolicyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center border-3 border-[var(--border-main)] bg-[var(--bg-primary)] px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-[var(--bg-secondary)]"
+                        >
+                            {t('settings.privacyLink')}
+                        </a>
                     </div>
                 </section>
 

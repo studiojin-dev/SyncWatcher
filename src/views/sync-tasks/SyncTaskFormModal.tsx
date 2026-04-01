@@ -102,7 +102,10 @@ function SyncTaskFormModal({
                 <input
                   name="source"
                   value={form.sourcePath}
-                  onChange={(event) => form.setSourcePath(event.target.value)}
+                  onChange={(event) => {
+                    form.setSourcePath(event.target.value);
+                    form.setSourceBookmark(null);
+                  }}
                   required={form.sourceType === 'path'}
                   disabled={savingTask}
                   className="neo-input font-mono text-sm flex-1"
@@ -220,7 +223,10 @@ function SyncTaskFormModal({
               <input
                 name="target"
                 value={form.targetPath}
-                onChange={(event) => form.setTargetPath(event.target.value)}
+                onChange={(event) => {
+                  form.setTargetPath(event.target.value);
+                  form.setTargetBookmark(null);
+                }}
                 required
                 disabled={savingTask}
                 className="neo-input font-mono text-sm flex-1"
