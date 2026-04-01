@@ -87,6 +87,8 @@ pnpm install
 pnpm dev
 pnpm build
 pnpm tauri build
+# local signed/notarized macOS release helper
+./scripts/release/local-macos-release.sh
 ```
 
 ### Install On macOS
