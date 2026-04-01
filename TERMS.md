@@ -1,10 +1,10 @@
 # Terms and Conditions
 
-Last updated: 2026-03-27
+Last updated: 2026-04-01
 
 These Terms and Conditions ("Terms") govern your use of SyncWatcher ("SyncWatcher", "the App", or "the Service") provided by StudioJin ("we", "us", or "our").
 
-By downloading, installing, accessing, or using SyncWatcher, or by purchasing a related license through Lemon Squeezy, you agree to these Terms.
+By downloading, installing, accessing, or using SyncWatcher, or by purchasing optional support through Lemon Squeezy or the Apple App Store, you agree to these Terms.
 
 ## Language Notice
 
@@ -32,62 +32,87 @@ This grant does not transfer ownership of the App or any intellectual property r
 
 The SyncWatcher source code is made available separately under the license terms published in the repository's `LICENSE` file.
 
-These Terms govern the binary application, the optional paid support license, and the commercial relationship around SyncWatcher unless a separate written agreement says otherwise.
+These Terms govern the binary application, optional support purchases, and the commercial relationship around SyncWatcher unless a separate written agreement says otherwise.
 
 If there is a conflict between these Terms and the repository source-code license with respect to the source code, the source-code license controls for the source code only.
 
-## 5. Purchases, Merchant of Record, and Taxes
+## 5. Distribution Channels
 
-Paid purchases related to SyncWatcher are processed by Lemon Squeezy. Lemon Squeezy acts as the merchant of record for checkout transactions and may collect payment, billing, and tax information directly from you under its own terms and policies.
+SyncWatcher may be distributed through more than one channel, including:
 
-Prices, currency conversion, taxes, invoicing, payment processing, and receipt delivery may be handled by Lemon Squeezy.
+- GitHub Releases and direct `.dmg` downloads; and
+- the Apple Mac App Store.
 
-We may rely on Lemon Squeezy records to determine whether a purchase was completed and whether a license is eligible for activation.
+Features may be implemented differently when required by platform policy, sandboxing, payment rules, or update rules. However, the product policy remains that SyncWatcher is free to use and optional support purchases do not unlock separate core backup functionality.
 
-## 6. License Activation
+## 6. Purchases, Merchant of Record, and Taxes
 
-Some paid features or support-related license states may require license activation and validation through Lemon Squeezy.
+### 6.1 GitHub DMG builds
 
-To activate a license, you may need to provide:
+If you obtain SyncWatcher outside the Mac App Store and choose to make an optional support purchase, payment is processed by Lemon Squeezy. Lemon Squeezy acts as the merchant of record for that transaction and may collect payment, billing, tax, and receipt information directly from you under its own terms and policies.
 
-- a valid license key;
-- a device instance name or identifier; and
-- any other information reasonably required for licensing operations.
+### 6.2 Mac App Store builds
 
-You are responsible for keeping your license key secure. You must not share, resell, or misuse a license key in a way that violates these Terms or the applicable checkout terms.
+If you obtain SyncWatcher through the Apple Mac App Store and choose to make the optional in-app purchase named `Lifetime Supporter`, Apple acts as the merchant of record for that transaction under Apple's own terms, billing policies, and refund rules.
 
-We may suspend or revoke license access if we reasonably believe a license was obtained fraudulently, used abusively, or used in violation of these Terms.
+### 6.3 General
 
-## 7. Acceptable Use
+Prices, currency conversion, taxes, invoicing, payment processing, and receipt delivery may be handled by the relevant merchant of record for the channel you use.
+
+## 7. Optional Support Purchases
+
+SyncWatcher's support purchase is optional. The current product policy is:
+
+- the app remains free to use;
+- the `Lifetime Supporter` purchase is intended as developer support; and
+- the purchase does not promise a separate feature tier, service level, or hosted account system.
+
+For GitHub DMG builds, supporter state may depend on Lemon Squeezy license-key activation and validation.
+
+For Mac App Store builds, supporter state may depend on Apple's in-app purchase transaction state and restore flow.
+
+You are responsible for keeping purchase credentials, Apple ID access, and any applicable license key secure.
+
+## 8. Acceptable Use
 
 You must not:
 
 - use SyncWatcher in violation of applicable law;
-- interfere with or circumvent licensing, validation, or security mechanisms;
+- interfere with or circumvent licensing, validation, App Store purchase, or security mechanisms;
 - use SyncWatcher to infringe the rights of others;
 - redistribute, sell, rent, lease, or sublicense the binary App except where we expressly permit it; or
 - use the App in a way that is intended to damage systems, data, or other users.
 
-## 8. Updates and Changes
+## 9. Updates and Changes
 
-We may release updates, fixes, improvements, or changes to SyncWatcher at any time. We do not guarantee that any particular feature, integration, or version will remain available indefinitely.
+We may release updates, fixes, improvements, or changes to SyncWatcher at any time.
 
-## 9. Third-Party Services
+If you use a GitHub DMG build, updates may be offered through GitHub Releases or a compatible in-app updater flow.
+
+If you use a Mac App Store build, updates are provided through the Mac App Store. SyncWatcher may show a best-effort notice that a newer App Store version exists, but installation and delivery remain managed by Apple.
+
+We do not guarantee that any particular feature, integration, or version will remain available indefinitely.
+
+## 10. Third-Party Services
 
 SyncWatcher may rely on or link to third-party services, including:
 
-- Lemon Squeezy for checkout and licensing; and
-- GitHub for software distribution, releases, issues, and discussions.
+- Lemon Squeezy for checkout and license-key operations on non-App-Store builds;
+- Apple App Store and StoreKit for App Store distribution, billing, purchase restoration, and transaction handling;
+- GitHub for software distribution, releases, issues, and discussions; and
+- Buy Me a Coffee or similar support links on non-App-Store builds.
 
 Those third-party services are governed by their own terms and policies, and we are not responsible for their independent acts or omissions.
 
-## 10. Refunds
+## 11. Refunds
 
-Because SyncWatcher can be evaluated and used for an effectively unlimited trial period before purchase, purchases related to SyncWatcher are final and non-refundable, except where required by applicable law.
+For GitHub DMG purchases handled by Lemon Squeezy, purchases are generally final and non-refundable except where required by applicable law or the relevant merchant-of-record policy.
 
-This means you should evaluate SyncWatcher before completing a purchase. Any mandatory statutory refund rights that cannot be waived will still apply where required by law.
+For Mac App Store purchases, Apple handles billing support, refunds, and any mandatory consumer rights according to Apple's policies and applicable law.
 
-## 11. No Warranty
+Because SyncWatcher can be evaluated and used before any optional support purchase, you should assess whether it fits your needs before purchasing.
+
+## 12. No Warranty
 
 SYNCWATCHER IS PROVIDED "AS IS" AND "AS AVAILABLE" TO THE MAXIMUM EXTENT PERMITTED BY LAW.
 
@@ -95,9 +120,9 @@ WE DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, I
 
 We do not warrant that SyncWatcher will be uninterrupted, error-free, secure, or suitable for your particular workflow, hardware, filesystem, or backup needs.
 
-## 12. Backup Responsibility
+## 13. Backup Responsibility
 
-You acknowledge that file synchronization and backup operations can overwrite, delete, duplicate, or fail to copy files if configured incorrectly, interrupted, or affected by hardware, operating system, filesystem, or user error.
+You acknowledge that file synchronization and backup operations can overwrite, delete, duplicate, or fail to copy files if configured incorrectly, interrupted, or affected by hardware, operating system, filesystem, sandbox permissions, or user error.
 
 You are solely responsible for:
 
@@ -105,33 +130,37 @@ You are solely responsible for:
 - maintaining independent backups of important data; and
 - confirming that SyncWatcher behaves as expected in your environment.
 
-## 13. Limitation of Liability
+## 14. Limitation of Liability
 
 To the maximum extent permitted by law, StudioJin and its affiliates, licensors, and suppliers will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for any loss of profits, revenue, goodwill, data, or business interruption, arising out of or related to SyncWatcher or these Terms.
 
-To the maximum extent permitted by law, our total aggregate liability arising out of or related to SyncWatcher or these Terms will not exceed the amount you paid for the relevant paid license in the 12 months before the event giving rise to the claim, or KRW 50,000 if you did not pay anything.
+To the maximum extent permitted by law, our total aggregate liability arising out of or related to SyncWatcher or these Terms will not exceed the amount you paid for the relevant optional support purchase in the 12 months before the event giving rise to the claim, or KRW 50,000 if you did not pay anything.
 
 Some jurisdictions do not allow certain limitations, so some of the above may not apply to you.
 
-## 14. Termination
+## 15. Termination
 
 You may stop using SyncWatcher at any time.
 
-We may suspend or terminate access to paid license functionality if you materially breach these Terms, use the App unlawfully, or engage in fraud or abuse.
+We may suspend or terminate access to optional support-related status if we reasonably believe a purchase or license state was obtained fraudulently, used abusively, or used in violation of these Terms.
 
 Sections that by their nature should survive termination will survive, including sections relating to ownership, disclaimers, liability limits, payments already due, and dispute-related terms.
 
-## 15. Governing Law
+## 16. Governing Law
 
 These Terms are governed by the laws of the Republic of Korea, excluding its conflict of laws principles, unless otherwise required by applicable consumer protection law.
 
 Any dispute arising out of or relating to SyncWatcher or these Terms will be submitted to the courts of the Republic of Korea, and the parties consent to the jurisdiction and venue of those courts.
 
-## 16. Changes to These Terms
+## 17. Apple Standard EULA
+
+When SyncWatcher is distributed through the Apple App Store, Apple's standard end-user license agreement may also apply as required by Apple platform rules.
+
+## 18. Changes to These Terms
 
 We may update these Terms from time to time. If we do, we will update the "Last updated" date and publish the revised version.
 
-## 17. Contact
+## 19. Contact
 
 For questions about these Terms or SyncWatcher purchases, contact StudioJin through:
 

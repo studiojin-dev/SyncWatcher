@@ -13,6 +13,7 @@ import type { SyncTask } from '../../hooks/useSyncTasks';
 import { useSyncTaskStatusStore, type TaskStatus } from '../../hooks/useSyncTaskStatus';
 import { toRuntimeTask } from '../../types/runtime';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
+import { capturePathAccess } from '../../utils/pathAccess';
 import { isUuidSourceResolutionError } from '../../utils/syncTaskSourceRecommendations';
 import type {
   ConflictReviewQueueChangedEvent,
@@ -66,6 +67,10 @@ interface UseSyncTaskActionsOptions {
   showToast: ShowToastFn;
   t: TranslateFn;
   onRequestSourceRecommendationReview?: (taskId: string) => void;
+}
+
+interface DistributionInfo {
+  channel: 'github' | 'app_store';
 }
 
 export function useSyncTaskActions({
@@ -267,6 +272,7 @@ export function useSyncTaskActions({
             'disk'
           : undefined;
       const selectedMountedUuidOption = form.selectedUuidOption?.mounted ?? false;
+      const selectedSourceMountPoint = form.selectedUuidOption?.mountPoint ?? null;
       const isEditingExistingUuidSource = Boolean(
         editingTask &&
           (editingTask.sourceType === 'uuid' || parsedEditingSourceToken),
@@ -317,10 +323,99 @@ export function useSyncTaskActions({
             );
       }
 
+      const distribution = await invoke<DistributionInfo>('get_distribution_info');
+      const isAppStoreBuild = distribution.channel === 'app_store';
+      const ensureBookmarkAccess = async (
+        path: string,
+        existingBookmark: string | null | undefined,
+        label: string,
+      ): Promise<{ path: string; bookmark: string } | null> => {
+        const trimmedBookmark = existingBookmark?.trim() ?? '';
+        if (!isAppStoreBuild) {
+          return { path, bookmark: trimmedBookmark };
+        }
+        if (trimmedBookmark) {
+          return { path, bookmark: trimmedBookmark };
+        }
+        if (!path.trim()) {
+          showToast(`${label}: Path is required.`, 'warning');
+          return null;
+        }
+
+        try {
+          const captured = await capturePathAccess(path);
+          const bookmark = captured.bookmark?.trim() ?? '';
+          if (!bookmark) {
+            showToast(
+              `${label}: ${t('syncTasks.selectVolume', {
+                defaultValue: 'Select the folder again with Browse to grant access.',
+              })}`,
+              'warning',
+            );
+            return null;
+          }
+          return {
+            path: captured.path,
+            bookmark,
+          };
+        } catch (error) {
+          showToast(`${label}: ${getErrorMessage(error)}`, 'error');
+          return null;
+        }
+      };
+
+      let sourceBookmark = form.sourceBookmark ?? '';
+      if (form.sourceType === 'path') {
+        const capturedSource = await ensureBookmarkAccess(
+          finalSource,
+          form.sourceBookmark,
+          t('syncTasks.source'),
+        );
+        if (!capturedSource) {
+          return;
+        }
+        finalSource = capturedSource.path;
+        sourceBookmark = capturedSource.bookmark;
+      } else if (selectedMountedUuidOption && selectedSourceMountPoint) {
+        const capturedSource = await ensureBookmarkAccess(
+          selectedSourceMountPoint,
+          form.sourceBookmark,
+          t('syncTasks.source'),
+        );
+        if (!capturedSource) {
+          return;
+        }
+        sourceBookmark = capturedSource.bookmark;
+      } else if (isAppStoreBuild && !(form.sourceBookmark ?? '').trim()) {
+        showToast(
+          t('syncTasks.volumeNotMounted', {
+            defaultValue:
+              'Mount the source volume and select it again to grant folder access.',
+          }),
+          'warning',
+        );
+        return;
+      }
+
+      let targetPath = form.targetPath || (formData.get('target') as string);
+      let targetBookmark = form.targetBookmark ?? '';
+      const capturedTarget = await ensureBookmarkAccess(
+        targetPath,
+        form.targetBookmark,
+        t('syncTasks.target'),
+      );
+      if (!capturedTarget) {
+        return;
+      }
+      targetPath = capturedTarget.path;
+      targetBookmark = capturedTarget.bookmark;
+
       const taskData = {
         name: formData.get('name') as string,
         source: finalSource,
-        target: form.targetPath || (formData.get('target') as string),
+        sourceBookmark,
+        target: targetPath,
+        targetBookmark,
         checksumMode: formData.get('checksumMode') === 'on',
         exclusionSets: form.selectedSets,
         watchMode: form.watchMode,

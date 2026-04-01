@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { formatBytes, type DataUnitSystem } from '../../utils/formatBytes';
+import { capturePathAccess } from '../../utils/pathAccess';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
 import type { SyncTask } from '../../hooks/useSyncTasks';
 import {
@@ -24,7 +25,7 @@ import {
   type UuidTokenType,
   type UuidSourceOption,
 } from '../syncTaskUuid';
-import type { ShowToastFn, TranslateFn, VolumeInfo } from './helpers';
+import { getErrorMessage, type ShowToastFn, type TranslateFn, type VolumeInfo } from './helpers';
 
 interface UseSyncTaskFormControllerOptions {
   editingTask: SyncTask | null;
@@ -39,8 +40,12 @@ export interface SyncTaskFormController {
   setSelectedSets: Dispatch<SetStateAction<string[]>>;
   sourcePath: string;
   setSourcePath: Dispatch<SetStateAction<string>>;
+  sourceBookmark: string | null;
+  setSourceBookmark: Dispatch<SetStateAction<string | null>>;
   targetPath: string;
   setTargetPath: Dispatch<SetStateAction<string>>;
+  targetBookmark: string | null;
+  setTargetBookmark: Dispatch<SetStateAction<string | null>>;
   watchMode: boolean;
   handleWatchModeChange: (checked: boolean) => void;
   autoUnmount: boolean;
@@ -71,7 +76,9 @@ export function useSyncTaskFormController({
 }: UseSyncTaskFormControllerOptions): SyncTaskFormController {
   const [selectedSets, setSelectedSets] = useState<string[]>([]);
   const [sourcePath, setSourcePath] = useState('');
+  const [sourceBookmark, setSourceBookmark] = useState<string | null>(null);
   const [targetPath, setTargetPath] = useState('');
+  const [targetBookmark, setTargetBookmark] = useState<string | null>(null);
   const [watchMode, setWatchMode] = useState(false);
   const [autoUnmount, setAutoUnmount] = useState(false);
   const [sourceType, setSourceType] = useState<'path' | 'uuid'>('path');
@@ -185,7 +192,9 @@ export function useSyncTaskFormController({
 
       setSelectedSets(editingTask.exclusionSets || []);
       setSourcePath(editingTask.source || '');
+      setSourceBookmark(editingTask.sourceBookmark ?? null);
       setTargetPath(editingTask.target || '');
+      setTargetBookmark(editingTask.targetBookmark ?? null);
       setWatchMode(editingTask.watchMode || false);
       setAutoUnmount(shouldEnableAutoUnmount(editingTask));
       setSourceType(resolvedSourceType);
@@ -208,7 +217,9 @@ export function useSyncTaskFormController({
 
     setSelectedSets([]);
     setSourcePath('');
+    setSourceBookmark(null);
     setTargetPath('');
+    setTargetBookmark(null);
     setWatchMode(false);
     setAutoUnmount(false);
     setSourceType('path');
@@ -258,37 +269,56 @@ export function useSyncTaskFormController({
     setSourceType(value);
     if (value === 'path') {
       setAutoUnmount(false);
+      return;
     }
+    setSourceBookmark(null);
   }, []);
 
   const handleUuidOptionChange = useCallback(
     (value: string | null) => {
-      if (!value) {
-        setSourceUuid('');
-        setSourceUuidType('');
-        setSourceTokenType('');
-        return;
-      }
+      const updateSelection = async () => {
+        if (!value) {
+          setSourceUuid('');
+          setSourceUuidType('');
+          setSourceTokenType('');
+          setSourceBookmark(null);
+          return;
+        }
 
-      const parsedOption = parseUuidOptionValue(value);
-      if (!parsedOption) {
-        setSourceUuid('');
-        setSourceUuidType('');
-        setSourceTokenType('');
-        return;
-      }
+        const parsedOption = parseUuidOptionValue(value);
+        if (!parsedOption) {
+          setSourceUuid('');
+          setSourceUuidType('');
+          setSourceTokenType('');
+          setSourceBookmark(null);
+          return;
+        }
 
-      setSourceUuid(parsedOption.uuid);
-      setSourceUuidType(
-        parsedOption.uuidType === 'legacy' ? '' : parsedOption.uuidType,
-      );
-      setSourceTokenType(parsedOption.uuidType);
-      const option = uuidSourceOptions.find((candidate) => candidate.value === value);
-      if (option?.mounted && option.mountPoint) {
-        setSourcePath(option.mountPoint);
-      }
+        setSourceUuid(parsedOption.uuid);
+        setSourceUuidType(
+          parsedOption.uuidType === 'legacy' ? '' : parsedOption.uuidType,
+        );
+        setSourceTokenType(parsedOption.uuidType);
+        const option = uuidSourceOptions.find((candidate) => candidate.value === value);
+        if (option?.mounted && option.mountPoint) {
+          setSourcePath(option.mountPoint);
+          try {
+            const captured = await capturePathAccess(option.mountPoint);
+            setSourceBookmark(captured.bookmark ?? null);
+          } catch (error) {
+            console.error('Failed to capture source volume access:', error);
+            setSourceBookmark(null);
+            showToast(getErrorMessage(error), 'error');
+          }
+          return;
+        }
+
+        setSourceBookmark(null);
+      };
+
+      void updateSelection();
     },
-    [uuidSourceOptions],
+    [showToast, uuidSourceOptions],
   );
 
   const handleWatchModeChange = useCallback((checked: boolean) => {
@@ -311,10 +341,13 @@ export function useSyncTaskFormController({
         });
 
         if (selected && typeof selected === 'string') {
+          const captured = await capturePathAccess(selected);
           if (type === 'source') {
-            setSourcePath(selected);
+            setSourcePath(captured.path);
+            setSourceBookmark(captured.bookmark ?? null);
           } else {
-            setTargetPath(selected);
+            setTargetPath(captured.path);
+            setTargetBookmark(captured.bookmark ?? null);
           }
         }
       } catch (error) {
@@ -387,8 +420,12 @@ export function useSyncTaskFormController({
     setSelectedSets,
     sourcePath,
     setSourcePath,
+    sourceBookmark,
+    setSourceBookmark,
     targetPath,
     setTargetPath,
+    targetBookmark,
+    setTargetBookmark,
     watchMode,
     handleWatchModeChange,
     autoUnmount,

@@ -3,16 +3,19 @@ import { useTranslation } from 'react-i18next';
 import { IconLicense, IconBrandGithub } from '@tabler/icons-react';
 import { LicenseCard, LicenseData } from '../components/ui/LicenseCard';
 import { useAppVersion } from '../hooks/useAppVersion';
+import { useDistribution } from '../hooks/useDistribution';
 import { useSettings } from '../hooks/useSettings';
-import { githubRepositoryUrl } from '../config/appLinks';
+import { appStoreListingUrl, githubRepositoryUrl, privacyPolicyUrl, termsOfServiceUrl } from '../config/appLinks';
 
 function AboutView() {
   const { t } = useTranslation();
   const [showLicenses, setShowLicenses] = useState(false);
   const appVersion = useAppVersion();
+  const { info: distribution } = useDistribution();
   const { settings } = useSettings();
   const [licenseData, setLicenseData] = useState<LicenseData[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
+  const storeUrl = distribution.appStoreUrl || appStoreListingUrl;
 
   const handleViewLicenses = async () => {
     try {
@@ -75,15 +78,43 @@ function AboutView() {
               </span>
             </div>
 
-            <a
-              href={githubRepositoryUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 flex items-center justify-center gap-2 w-full py-3 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
-            >
-              <IconBrandGithub size={20} />
-              <span>{t('about.viewOnGithub')}</span>
-            </a>
+            <div className="mt-4 grid gap-3">
+              <a
+                href={githubRepositoryUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+              >
+                <IconBrandGithub size={20} />
+                <span>{t('about.viewOnGithub')}</span>
+              </a>
+              {distribution.channel === 'app_store' && storeUrl ? (
+                <a
+                  href={storeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+                >
+                  <span>{t('about.openAppStore')}</span>
+                </a>
+              ) : null}
+              <a
+                href={termsOfServiceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+              >
+                <span>{t('settings.termsLink')}</span>
+              </a>
+              <a
+                href={privacyPolicyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--bg-secondary)] border-3 border-[var(--border-main)] font-bold hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0_0_black] transition-all"
+              >
+                <span>{t('settings.privacyLink')}</span>
+              </a>
+            </div>
           </div>
         </div>
 

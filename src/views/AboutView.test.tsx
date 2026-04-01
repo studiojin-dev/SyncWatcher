@@ -16,6 +16,15 @@ vi.mock('../hooks/useSettings', () => ({
   }),
 }));
 
+vi.mock('../hooks/useDistribution', () => ({
+  useDistribution: () => ({
+    info: {
+      channel: 'github',
+      appStoreUrl: null,
+    },
+  }),
+}));
+
 const mockGetVersion = vi.mocked(getVersion);
 
 // Mock i18n

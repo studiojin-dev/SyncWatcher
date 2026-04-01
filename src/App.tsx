@@ -5,6 +5,7 @@ import { ask, message } from '@tauri-apps/plugin-dialog';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppShell from './components/layout/AppShell';
+import { DistributionProvider, useDistribution } from './context/DistributionContext';
 import { useSettings } from './hooks/useSettings';
 import { useSyncTaskStatusStore } from './hooks/useSyncTaskStatus';
 import { SettingsProvider } from './context/SettingsContext';
@@ -36,6 +37,7 @@ const AboutView = lazy(() => import('./views/AboutView'));
 
 const LEGACY_BACKGROUND_INTRO_STORAGE_KEY = 'syncwatcher_bg_intro_shown';
 const FIRST_RUN_INTRO_STORAGE_KEY = 'syncwatcher_first_run_intro_seen';
+const APP_STORE_IMPORT_PROMPT_STORAGE_KEY = 'syncwatcher_app_store_legacy_import_prompted';
 type CloseIntent = 'window-close' | 'cmd-quit' | 'tray-quit';
 
 function getCurrentWindowLabel(): string {
@@ -52,6 +54,7 @@ function getCurrentWindowLabel(): string {
  */
 function AppContent() {
   const { t } = useTranslation();
+  const { info: distribution, loaded: distributionLoaded, reload: reloadDistribution } = useDistribution();
   const [activeTab, setActiveTab] = useState('sync-tasks');
   const [manualUpdateCheckNonce, setManualUpdateCheckNonce] = useState(0);
   const {
@@ -76,7 +79,8 @@ function AppContent() {
   const activeCloseIntentRef = useRef<CloseIntent | null>(null);
   const pendingCloseIntentRef = useRef<CloseIntent | null>(null);
   const recentCmdQAtRef = useRef(0);
-  const didRunStartupLicenseValidationRef = useRef(false);
+  const didRunStartupSupporterRefreshRef = useRef(false);
+  const didPromptLegacyImportRef = useRef(false);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
   const setTaskLastLog = useCallback((
     taskId: string,
@@ -102,36 +106,81 @@ function AppContent() {
     setActiveTab('sync-tasks');
   }, []);
 
-  // 앱 시작 시 라이선스 검증
+  // 앱 시작 시 supporter 상태 갱신
   useEffect(() => {
-    if (!settingsLoaded || didRunStartupLicenseValidationRef.current) {
+    if (!settingsLoaded || !distributionLoaded || didRunStartupSupporterRefreshRef.current) {
       return;
     }
 
-    didRunStartupLicenseValidationRef.current = true;
-    if (!settings.isRegistered) {
-      return;
-    }
+    didRunStartupSupporterRefreshRef.current = true;
 
     let cancelled = false;
 
-    const validateLicense = async () => {
+    const refreshSupporterStatus = async () => {
       try {
-        const result = await invoke<{ valid: boolean; error: string | null }>('validate_license_key');
-        if (!cancelled && result?.valid === false) {
-          updateSettings({ isRegistered: false });
+        const result = await invoke<{ isRegistered: boolean }>('refresh_supporter_status');
+        if (!cancelled) {
+          updateSettings({ isRegistered: result.isRegistered });
         }
       } catch (err) {
-        console.error('[App] License validation failed:', err);
+        console.error('[App] Supporter status refresh failed:', err);
       }
     };
 
-    void validateLicense();
+    void refreshSupporterStatus();
 
     return () => {
       cancelled = true;
     };
-  }, [settings.isRegistered, settingsLoaded, updateSettings]);
+  }, [distributionLoaded, settingsLoaded, updateSettings]);
+
+  useEffect(() => {
+    if (
+      !startupComplete
+      || !distributionLoaded
+      || didPromptLegacyImportRef.current
+      || distribution.channel !== 'app_store'
+      || !distribution.legacyImportAvailable
+    ) {
+      return;
+    }
+
+    didPromptLegacyImportRef.current = true;
+
+    try {
+      if (localStorage.getItem(APP_STORE_IMPORT_PROMPT_STORAGE_KEY) === '1') {
+        return;
+      }
+      localStorage.setItem(APP_STORE_IMPORT_PROMPT_STORAGE_KEY, '1');
+    } catch (error) {
+      console.error('Failed to read legacy import prompt state:', error);
+    }
+
+    const promptImport = async () => {
+      try {
+        const confirmed = await ask(t('app.importLegacyPromptMessage'), {
+          title: t('app.importLegacyPromptTitle'),
+          kind: 'info',
+        });
+        if (!confirmed) {
+          return;
+        }
+
+        const result = await invoke<{ imported: boolean; message?: string | null }>('import_legacy_channel_data');
+        await reloadDistribution();
+        if (result?.message) {
+          await message(result.message, {
+            title: t('app.importLegacyPromptTitle'),
+            kind: result.imported ? 'info' : 'warning',
+          });
+        }
+      } catch (error) {
+        console.error('Failed to import legacy channel data:', error);
+      }
+    };
+
+    void promptImport();
+  }, [distribution, distributionLoaded, reloadDistribution, startupComplete, t]);
 
   const markFirstRunIntroSeen = useCallback(() => {
     try {
@@ -711,26 +760,30 @@ function App() {
   if (windowLabel === 'conflict-review') {
     return (
       <ErrorBoundary>
-        <SettingsProvider>
-          <ToastProvider>
-            <ConflictReviewWindow />
-          </ToastProvider>
-        </SettingsProvider>
+        <DistributionProvider>
+          <SettingsProvider>
+            <ToastProvider>
+              <ConflictReviewWindow />
+            </ToastProvider>
+          </SettingsProvider>
+        </DistributionProvider>
       </ErrorBoundary>
     );
   }
 
   return (
     <ErrorBoundary>
-      <SettingsProvider>
-        <SyncTasksProvider>
-          <ExclusionSetsProvider>
-            <ToastProvider>
-              <AppContent />
-            </ToastProvider>
-          </ExclusionSetsProvider>
-        </SyncTasksProvider>
-      </SettingsProvider>
+      <DistributionProvider>
+        <SettingsProvider>
+          <SyncTasksProvider>
+            <ExclusionSetsProvider>
+              <ToastProvider>
+                <AppContent />
+              </ToastProvider>
+            </ExclusionSetsProvider>
+          </SyncTasksProvider>
+        </SettingsProvider>
+      </DistributionProvider>
     </ErrorBoundary>
   );
 }

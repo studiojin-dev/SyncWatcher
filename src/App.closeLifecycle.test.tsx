@@ -102,6 +102,23 @@ vi.mock('./context/SettingsContext', () => ({
   SettingsProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
+vi.mock('./context/DistributionContext', () => ({
+  DistributionProvider: ({ children }: { children: ReactNode }) => children,
+  useDistribution: () => ({
+    info: {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    },
+    loaded: true,
+    reload: vi.fn(),
+  }),
+}));
+
 vi.mock('./context/SyncTasksContext', () => ({
   useSyncTasksContext: () => ({
     tasks: runtimeState.tasks,
@@ -256,6 +273,11 @@ describe('App close lifecycle', () => {
     });
 
     invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'refresh_supporter_status') {
+        return {
+          isRegistered: runtimeState.isRegistered,
+        };
+      }
       if (command === 'runtime_get_state') {
         return {
           watchingTasks: [],
@@ -277,24 +299,22 @@ describe('App close lifecycle', () => {
     updateSettingsMock.mockReset();
   });
 
-  it('skips startup license validation when stored status is unregistered', async () => {
+  it('refreshes supporter status on startup', async () => {
     render(<App />);
 
     await waitFor(() => {
       expect(screen.getByText('sync-tasks')).toBeInTheDocument();
     });
 
-    expect(
-      invokeMock.mock.calls.some((call) => call[0] === 'validate_license_key'),
-    ).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
   });
 
-  it('keeps registered state while startup validation is pending or succeeds', async () => {
+  it('keeps registered state while startup supporter refresh is pending or succeeds', async () => {
     runtimeState.isRegistered = true;
-    const deferred = createDeferred<{ valid: boolean; error: string | null }>();
+    const deferred = createDeferred<{ isRegistered: boolean }>();
 
     invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'validate_license_key') {
+      if (command === 'refresh_supporter_status') {
         return deferred.promise;
       }
       if (command === 'runtime_get_state') {
@@ -316,23 +336,23 @@ describe('App close lifecycle', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('validate_license_key');
+      expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
     });
 
     expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
 
-    deferred.resolve({ valid: true, error: null });
+    deferred.resolve({ isRegistered: true });
 
     await waitFor(() => {
       expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
     });
   });
 
-  it('keeps registered state when startup validation throws', async () => {
+  it('keeps registered state when startup supporter refresh throws', async () => {
     runtimeState.isRegistered = true;
 
     invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'validate_license_key') {
+      if (command === 'refresh_supporter_status') {
         throw new Error('network down');
       }
       if (command === 'runtime_get_state') {
@@ -356,11 +376,11 @@ describe('App close lifecycle', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('validate_license_key');
+      expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
     });
     await waitFor(() => {
       expect(consoleError).toHaveBeenCalledWith(
-        '[App] License validation failed:',
+        '[App] Supporter status refresh failed:',
         expect.any(Error),
       );
     });
@@ -369,12 +389,12 @@ describe('App close lifecycle', () => {
     consoleError.mockRestore();
   });
 
-  it('marks the app unregistered when startup validation returns invalid', async () => {
+  it('marks the app unregistered when startup supporter refresh returns inactive', async () => {
     runtimeState.isRegistered = true;
 
     invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'validate_license_key') {
-        return { valid: false, error: 'License invalid' };
+      if (command === 'refresh_supporter_status') {
+        return { isRegistered: false };
       }
       if (command === 'runtime_get_state') {
         return {

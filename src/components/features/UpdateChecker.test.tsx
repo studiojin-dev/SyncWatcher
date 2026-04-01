@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import UpdateChecker from './UpdateChecker';
 
 function createDeferred<T>() {
@@ -20,6 +21,10 @@ const { checkMock, relaunchMock, showToastMock } = vi.hoisted(() => ({
   showToastMock: vi.fn(),
 }));
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}));
+
 vi.mock('@tauri-apps/plugin-updater', () => ({
   check: checkMock,
 }));
@@ -31,6 +36,15 @@ vi.mock('@tauri-apps/plugin-process', () => ({
 vi.mock('../ui/Toast', () => ({
   useToast: () => ({
     showToast: showToastMock,
+  }),
+}));
+
+vi.mock('../../hooks/useDistribution', () => ({
+  useDistribution: () => ({
+    info: {
+      channel: 'github',
+      appStoreUrl: null,
+    },
   }),
 }));
 
@@ -68,10 +82,13 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('UpdateChecker', () => {
+  const invokeMock = vi.mocked(invoke);
+
   beforeEach(() => {
     checkMock.mockReset();
     relaunchMock.mockReset();
     showToastMock.mockReset();
+    invokeMock.mockReset();
   });
 
   it('checks once automatically when enabled and stays hidden when no update exists', async () => {

@@ -41,6 +41,14 @@ vi.mock('../../hooks/useSettings', () => ({
   }),
 }));
 
+vi.mock('../../hooks/useDistribution', () => ({
+  useDistribution: () => ({
+    info: {
+      channel: 'github',
+    },
+  }),
+}));
+
 describe('LicenseActivation', () => {
   beforeEach(() => {
     invokeMock.mockReset();

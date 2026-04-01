@@ -9,12 +9,13 @@ use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt as _;
 use tempfile::NamedTempFile;
 
+use crate::distribution;
 use crate::input_validation;
-use crate::license_validation;
 use crate::recurring::{
     normalize_recurring_schedules, validate_guided_preset_compatible_schedules,
     validate_strict_recurring_schedule_ids, RecurringScheduleRecord,
 };
+use crate::supporter;
 use crate::DataUnitSystem;
 
 pub const APP_IDENTIFIER: &str = "dev.studiojin.syncwatcher";
@@ -85,6 +86,8 @@ pub struct StoredSettings {
     pub notifications: bool,
     #[serde(default)]
     pub state_location: String,
+    #[serde(default)]
+    pub state_location_bookmark: Option<String>,
     #[serde(default = "default_max_log_lines")]
     pub max_log_lines: u32,
     #[serde(default)]
@@ -101,6 +104,7 @@ pub struct SettingsSnapshot {
     pub data_unit_system: DataUnitSystem,
     pub notifications: bool,
     pub state_location: String,
+    pub state_location_bookmark: Option<String>,
     pub max_log_lines: u32,
     pub close_action: CloseAction,
     pub is_registered: bool,
@@ -116,6 +120,7 @@ pub struct SettingsPatch {
     pub data_unit_system: Option<DataUnitSystem>,
     pub notifications: Option<bool>,
     pub state_location: Option<String>,
+    pub state_location_bookmark: Option<String>,
     pub max_log_lines: Option<u32>,
     pub close_action: Option<CloseAction>,
     pub mcp_enabled: Option<bool>,
@@ -149,6 +154,10 @@ impl SettingsPatch {
         if let Some(state_location) = self.state_location.clone() {
             settings.state_location = state_location;
         }
+        if self.state_location_bookmark.is_some() {
+            settings.state_location_bookmark =
+                normalize_optional_string(self.state_location_bookmark.clone());
+        }
         if let Some(max_log_lines) = self.max_log_lines {
             settings.max_log_lines = max_log_lines;
         }
@@ -169,6 +178,7 @@ impl From<McpSettingsPatch> for SettingsPatch {
             data_unit_system: value.data_unit_system,
             notifications: value.notifications,
             state_location: None,
+            state_location_bookmark: None,
             max_log_lines: None,
             close_action: value.close_action,
             mcp_enabled: value.mcp_enabled,
@@ -182,7 +192,11 @@ pub struct SyncTaskRecord {
     pub id: String,
     pub name: String,
     pub source: String,
+    #[serde(default)]
+    pub source_bookmark: Option<String>,
     pub target: String,
+    #[serde(default)]
+    pub target_bookmark: Option<String>,
     #[serde(default)]
     pub checksum_mode: bool,
     #[serde(default = "default_verify_after_copy")]
@@ -237,7 +251,11 @@ pub struct SourceIdentitySnapshot {
 pub struct CreateSyncTaskRequest {
     pub name: String,
     pub source: String,
+    #[serde(default)]
+    pub source_bookmark: Option<String>,
     pub target: String,
+    #[serde(default)]
+    pub target_bookmark: Option<String>,
     #[serde(default)]
     pub checksum_mode: bool,
     #[serde(default = "default_verify_after_copy")]
@@ -268,7 +286,9 @@ pub struct UpdateSyncTaskRequest {
     pub task_id: String,
     pub name: Option<String>,
     pub source: Option<String>,
+    pub source_bookmark: Option<String>,
     pub target: Option<String>,
+    pub target_bookmark: Option<String>,
     pub checksum_mode: Option<bool>,
     pub verify_after_copy: Option<bool>,
     pub exclusion_sets: Option<Vec<String>>,
@@ -592,6 +612,10 @@ pub fn app_support_dir_for_app(app: &tauri::AppHandle) -> Result<PathBuf, Config
 }
 
 pub fn default_app_support_dir() -> Result<PathBuf, ConfigStoreError> {
+    app_support_dir_for_identifier(&distribution::configured_app_identifier())
+}
+
+pub fn app_support_dir_for_identifier(identifier: &str) -> Result<PathBuf, ConfigStoreError> {
     if let Some(override_dir) = override_app_support_dir() {
         return Ok(override_dir);
     }
@@ -604,7 +628,7 @@ pub fn default_app_support_dir() -> Result<PathBuf, ConfigStoreError> {
     Ok(PathBuf::from(home)
         .join("Library")
         .join("Application Support")
-        .join(APP_IDENTIFIER))
+        .join(identifier))
 }
 
 pub fn config_dir_for_app(app: &tauri::AppHandle) -> Result<PathBuf, ConfigStoreError> {
@@ -613,6 +637,10 @@ pub fn config_dir_for_app(app: &tauri::AppHandle) -> Result<PathBuf, ConfigStore
 
 pub fn default_config_dir() -> Result<PathBuf, ConfigStoreError> {
     Ok(default_app_support_dir()?.join("config"))
+}
+
+pub fn config_dir_for_identifier(identifier: &str) -> Result<PathBuf, ConfigStoreError> {
+    Ok(app_support_dir_for_identifier(identifier)?.join("config"))
 }
 
 pub fn control_plane_socket_path_for_app(
@@ -633,7 +661,7 @@ pub async fn settings_snapshot_from_store(
     app: &tauri::AppHandle,
     settings: StoredSettings,
 ) -> Result<SettingsSnapshot, ConfigStoreError> {
-    let license = license_validation::get_license_status(app.clone())
+    let supporter_status = supporter::get_supporter_status_for_app(app.clone())
         .await
         .map_err(|message| ConfigStoreError::IoError {
             message,
@@ -645,9 +673,10 @@ pub async fn settings_snapshot_from_store(
         data_unit_system: settings.data_unit_system,
         notifications: settings.notifications,
         state_location: settings.state_location,
+        state_location_bookmark: settings.state_location_bookmark,
         max_log_lines: settings.max_log_lines,
         close_action: settings.close_action,
-        is_registered: license.is_registered,
+        is_registered: supporter_status.is_registered,
         launch_at_login: launch_at_login_status_or_default(
             app.autolaunch()
                 .is_enabled()
@@ -682,6 +711,9 @@ pub fn apply_settings_patch(mut settings: StoredSettings, patch: SettingsPatch) 
     }
     if let Some(state_location) = patch.state_location {
         settings.state_location = state_location;
+    }
+    if patch.state_location_bookmark.is_some() {
+        settings.state_location_bookmark = normalize_optional_string(patch.state_location_bookmark);
     }
     if let Some(max_log_lines) = patch.max_log_lines {
         settings.max_log_lines = max_log_lines;
@@ -749,7 +781,9 @@ pub fn build_sync_task_record(
         id,
         name: request.name,
         source: request.source,
+        source_bookmark: normalize_optional_string(request.source_bookmark),
         target: request.target,
+        target_bookmark: normalize_optional_string(request.target_bookmark),
         checksum_mode: request.checksum_mode,
         verify_after_copy: request.verify_after_copy,
         exclusion_sets: request.exclusion_sets,
@@ -780,6 +814,10 @@ pub fn apply_sync_task_update(
         .as_ref()
         .is_some_and(|value| value != &task.source)
         || update
+            .source_bookmark
+            .as_ref()
+            .is_some_and(|value| normalize_optional_string(Some(value.clone())) != task.source_bookmark)
+        || update
             .source_type
             .as_ref()
             .is_some_and(|value| Some(value.clone()) != task.source_type)
@@ -795,11 +833,23 @@ pub fn apply_sync_task_update(
             .source_sub_path
             .as_ref()
             .is_some_and(|value| Some(value.clone()) != task.source_sub_path);
+    let next_source_bookmark = if update.source_bookmark.is_some() {
+        normalize_optional_string(update.source_bookmark.clone())
+    } else {
+        task.source_bookmark.clone()
+    };
+    let next_target_bookmark = if update.target_bookmark.is_some() {
+        normalize_optional_string(update.target_bookmark.clone())
+    } else {
+        task.target_bookmark.clone()
+    };
     let mut next = SyncTaskRecord {
         id: task.id,
         name: update.name.clone().unwrap_or(task.name),
         source: update.source.clone().unwrap_or(task.source),
+        source_bookmark: next_source_bookmark,
         target: update.target.clone().unwrap_or(task.target),
+        target_bookmark: next_target_bookmark,
         checksum_mode: update.checksum_mode.unwrap_or(task.checksum_mode),
         verify_after_copy: update.verify_after_copy.unwrap_or(task.verify_after_copy),
         exclusion_sets: update.exclusion_sets.clone().unwrap_or(task.exclusion_sets),
@@ -864,6 +914,17 @@ fn default_language() -> String {
     "en".to_string()
 }
 
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
+}
+
 fn default_notifications() -> bool {
     true
 }
@@ -887,6 +948,7 @@ fn default_settings() -> StoredSettings {
         data_unit_system: DataUnitSystem::Binary,
         notifications: true,
         state_location: String::new(),
+        state_location_bookmark: None,
         max_log_lines: DEFAULT_MAX_LOG_LINES,
         close_action: CloseAction::Quit,
         mcp_enabled: false,
@@ -1327,6 +1389,8 @@ mod tests {
             name: "Task".to_string(),
             source: String::new(),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1488,6 +1552,8 @@ mod tests {
             name: "Task".to_string(),
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: vec![
@@ -1538,6 +1604,8 @@ mod tests {
             name: "Task".to_string(),
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1577,6 +1645,8 @@ mod tests {
                 name: "Task".to_string(),
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
+                source_bookmark: None,
+                target_bookmark: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -1609,6 +1679,8 @@ mod tests {
             name: "Task".to_string(),
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1650,6 +1722,8 @@ mod tests {
             name: "Task".to_string(),
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1691,6 +1765,8 @@ mod tests {
             name: "Task".to_string(),
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            target_bookmark: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),

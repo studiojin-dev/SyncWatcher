@@ -18,3 +18,9 @@ export const buyMeACoffeeUrl = readPublicUrl(
 
 export const githubRepositoryUrl = 'https://github.com/studiojin-dev/SyncWatcher';
 export const githubLatestReleaseUrl = `${githubRepositoryUrl}/releases/latest`;
+export const termsOfServiceUrl = `${githubRepositoryUrl}/blob/main/TERMS.md`;
+export const privacyPolicyUrl = `${githubRepositoryUrl}/blob/main/PRIVACY.md`;
+export const appStoreListingUrl = readPublicUrl(
+    import.meta.env.VITE_APP_STORE_URL,
+    '',
+);

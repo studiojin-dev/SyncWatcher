@@ -24,7 +24,9 @@
       "firstRunIntroSettingsHint": "この設定はあとで 設定 > 動作 から変更できます。",
       "firstRunIntroLater": "後で",
       "firstRunIntroEnable": "ログイン時に起動を有効化",
-      "loadingView": "ビューを読み込み中..."
+      "loadingView": "ビューを読み込み中...",
+      "importLegacyPromptTitle": "GitHub ビルド設定を取り込む",
+      "importLegacyPromptMessage": "以前の GitHub DMG の設定が見つかりました。設定、同期タスク、除外セットを Mac App Store ビルドに今すぐ取り込みますか？"
     },
     "nav": {
       "dashboard": "ボリューム",
@@ -325,6 +327,7 @@
       "sectionSystem": "システム",
       "sectionBehavior": "動作",
       "sectionLicense": "ライセンス支援",
+      "sectionLegal": "法務",
       "stateLocation": "状態保存先",
       "stateLocationPlaceholder": "既定: Tauri AppData",
       "maxLogLines": "最大ログ行数",
@@ -339,6 +342,8 @@
       "notifications": "通知",
       "deleteConfirmation": "削除確認",
       "verifyAfterCopy": "コピー後の検証",
+      "termsLink": "利用規約",
+      "privacyLink": "プライバシーポリシー",
       "saveSettings": "設定を保存",
       "resetDefaults": "初期設定に戻す"
     },
@@ -479,6 +484,7 @@
       "openSourceDescription": "SyncWatcher は複数のオープンソースライブラリを利用しています。ライセンス情報は下のボタンから確認できます。",
       "viewLicenses": "オープンソースライセンスを表示",
       "viewOnGithub": "GitHub で表示",
+      "openAppStore": "App Store で開く",
       "unregistered": "無料利用（個人・商用）",
       "registered": "ライセンス支援者",
       "thankYou": "開発者の命綱をありがとうございます！",
@@ -545,7 +551,10 @@
       "checkingAlready": "すでにアップデートを確認しています。",
       "checkFailed": "アップデートの確認に失敗しました。",
       "later": "後で",
-      "updateNow": "今すぐアップデート"
+      "updateNow": "今すぐアップデート",
+      "appStoreAvailable": "Mac App Store で v{{version}} を利用できます",
+      "appStoreDescription": "Mac App Store ビルドの SyncWatcher ではアプリ内から直接アップデートをインストールできません。App Store を開いて更新してください。",
+      "openAppStore": "App Store を開く"
     },
     "license": {
       "title": "ライセンスのアクティベーション",
@@ -562,7 +571,20 @@
       "remove": "ライセンスを解除",
       "removing": "解除中...",
       "removed": "ライセンスを解除しました。",
-      "removeFailed": "ライセンスを解除できませんでした。"
+      "removeFailed": "ライセンスを解除できませんでした。",
+      "appStoreTitle": "Lifetime Supporter",
+      "appStoreDescription": "開発支援のための任意の一回限りのアプリ内課金です。追加機能はアンロックされません。",
+      "appStoreSupportStatus": "Mac App Store での支援状態",
+      "appStorePurchase": "サポーターになる",
+      "appStorePurchasing": "購入処理中...",
+      "appStorePurchased": "SyncWatcher を支援していただきありがとうございます！",
+      "appStoreRestoreFailed": "復元できる App Store 購入が見つかりませんでした。",
+      "appStoreRestored": "App Store 購入を復元しました。",
+      "appStoreRestoring": "復元中...",
+      "appStorePurchaseFailed": "App Store 購入を完了できませんでした。",
+      "appStorePending": "App Store 購入はまだ承認待ちです。",
+      "appStoreSupporterActive": "App Store サポーター有効",
+      "restore": "購入を復元"
     }
   }
 }

@@ -10,6 +10,7 @@ export interface Settings {
     dataUnitSystem: DataUnitSystem;
     notifications: boolean;
     stateLocation: string;
+    stateLocationBookmark?: string | null;
     maxLogLines: number;
     closeAction: 'quit' | 'background';
     isRegistered: boolean;
@@ -23,6 +24,7 @@ export const DEFAULT_SETTINGS: Settings = {
     dataUnitSystem: 'binary',
     notifications: true,
     stateLocation: '',
+    stateLocationBookmark: null,
     maxLogLines: 10000,
     closeAction: 'quit',
     isRegistered: false,

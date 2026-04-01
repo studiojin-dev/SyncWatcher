@@ -1,5 +1,23 @@
 [
   {
+    "id": "ADR-20260401-0021-MAS",
+    "title": "App Store channel split with StoreKit supporter state and sandbox bookmarks",
+    "tags": [
+      "app-store",
+      "distribution",
+      "storekit",
+      "sandbox",
+      "bookmarks",
+      "updater",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-01",
+    "tldr": "Ship GitHub DMG and Mac App Store as separate channels, keep optional supporter purchases provider-specific, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.",
+    "path": "docs/adr/ADR-20260401-0021-MAS-app-store-channel-split-storekit-and-sandbox-bookmarks.md"
+  },
+  {
     "id": "ADR-20260328-0020-REC",
     "title": "In-process recurring schedule engine and file-backed history",
     "tags": [
