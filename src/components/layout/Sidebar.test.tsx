@@ -73,7 +73,7 @@ describe('Sidebar', () => {
     const purchaseLink = screen.getByRole('link', { name: 'Optional License Support' });
     expect(purchaseLink).toHaveAttribute(
       'href',
-      'https://studiojin.lemonsqueezy.com/checkout/buy/1301030',
+      'https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97',
     );
     expect(purchaseLink).toHaveAttribute('target', '_blank');
     expect(purchaseLink).toHaveAttribute('rel', 'noopener noreferrer');

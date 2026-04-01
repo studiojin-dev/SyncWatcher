@@ -74,23 +74,6 @@ Detailed walkthroughs:
 - **pnpm** 10+
 - **macOS** 11+
 
-### Development
-
-```bash
-export SYNCWATCHER_LEMON_SQUEEZY_STORE_ID=your_store_id
-export SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID=your_product_id
-# optional when you want to lock validation to a single variant
-export SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID=your_variant_id
-export VITE_LEMON_SQUEEZY_CHECKOUT_URL=https://studiojin.lemonsqueezy.com/checkout/buy/1301030
-
-pnpm install
-pnpm dev
-pnpm build
-pnpm tauri build
-# local signed/notarized macOS release helper
-./scripts/release/local-macos-release.sh
-```
-
 ### Install On macOS
 
 1. Download the latest macOS release from GitHub Releases.
@@ -141,8 +124,8 @@ This project is **Source-Available** software.
 The official app is free to use, including commercial and internal company use. Buying a license is optional and works as project support.
 
 ## Support
-
-- License support purchase: [Lemon Squeezy checkout](https://studiojin.lemonsqueezy.com/checkout/buy/1301030)
+https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97
+- License support purchase: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
 - Additional tip: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
 - Support email: [support@studiojin.dev](mailto:support@studiojin.dev)
 - Terms & Conditions: [TERMS.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.md)

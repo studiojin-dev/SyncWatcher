@@ -81,7 +81,7 @@ export SYNCWATCHER_LEMON_SQUEEZY_STORE_ID=your_store_id
 export SYNCWATCHER_LEMON_SQUEEZY_PRODUCT_ID=your_product_id
 # 특정 variant에만 검증을 고정하고 싶을 때만 사용
 export SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID=your_variant_id
-export VITE_LEMON_SQUEEZY_CHECKOUT_URL=https://studiojin.lemonsqueezy.com/checkout/buy/1301030
+export VITE_LEMON_SQUEEZY_CHECKOUT_URL=https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97
 
 pnpm install
 pnpm dev
@@ -142,7 +142,7 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 ## 후원
 
-- 라이선스 후원 구매: [Lemon Squeezy checkout](https://studiojin.lemonsqueezy.com/checkout/buy/1301030)
+- 라이선스 후원 구매: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
 - 추가 후원: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
 - 지원 이메일: [support@studiojin.dev](mailto:support@studiojin.dev)
 - 이용약관: [TERMS.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.md)

@@ -1,4 +1,4 @@
-const DEFAULT_LEMON_SQUEEZY_CHECKOUT_URL = 'https://studiojin.lemonsqueezy.com/checkout/buy/1301030';
+const DEFAULT_LEMON_SQUEEZY_CHECKOUT_URL = 'https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97';
 const DEFAULT_BUY_ME_A_COFFEE_URL = 'https://buymeacoffee.com/studiojin_dev';
 
 function readPublicUrl(value: string | undefined, fallback: string): string {
