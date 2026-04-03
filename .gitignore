@@ -19,6 +19,7 @@ src-tauri/Cargo.lock
 
 # Vite
 dist/
+dist-appstore/
 dist-ssr/
 *.local
 .vite/
