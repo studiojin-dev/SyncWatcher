@@ -22,6 +22,17 @@ pub enum PurchaseProvider {
     AppStore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelPolicy {
+    pub purchase_provider: PurchaseProvider,
+    pub can_self_update: bool,
+    pub supports_license_keys: bool,
+    pub supports_external_checkout: bool,
+    pub supports_storekit_purchase: bool,
+    pub supports_storekit_restore: bool,
+    pub requires_security_scoped_bookmarks: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DistributionInfo {
@@ -77,8 +88,7 @@ fn configured_env(name: &str) -> Option<String> {
 }
 
 pub fn configured_app_identifier() -> String {
-    configured_env(APP_IDENTIFIER_ENV)
-        .unwrap_or_else(|| DEFAULT_GITHUB_APP_IDENTIFIER.to_string())
+    configured_env(APP_IDENTIFIER_ENV).unwrap_or_else(|| DEFAULT_GITHUB_APP_IDENTIFIER.to_string())
 }
 
 pub fn configured_app_store_app_id() -> Option<String> {
@@ -86,8 +96,7 @@ pub fn configured_app_store_app_id() -> Option<String> {
 }
 
 pub fn configured_app_store_country() -> String {
-    configured_env(APP_STORE_COUNTRY_ENV)
-        .unwrap_or_else(|| DEFAULT_APP_STORE_COUNTRY.to_string())
+    configured_env(APP_STORE_COUNTRY_ENV).unwrap_or_else(|| DEFAULT_APP_STORE_COUNTRY.to_string())
 }
 
 pub fn app_store_url_for(app_id: &str, country: &str) -> String {
@@ -98,7 +107,19 @@ pub fn app_store_url_for(app_id: &str, country: &str) -> String {
     )
 }
 
+pub fn distribution_channel_for_identifier(identifier: &str) -> DistributionChannel {
+    if identifier.trim().ends_with(".appstore") {
+        DistributionChannel::AppStore
+    } else {
+        DistributionChannel::Github
+    }
+}
+
 pub fn detect_distribution_channel(app: Option<&AppHandle>) -> DistributionChannel {
+    if let Some(handle) = app {
+        return distribution_channel_for_identifier(handle.config().identifier.as_str());
+    }
+
     if let Some(configured) = configured_env(DISTRIBUTION_CHANNEL_ENV) {
         let normalized = configured.trim().to_ascii_lowercase();
         if normalized == "app_store" || normalized == "appstore" || normalized == "mas" {
@@ -109,29 +130,39 @@ pub fn detect_distribution_channel(app: Option<&AppHandle>) -> DistributionChann
         }
     }
 
-    let app_identifier = app
-        .map(|handle| handle.config().identifier.clone())
-        .unwrap_or_else(configured_app_identifier);
-
-    if app_identifier.ends_with(".appstore") {
-        DistributionChannel::AppStore
-    } else {
-        DistributionChannel::Github
-    }
+    distribution_channel_for_identifier(&configured_app_identifier())
 }
 
 pub fn purchase_provider_for(channel: DistributionChannel) -> PurchaseProvider {
+    channel_policy(channel).purchase_provider
+}
+
+pub fn channel_policy(channel: DistributionChannel) -> ChannelPolicy {
     match channel {
-        DistributionChannel::Github => PurchaseProvider::LemonSqueezy,
-        DistributionChannel::AppStore => PurchaseProvider::AppStore,
+        DistributionChannel::Github => ChannelPolicy {
+            purchase_provider: PurchaseProvider::LemonSqueezy,
+            can_self_update: true,
+            supports_license_keys: true,
+            supports_external_checkout: true,
+            supports_storekit_purchase: false,
+            supports_storekit_restore: false,
+            requires_security_scoped_bookmarks: false,
+        },
+        DistributionChannel::AppStore => ChannelPolicy {
+            purchase_provider: PurchaseProvider::AppStore,
+            can_self_update: false,
+            supports_license_keys: false,
+            supports_external_checkout: false,
+            supports_storekit_purchase: true,
+            supports_storekit_restore: true,
+            requires_security_scoped_bookmarks: true,
+        },
     }
 }
 
-pub fn distribution_info(
-    app: &AppHandle,
-    legacy_import_available: bool,
-) -> DistributionInfo {
+pub fn distribution_info(app: &AppHandle, legacy_import_available: bool) -> DistributionInfo {
     let channel = detect_distribution_channel(Some(app));
+    let policy = channel_policy(channel);
     let app_store_app_id = configured_app_store_app_id();
     let app_store_country = configured_app_store_country();
     let app_store_url = app_store_app_id
@@ -140,8 +171,8 @@ pub fn distribution_info(
 
     DistributionInfo {
         channel,
-        purchase_provider: purchase_provider_for(channel),
-        can_self_update: channel == DistributionChannel::Github,
+        purchase_provider: policy.purchase_provider,
+        can_self_update: policy.can_self_update,
         app_store_app_id,
         app_store_country,
         app_store_url,
@@ -149,20 +180,22 @@ pub fn distribution_info(
     }
 }
 
-pub async fn check_app_store_update(
-    app: &AppHandle,
-) -> AppStoreUpdateCheckResult {
+pub async fn check_app_store_update(app: &AppHandle) -> AppStoreUpdateCheckResult {
     let current_version = app.package_info().version.to_string();
     let channel = detect_distribution_channel(Some(app));
+    let policy = channel_policy(channel);
 
-    if channel != DistributionChannel::AppStore {
+    if policy.can_self_update {
         return AppStoreUpdateCheckResult {
             available: false,
             current_version,
             latest_version: None,
             store_url: None,
             manual_only: false,
-            error: Some("App Store update checks are only available for the Mac App Store build.".to_string()),
+            error: Some(
+                "App Store update checks are only available for the Mac App Store build."
+                    .to_string(),
+            ),
         };
     }
 
@@ -223,7 +256,10 @@ pub async fn check_app_store_update(
         };
     };
 
-    let latest_version = result.version.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+    let latest_version = result
+        .version
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
     let store_url = result
         .track_view_url
         .filter(|value| !value.trim().is_empty())
@@ -271,7 +307,10 @@ fn compare_version_strings(left: &str, right: &str) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
-    use super::compare_version_strings;
+    use super::{
+        channel_policy, compare_version_strings, distribution_channel_for_identifier,
+        DistributionChannel, PurchaseProvider,
+    };
     use std::cmp::Ordering;
 
     #[test]
@@ -280,5 +319,37 @@ mod tests {
         assert_eq!(compare_version_strings("1.4.1", "1.4.1"), Ordering::Equal);
         assert_eq!(compare_version_strings("1.4.0", "1.4.1"), Ordering::Less);
         assert_eq!(compare_version_strings("1.10", "1.9.9"), Ordering::Greater);
+    }
+
+    #[test]
+    fn detects_distribution_channel_from_identifier() {
+        assert_eq!(
+            distribution_channel_for_identifier("dev.studiojin.syncwatcher"),
+            DistributionChannel::Github
+        );
+        assert_eq!(
+            distribution_channel_for_identifier("dev.studiojin.syncwatcher.appstore"),
+            DistributionChannel::AppStore
+        );
+    }
+
+    #[test]
+    fn channel_policy_matches_distribution_constraints() {
+        let github = channel_policy(DistributionChannel::Github);
+        assert_eq!(github.purchase_provider, PurchaseProvider::LemonSqueezy);
+        assert!(github.can_self_update);
+        assert!(github.supports_license_keys);
+        assert!(github.supports_external_checkout);
+        assert!(!github.supports_storekit_purchase);
+        assert!(!github.requires_security_scoped_bookmarks);
+
+        let app_store = channel_policy(DistributionChannel::AppStore);
+        assert_eq!(app_store.purchase_provider, PurchaseProvider::AppStore);
+        assert!(!app_store.can_self_update);
+        assert!(!app_store.supports_license_keys);
+        assert!(!app_store.supports_external_checkout);
+        assert!(app_store.supports_storekit_purchase);
+        assert!(app_store.supports_storekit_restore);
+        assert!(app_store.requires_security_scoped_bookmarks);
     }
 }

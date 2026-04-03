@@ -2,12 +2,13 @@
 Status: Accepted
 Date: 2026-04-01
 Tags: app-store, distribution, storekit, sandbox, bookmarks, updater, macos, tauri
-TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional supporter purchases provider-specific, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.
+TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional supporter purchases provider-specific, submit the App Store build locally instead of through GitHub release automation, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.
 
 ## Context
 
 - SyncWatcher already ships through GitHub Releases with a Tauri updater and Lemon Squeezy supporter-license flow.
 - The Mac App Store imposes different rules for updater delivery, copy-protection UX, sandbox access, and in-app purchases.
+- The GitHub release workflow already owns DMG packaging, updater metadata, SBOMs, and attestations for the direct-download channel, while App Store submission requires different signing, metadata, and operator review steps.
 - SyncWatcher stores source and target directories as plain paths today, which is not sufficient for App Sandbox relaunch access.
 - The product policy remains "free to use, optional support purchase" rather than feature gating.
 
@@ -30,6 +31,10 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
    - no custom receipt-validation server
    - no central entitlement service
    - on-device StoreKit transaction checks only
+9. Keep the Mac App Store release path local and manual for v1:
+   - GitHub Actions remains the release automation path for the GitHub DMG channel
+   - Mac App Store packaging, validation, and App Store Connect upload happen from a maintainer's local macOS environment
+   - CI remains verification-only for the App Store path and does not submit to App Store Connect
 
 ## Consequences
 
@@ -38,6 +43,7 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
 - Source, target, and state-location access become more robust across relaunch in the App Store build, but user-selected bookmark refresh is now part of the failure model.
 - `isRegistered` remains a useful UI-level supporter signal, but its backing provider depends on the current channel.
 - Release and submission workflow becomes more complex because metadata, entitlements, and review notes now differ by channel.
+- App Store submission stays out of GitHub CI/CD, which reduces accidental cross-channel automation but keeps one local/manual operator step in the release process.
 
 ## Alternatives Considered
 

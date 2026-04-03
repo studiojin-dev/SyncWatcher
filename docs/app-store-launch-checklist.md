@@ -8,11 +8,19 @@
 - Confirm the App Store build hides Lemon Squeezy checkout, license-key entry, and Buy Me a Coffee links.
 - Confirm the GitHub DMG build keeps Lemon Squeezy checkout, license activation, and GitHub update flow.
 
+## Release Path
+
+- Treat the Mac App Store path as local/manual release work; do not submit or upload it from GitHub Actions.
+- Keep GitHub Actions as verification-only for the App Store path.
+- Keep `scripts/release/local-macos-release.sh` scoped to the GitHub DMG distribution flow.
+- Set `VITE_APP_STORE_URL` for the public App Store listing fallback even when `SYNCWATCHER_APP_STORE_APP_ID` is only injected locally for App Store builds.
+
 ## App Store Connect
 
 - Create the macOS app as a free app.
 - Add the non-consumable in-app purchase `Lifetime Supporter`.
 - Set the App Store product page URL in `VITE_APP_STORE_URL`.
+- Inject `SYNCWATCHER_APP_STORE_APP_ID` locally for App Store builds when you want best-effort metadata-based update checks.
 - Fill in the Privacy Policy URL and Support URL.
 - Upload screenshots for the current macOS release.
 - Complete Paid Applications, tax, and banking setup before submitting the IAP.

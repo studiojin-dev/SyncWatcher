@@ -20,8 +20,15 @@ vi.mock('../hooks/useDistribution', () => ({
   useDistribution: () => ({
     info: {
       channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
       appStoreUrl: null,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      legacyImportAvailable: false,
     },
+    loaded: true,
+    resolve: vi.fn(),
   }),
 }));
 

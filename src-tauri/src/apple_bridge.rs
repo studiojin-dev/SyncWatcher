@@ -63,8 +63,8 @@ fn call_string_bridge<F>(input: &str, bridge_call: F) -> Result<String, String>
 where
     F: FnOnce(*const c_char) -> *mut c_char,
 {
-    let input_c_string =
-        CString::new(input).map_err(|_| "Bridge input contained an interior null byte".to_string())?;
+    let input_c_string = CString::new(input)
+        .map_err(|_| "Bridge input contained an interior null byte".to_string())?;
     let response_ptr = bridge_call(input_c_string.as_ptr());
     if response_ptr.is_null() {
         return Err("Native Apple bridge returned an empty response".to_string());
@@ -89,7 +89,9 @@ pub fn get_app_store_supporter_status(product_id: &str) -> Result<AppStoreSuppor
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn get_app_store_supporter_status(_product_id: &str) -> Result<AppStoreSupporterStatus, String> {
+pub fn get_app_store_supporter_status(
+    _product_id: &str,
+) -> Result<AppStoreSupporterStatus, String> {
     Err("App Store supporter status is only available on macOS".to_string())
 }
 

@@ -21,6 +21,10 @@ import FirstRunIntroModal from './components/ui/FirstRunIntroModal';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
 import SyncTaskSourceRecommendationBridge from './components/runtime/SyncTaskSourceRecommendationBridge';
 import ConflictReviewWindow from './components/features/ConflictReviewWindow';
+import {
+  assertSupporterProviderMatchesPolicy,
+  getDistributionPolicy,
+} from './utils/distributionPolicy';
 // SyncTasksView는 기본 탭이므로 lazy loading 제외 - 즉시 로드
 import SyncTasksView from './views/SyncTasksView';
 import type {
@@ -118,7 +122,14 @@ function AppContent() {
 
     const refreshSupporterStatus = async () => {
       try {
-        const result = await invoke<{ isRegistered: boolean }>('refresh_supporter_status');
+        const result = await invoke<{
+          isRegistered: boolean;
+          provider: 'lemon_squeezy' | 'app_store';
+        }>('refresh_supporter_status');
+        assertSupporterProviderMatchesPolicy(
+          getDistributionPolicy(distribution),
+          result.provider,
+        );
         if (!cancelled) {
           updateSettings({ isRegistered: result.isRegistered });
         }
@@ -132,7 +143,7 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [distributionLoaded, settingsLoaded, updateSettings]);
+  }, [distribution, distributionLoaded, settingsLoaded, updateSettings]);
 
   const startupComplete =
     settingsLoaded &&
@@ -157,7 +168,6 @@ function AppContent() {
       if (localStorage.getItem(APP_STORE_IMPORT_PROMPT_STORAGE_KEY) === '1') {
         return;
       }
-      localStorage.setItem(APP_STORE_IMPORT_PROMPT_STORAGE_KEY, '1');
     } catch (error) {
       console.error('Failed to read legacy import prompt state:', error);
     }
@@ -169,11 +179,21 @@ function AppContent() {
           kind: 'info',
         });
         if (!confirmed) {
+          didPromptLegacyImportRef.current = false;
           return;
         }
 
         const result = await invoke<{ imported: boolean; message?: string | null }>('import_legacy_channel_data');
         await reloadDistribution();
+        if (result?.imported) {
+          try {
+            localStorage.setItem(APP_STORE_IMPORT_PROMPT_STORAGE_KEY, '1');
+          } catch (error) {
+            console.error('Failed to persist legacy import prompt state:', error);
+          }
+        } else {
+          didPromptLegacyImportRef.current = false;
+        }
         if (result?.message) {
           await message(result.message, {
             title: t('app.importLegacyPromptTitle'),
@@ -181,6 +201,7 @@ function AppContent() {
           });
         }
       } catch (error) {
+        didPromptLegacyImportRef.current = false;
         console.error('Failed to import legacy channel data:', error);
       }
     };

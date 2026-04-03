@@ -8,7 +8,7 @@ use tauri::AppHandle;
 
 use crate::apple_bridge;
 use crate::config_store::{self, ConfigStoreError, SyncTaskRecord};
-use crate::distribution::{detect_distribution_channel, DistributionChannel};
+use crate::distribution::{channel_policy, detect_distribution_channel, DistributionChannel};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -62,23 +62,20 @@ impl SecurityScopedAccessManager {
     }
 }
 
-pub fn capture_path_access(
-    app: &AppHandle,
-    path: String,
-) -> Result<CapturedPathAccess, String> {
-    match detect_distribution_channel(Some(app)) {
-        DistributionChannel::Github => Ok(CapturedPathAccess {
+pub fn capture_path_access(app: &AppHandle, path: String) -> Result<CapturedPathAccess, String> {
+    let policy = channel_policy(detect_distribution_channel(Some(app)));
+    if !policy.requires_security_scoped_bookmarks {
+        return Ok(CapturedPathAccess {
             path,
             bookmark: None,
-        }),
-        DistributionChannel::AppStore => {
-            let captured = apple_bridge::create_security_scoped_bookmark(&path)?;
-            Ok(CapturedPathAccess {
-                path: captured.path,
-                bookmark: Some(captured.bookmark),
-            })
-        }
+        });
     }
+
+    let captured = apple_bridge::create_security_scoped_bookmark(&path)?;
+    Ok(CapturedPathAccess {
+        path: captured.path,
+        bookmark: Some(captured.bookmark),
+    })
 }
 
 pub fn activate_sync_task_path_access(
@@ -104,7 +101,9 @@ pub fn activate_settings_path_access(
     Ok(())
 }
 
-fn legacy_config_dir_for_current_channel(app: &AppHandle) -> Result<Option<PathBuf>, ConfigStoreError> {
+fn legacy_config_dir_for_current_channel(
+    app: &AppHandle,
+) -> Result<Option<PathBuf>, ConfigStoreError> {
     let current_identifier = app.config().identifier.as_str();
     if current_identifier == config_store::APP_IDENTIFIER {
         return Ok(None);
@@ -150,8 +149,8 @@ pub fn legacy_import_available(app: &AppHandle) -> bool {
 }
 
 pub fn import_legacy_channel_data(app: &AppHandle) -> Result<LegacyImportStatus, String> {
-    let Some(legacy_dir) = legacy_config_dir_for_current_channel(app)
-        .map_err(config_store_error_to_string)?
+    let Some(legacy_dir) =
+        legacy_config_dir_for_current_channel(app).map_err(config_store_error_to_string)?
     else {
         return Ok(LegacyImportStatus {
             available: false,

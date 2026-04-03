@@ -11,7 +11,7 @@ export interface DistributionInfo {
     legacyImportAvailable: boolean;
 }
 
-const DEFAULT_DISTRIBUTION_INFO: DistributionInfo = {
+export const DEFAULT_DISTRIBUTION_INFO: DistributionInfo = {
     channel: 'github',
     purchaseProvider: 'lemon_squeezy',
     canSelfUpdate: true,
@@ -21,10 +21,25 @@ const DEFAULT_DISTRIBUTION_INFO: DistributionInfo = {
     legacyImportAvailable: false,
 };
 
+export function normalizeDistributionInfo(
+    info: Partial<DistributionInfo>,
+): DistributionInfo {
+    return {
+        ...DEFAULT_DISTRIBUTION_INFO,
+        ...info,
+    };
+}
+
+export async function fetchDistributionInfo(): Promise<DistributionInfo> {
+    const result = await invoke<DistributionInfo>('get_distribution_info');
+    return normalizeDistributionInfo(result);
+}
+
 interface DistributionContextValue {
     info: DistributionInfo;
     loaded: boolean;
-    reload: () => Promise<void>;
+    reload: () => Promise<DistributionInfo>;
+    resolve: () => Promise<DistributionInfo>;
 }
 
 const DistributionContext = createContext<DistributionContextValue | null>(null);
@@ -34,19 +49,25 @@ export function DistributionProvider({ children }: { children: ReactNode }) {
     const [loaded, setLoaded] = useState(false);
 
     const load = useCallback(async () => {
+        let nextInfo = DEFAULT_DISTRIBUTION_INFO;
         try {
-            const result = await invoke<DistributionInfo>('get_distribution_info');
-            setInfo({
-                ...DEFAULT_DISTRIBUTION_INFO,
-                ...result,
-            });
+            nextInfo = await fetchDistributionInfo();
+            setInfo(nextInfo);
         } catch (error) {
             console.error('Failed to load distribution info:', error);
             setInfo(DEFAULT_DISTRIBUTION_INFO);
         } finally {
             setLoaded(true);
         }
+        return nextInfo;
     }, []);
+
+    const resolve = useCallback(async () => {
+        if (loaded) {
+            return info;
+        }
+        return load();
+    }, [info, loaded, load]);
 
     useEffect(() => {
         void load();
@@ -56,7 +77,8 @@ export function DistributionProvider({ children }: { children: ReactNode }) {
         info,
         loaded,
         reload: load,
-    }), [info, loaded, load]);
+        resolve,
+    }), [info, loaded, load, resolve]);
 
     return (
         <DistributionContext.Provider value={value}>

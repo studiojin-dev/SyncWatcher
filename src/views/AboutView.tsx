@@ -5,16 +5,18 @@ import { LicenseCard, LicenseData } from '../components/ui/LicenseCard';
 import { useAppVersion } from '../hooks/useAppVersion';
 import { useDistribution } from '../hooks/useDistribution';
 import { useSettings } from '../hooks/useSettings';
+import { getDistributionPolicy } from '../utils/distributionPolicy';
 import { appStoreListingUrl, githubRepositoryUrl, privacyPolicyUrl, termsOfServiceUrl } from '../config/appLinks';
 
 function AboutView() {
   const { t } = useTranslation();
   const [showLicenses, setShowLicenses] = useState(false);
   const appVersion = useAppVersion();
-  const { info: distribution } = useDistribution();
+  const { info: distribution, loaded: distributionLoaded } = useDistribution();
   const { settings } = useSettings();
   const [licenseData, setLicenseData] = useState<LicenseData[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
+  const policy = getDistributionPolicy(distribution);
   const storeUrl = distribution.appStoreUrl || appStoreListingUrl;
 
   const handleViewLicenses = async () => {
@@ -88,7 +90,7 @@ function AboutView() {
                 <IconBrandGithub size={20} />
                 <span>{t('about.viewOnGithub')}</span>
               </a>
-              {distribution.channel === 'app_store' && storeUrl ? (
+              {distributionLoaded && policy.supportsStoreKitPurchase && storeUrl ? (
                 <a
                   href={storeUrl}
                   target="_blank"

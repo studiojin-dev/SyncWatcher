@@ -3,6 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../../hooks/useSettings';
 import { useDistribution } from '../../hooks/useDistribution';
+import {
+    assertSupporterProviderMatchesPolicy,
+    getDistributionPolicy,
+    type SupporterProvider,
+} from '../../utils/distributionPolicy';
 
 type ActivationState =
     | 'idle'
@@ -16,11 +21,12 @@ type ActivationState =
 interface LicenseStatus {
     isRegistered: boolean;
     licenseKey: string | null;
+    provider: SupporterProvider;
 }
 
 interface SupporterStatus {
     isRegistered: boolean;
-    provider: 'lemon_squeezy' | 'app_store';
+    provider: SupporterProvider;
 }
 
 interface SupporterPurchaseResponse {
@@ -33,13 +39,24 @@ interface SupporterPurchaseResponse {
 
 function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => void }) {
     const { t } = useTranslation();
-    const { info: distribution } = useDistribution();
+    const {
+        info: distribution,
+        loaded: distributionLoaded,
+        resolve: resolveDistribution,
+    } = useDistribution();
     const { updateSettings } = useSettings();
     const [licenseKey, setLicenseKey] = useState('');
     const [state, setState] = useState<ActivationState>('idle');
     const [errorMessage, setErrorMessage] = useState('');
     const [status, setStatus] = useState<LicenseStatus | null>(null);
     const [lastAction, setLastAction] = useState<'activate' | 'deactivate' | 'purchase' | 'restore' | null>(null);
+
+    const resolvePolicy = useCallback(async () => {
+        const resolvedDistribution = distributionLoaded
+            ? distribution
+            : await resolveDistribution();
+        return getDistributionPolicy(resolvedDistribution);
+    }, [distribution, distributionLoaded, resolveDistribution]);
 
     const loadStatus = useCallback(async (options?: { silent?: boolean }) => {
         if (!options?.silent) {
@@ -48,31 +65,35 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
         }
 
         try {
-            if (distribution.channel === 'app_store') {
-                const result = await invoke<SupporterStatus>('get_supporter_status');
-                const nextStatus = {
-                    isRegistered: result.isRegistered,
-                    licenseKey: null,
-                };
-                setStatus(nextStatus);
-                updateSettings({ isRegistered: nextStatus.isRegistered });
-            } else {
-                const result = await invoke<LicenseStatus>('get_license_status');
-                setStatus(result);
-                updateSettings({ isRegistered: result.isRegistered });
+            const policy = await resolvePolicy();
+            const supporterStatus = await invoke<SupporterStatus>('get_supporter_status');
+            assertSupporterProviderMatchesPolicy(policy, supporterStatus.provider);
+
+            let licenseKey: string | null = null;
+            if (policy.supportsLicenseKeys) {
+                const licenseStatus = await invoke<Omit<LicenseStatus, 'provider'>>('get_license_status');
+                licenseKey = licenseStatus.licenseKey;
             }
+
+            const nextStatus = {
+                isRegistered: supporterStatus.isRegistered,
+                licenseKey,
+                provider: supporterStatus.provider,
+            };
+            setStatus(nextStatus);
+            updateSettings({ isRegistered: supporterStatus.isRegistered });
 
             if (!options?.silent) {
                 setState('idle');
             }
         } catch (err) {
             console.error('[LicenseActivation] Failed to load status:', err);
-            setStatus({ isRegistered: false, licenseKey: null });
+            setStatus({ isRegistered: false, licenseKey: null, provider: distribution.purchaseProvider });
             updateSettings({ isRegistered: false });
             setState('error');
             setErrorMessage(String(err));
         }
-    }, [distribution.channel, updateSettings]);
+    }, [distribution.purchaseProvider, resolvePolicy, updateSettings]);
 
     useEffect(() => {
         if (!open) {
@@ -86,6 +107,12 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
         if (!licenseKey.trim()) return;
 
         try {
+            const policy = await resolvePolicy();
+            if (!policy.supportsLicenseKeys) {
+                setState('error');
+                setErrorMessage('License keys are not available on this build.');
+                return;
+            }
             setState('activating');
             setErrorMessage('');
             setLastAction(null);
@@ -108,10 +135,16 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             setState('error');
             setErrorMessage(String(err));
         }
-    }, [licenseKey, loadStatus, t, updateSettings]);
+    }, [licenseKey, loadStatus, resolvePolicy, t, updateSettings]);
 
     const handleDeactivate = useCallback(async () => {
         try {
+            const policy = await resolvePolicy();
+            if (!policy.supportsLicenseKeys) {
+                setState('error');
+                setErrorMessage('License keys are not available on this build.');
+                return;
+            }
             setState('deactivating');
             setErrorMessage('');
             setLastAction(null);
@@ -121,7 +154,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             if (result.success) {
                 setState('success');
                 setLastAction('deactivate');
-                setStatus({ isRegistered: false, licenseKey: null });
+                setStatus({ isRegistered: false, licenseKey: null, provider: policy.purchaseProvider });
                 updateSettings({ isRegistered: false });
             } else {
                 setState('error');
@@ -132,10 +165,16 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             setState('error');
             setErrorMessage(String(err));
         }
-    }, [t, updateSettings]);
+    }, [resolvePolicy, t, updateSettings]);
 
     const handlePurchase = useCallback(async () => {
         try {
+            const policy = await resolvePolicy();
+            if (!policy.supportsStoreKitPurchase) {
+                setState('error');
+                setErrorMessage('In-app purchase is not available on this build.');
+                return;
+            }
             setState('activating');
             setErrorMessage('');
             setLastAction(null);
@@ -167,10 +206,16 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             setState('error');
             setErrorMessage(String(err));
         }
-    }, [loadStatus, t, updateSettings]);
+    }, [loadStatus, resolvePolicy, t, updateSettings]);
 
     const handleRestore = useCallback(async () => {
         try {
+            const policy = await resolvePolicy();
+            if (!policy.supportsStoreKitRestore) {
+                setState('error');
+                setErrorMessage('Restore is not available on this build.');
+                return;
+            }
             setState('restoring');
             setErrorMessage('');
             setLastAction(null);
@@ -191,7 +236,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             setState('error');
             setErrorMessage(String(err));
         }
-    }, [loadStatus, t, updateSettings]);
+    }, [loadStatus, resolvePolicy, t, updateSettings]);
 
     const handleClose = useCallback(() => {
         setState('idle');
@@ -204,7 +249,8 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
 
     if (!open) return null;
 
-    const isAppStoreBuild = distribution.channel === 'app_store';
+    const policy = getDistributionPolicy(distribution);
+    const isAppStoreBuild = distributionLoaded && policy.supportsStoreKitPurchase;
     const isBusy = state === 'activating' || state === 'deactivating' || state === 'loading' || state === 'restoring';
 
     return (
@@ -223,7 +269,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
                 </div>
 
                 <div className="space-y-4 p-5">
-                    {state === 'loading' ? (
+                    {state === 'loading' || !distributionLoaded ? (
                         <p className="text-sm font-bold text-[var(--text-primary)]">
                             {t('common.loading')}
                         </p>

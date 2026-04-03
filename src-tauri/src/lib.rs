@@ -44,12 +44,12 @@ use sync_engine::{
 use system_integration::DiskMonitor;
 
 use config_store::{
-    apply_sync_task_update, build_sync_task_record, default_config_dir, default_exclusion_set_records,
-    settings_snapshot_from_store, validate_exclusion_sets, AppSettings, ConfigStore,
-    ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope, ExclusionSetEnvelope,
-    ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NewSyncTaskRecord,
-    SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope,
-    UpdateSettingsPayload, UpdateSyncTaskRequest,
+    apply_sync_task_update, build_sync_task_record, default_config_dir,
+    default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
+    AppSettings, ConfigStore, ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope,
+    ExclusionSetEnvelope, ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch,
+    NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord,
+    SyncTasksEnvelope, UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
@@ -837,7 +837,20 @@ fn is_uuid_source(source: &str, source_type: Option<config_store::SyncTaskSource
     }
 }
 
+fn normalize_optional_bookmark(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    })
+}
+
 fn normalize_sync_task_record(mut task: SyncTaskRecord) -> SyncTaskRecord {
+    task.source_bookmark = normalize_optional_bookmark(task.source_bookmark);
+    task.target_bookmark = normalize_optional_bookmark(task.target_bookmark);
+
     if matches!(
         task.source_type.clone(),
         Some(config_store::SyncTaskSourceType::Path) | None
@@ -3811,10 +3824,7 @@ async fn release_task_operation(task_id: &str, state: &AppState) {
     active.remove(task_id);
 }
 
-async fn load_sync_task_by_id(
-    task_id: &str,
-    state: &AppState,
-) -> Result<SyncTaskRecord, String> {
+async fn load_sync_task_by_id(task_id: &str, state: &AppState) -> Result<SyncTaskRecord, String> {
     input_validation::validate_task_id(task_id).map_err(|e| e.to_string())?;
     let tasks = state
         .config_store
@@ -4898,9 +4908,7 @@ async fn capture_path_access(
 }
 
 #[tauri::command]
-async fn import_legacy_channel_data(
-    app: tauri::AppHandle,
-) -> Result<LegacyImportStatus, String> {
+async fn import_legacy_channel_data(app: tauri::AppHandle) -> Result<LegacyImportStatus, String> {
     let result = security_scoped::import_legacy_channel_data(&app)?;
     if result.imported {
         emit_config_store_changed(&app, &["settings", "syncTasks", "exclusionSets"]);
@@ -7758,7 +7766,8 @@ pub fn run() {
             .expect("failed to resolve SyncWatcher app support directory"),
     ));
     let autostart_args = vec![AUTOSTART_ARG];
-    let distribution_channel = distribution::detect_distribution_channel(None);
+    let distribution_channel =
+        distribution::distribution_channel_for_identifier(&context_identifier);
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -7790,11 +7799,12 @@ pub fn run() {
             }
         });
 
-    if distribution_channel == distribution::DistributionChannel::Github {
+    if distribution::channel_policy(distribution_channel).can_self_update {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
-    let builder = builder.setup(move |app| {
+    let builder = builder
+        .setup(move |app| {
             app.set_menu(build_app_menu(app)?)?;
 
             let autostart_arg_present = is_autostart_launch();

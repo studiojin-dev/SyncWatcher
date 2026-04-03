@@ -813,10 +813,9 @@ pub fn apply_sync_task_update(
         .source
         .as_ref()
         .is_some_and(|value| value != &task.source)
-        || update
-            .source_bookmark
-            .as_ref()
-            .is_some_and(|value| normalize_optional_string(Some(value.clone())) != task.source_bookmark)
+        || update.source_bookmark.as_ref().is_some_and(|value| {
+            normalize_optional_string(Some(value.clone())) != task.source_bookmark
+        })
         || update
             .source_type
             .as_ref()
@@ -1328,6 +1327,8 @@ fn normalize_task_records(tasks: Vec<SyncTaskRecord>) -> Vec<SyncTaskRecord> {
     tasks
         .into_iter()
         .map(|mut task| {
+            task.source_bookmark = normalize_optional_string(task.source_bookmark);
+            task.target_bookmark = normalize_optional_string(task.target_bookmark);
             task.exclusion_sets = normalize_task_exclusion_set_ids(task.exclusion_sets);
             task
         })
@@ -1635,6 +1636,43 @@ mod tests {
             loaded_tasks[0].recurring_schedules[0].cron_expression,
             "*/15 9-17 * * 1-5"
         );
+    }
+
+    #[test]
+    fn load_tasks_normalizes_empty_bookmarks_to_none() {
+        let temp = tempdir().expect("tempdir should be created");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+        let tasks = vec![SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            source_bookmark: Some(String::new()),
+            target_bookmark: Some("   ".to_string()),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        }];
+
+        store
+            .write_yaml_atomic(&store.tasks_file_path(), &tasks)
+            .expect("should write tasks");
+
+        let loaded_tasks = store.load_tasks().expect("should load tasks");
+        assert_eq!(loaded_tasks[0].source_bookmark, None);
+        assert_eq!(loaded_tasks[0].target_bookmark, None);
+
+        let raw = fs::read_to_string(store.tasks_file_path()).expect("tasks file should exist");
+        assert!(!raw.contains("sourceBookmark: ''"));
+        assert!(!raw.contains("targetBookmark: \"   \""));
     }
 
     #[test]

@@ -217,7 +217,19 @@ impl SyncEngine {
                 !globs.is_match(relative_path)
             });
 
-            for entry in walker.filter_map(|e| e.ok()) {
+            for entry_result in walker {
+                let entry = match entry_result {
+                    Ok(entry) => entry,
+                    Err(err) => {
+                        let failed_path = err
+                            .path()
+                            .map(|path| path.to_path_buf())
+                            .unwrap_or_else(|| dir_buf.clone());
+                        return Err(anyhow::Error::new(err)).with_context(|| {
+                            format!("Failed to traverse directory entry: {:?}", failed_path)
+                        });
+                    }
+                };
                 if let Some(token) = cancel_token.as_ref() {
                     if token.is_cancelled() {
                         anyhow::bail!("Dry run cancelled by user");
@@ -1075,6 +1087,7 @@ impl SyncEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -1096,6 +1109,33 @@ mod tests {
 
         let result = engine.sync_files(&options, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_fails_when_source_scan_hits_walkdir_error() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        let restricted_dir = source_dir.path().join("restricted");
+        let visible_file = source_dir.path().join("visible.txt");
+
+        fs::create_dir(&restricted_dir).await?;
+        fs::write(&visible_file, b"visible").await?;
+        std::fs::set_permissions(&restricted_dir, std::fs::Permissions::from_mode(0o000))?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let result = engine.dry_run(&SyncOptions::default()).await;
+
+        std::fs::set_permissions(&restricted_dir, std::fs::Permissions::from_mode(0o755))?;
+
+        let err = result.expect_err("dry run should fail on traversal errors");
+        let message = format!("{:#}", err);
+        assert!(message.contains("Failed to read source directory"));
+        assert!(message.contains("Failed to traverse directory entry"));
 
         Ok(())
     }

@@ -4,10 +4,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsView from './SettingsView';
 
 const {
+  distributionState,
   updateSettingsMock,
   setLaunchAtLoginMock,
   resetSettingsMock,
 } = vi.hoisted(() => ({
+  distributionState: {
+    loaded: true,
+    info: {
+      channel: 'github' as const,
+      purchaseProvider: 'lemon_squeezy' as const,
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    },
+  },
   updateSettingsMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
   resetSettingsMock: vi.fn(),
@@ -50,10 +63,16 @@ vi.mock('../hooks/useSettings', () => ({
 
 vi.mock('../hooks/useDistribution', () => ({
   useDistribution: () => ({
-    info: {
-      channel: 'github',
-    },
+    info: distributionState.info,
+    loaded: distributionState.loaded,
+    resolve: vi.fn(async () => distributionState.info),
   }),
+}));
+
+vi.mock('../config/appLinks', () => ({
+  lemonSqueezyCheckoutUrl: 'https://store.studiojin.dev/checkout/buy/test-link',
+  privacyPolicyUrl: 'https://example.com/privacy',
+  termsOfServiceUrl: 'https://example.com/terms',
 }));
 
 vi.mock('../components/settings/ExclusionSetsManager', () => ({
@@ -75,6 +94,16 @@ function renderWithMantine() {
 describe('SettingsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    distributionState.loaded = true;
+    distributionState.info = {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    };
   });
 
   it('calls setLaunchAtLogin when the launch-at-login switch is toggled', () => {
@@ -97,8 +126,29 @@ describe('SettingsView', () => {
     renderWithMantine();
 
     expect(screen.getByText('settings.sectionLicense')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'about.purchaseLicense' })).toHaveAttribute(
+      'href',
+      'https://store.studiojin.dev/checkout/buy/test-link',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'license.enterLicense' }));
 
     expect(screen.getByText('license-modal')).toBeInTheDocument();
+  });
+
+  it('hides the external checkout link in the App Store channel', () => {
+    distributionState.info = {
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreCountry: 'us',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+      legacyImportAvailable: false,
+    };
+
+    renderWithMantine();
+
+    expect(screen.queryByRole('link', { name: 'about.purchaseLicense' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'license.appStorePurchase' })).toBeInTheDocument();
   });
 });

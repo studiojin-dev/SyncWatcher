@@ -2,7 +2,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use crate::apple_bridge;
-use crate::distribution::{detect_distribution_channel, DistributionChannel};
+use crate::distribution::{channel_policy, detect_distribution_channel, DistributionChannel};
 use crate::license_validation;
 
 const APP_STORE_SUPPORTER_PRODUCT_ID: &str = "dev.studiojin.syncwatcher.lifetime_supporter";
@@ -28,11 +28,12 @@ fn supporter_status_for_channel(
     channel: DistributionChannel,
     is_registered: bool,
 ) -> SupporterStatus {
+    let policy = channel_policy(channel);
     SupporterStatus {
         is_registered,
-        provider: match channel {
-            DistributionChannel::Github => "lemon_squeezy",
-            DistributionChannel::AppStore => "app_store",
+        provider: match policy.purchase_provider {
+            crate::distribution::PurchaseProvider::LemonSqueezy => "lemon_squeezy",
+            crate::distribution::PurchaseProvider::AppStore => "app_store",
         },
     }
 }
@@ -71,6 +72,14 @@ pub async fn purchase_supporter_for_app(
     app: AppHandle,
 ) -> Result<SupporterPurchaseResponse, String> {
     let channel = detect_distribution_channel(Some(&app));
+    let policy = channel_policy(channel);
+    if !policy.supports_storekit_purchase {
+        return Err(
+            "Supporter purchases on the GitHub build are handled by Lemon Squeezy checkout."
+                .to_string(),
+        );
+    }
+
     match channel {
         DistributionChannel::Github => Err(
             "Supporter purchases on the GitHub build are handled by Lemon Squeezy checkout."
@@ -94,13 +103,17 @@ pub async fn restore_supporter_for_app(
     app: AppHandle,
 ) -> Result<SupporterPurchaseResponse, String> {
     let channel = detect_distribution_channel(Some(&app));
+    let policy = channel_policy(channel);
+    if !policy.supports_storekit_restore {
+        return Err("Supporter restore is only available for the Mac App Store build.".to_string());
+    }
+
     match channel {
-        DistributionChannel::Github => Err(
-            "Supporter restore is only available for the Mac App Store build.".to_string(),
-        ),
+        DistributionChannel::Github => {
+            Err("Supporter restore is only available for the Mac App Store build.".to_string())
+        }
         DistributionChannel::AppStore => {
-            let result =
-                apple_bridge::restore_app_store_supporter(APP_STORE_SUPPORTER_PRODUCT_ID)?;
+            let result = apple_bridge::restore_app_store_supporter(APP_STORE_SUPPORTER_PRODUCT_ID)?;
             Ok(SupporterPurchaseResponse {
                 success: result.success,
                 is_registered: result.active,
@@ -109,5 +122,22 @@ pub async fn restore_supporter_for_app(
                 error: result.error,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supporter_status_for_channel;
+    use crate::distribution::DistributionChannel;
+
+    #[test]
+    fn supporter_status_uses_provider_for_distribution_channel() {
+        let github = supporter_status_for_channel(DistributionChannel::Github, true);
+        assert!(github.is_registered);
+        assert_eq!(github.provider, "lemon_squeezy");
+
+        let app_store = supporter_status_for_channel(DistributionChannel::AppStore, false);
+        assert!(!app_store.is_registered);
+        assert_eq!(app_store.provider, "app_store");
     }
 }

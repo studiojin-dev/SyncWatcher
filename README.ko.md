@@ -87,7 +87,7 @@ pnpm install
 pnpm dev
 pnpm build
 pnpm tauri build
-# 로컬 서명/노타리제이션 macOS 릴리스 헬퍼
+# 로컬 서명/노타리제이션 GitHub DMG 릴리스 헬퍼
 ./scripts/release/local-macos-release.sh
 ```
 

@@ -9,6 +9,16 @@ vi.mock('@tauri-apps/api/app', () => ({
 
 const mockState = vi.hoisted(() => ({
   isRegistered: false,
+  distributionLoaded: true,
+  distributionInfo: {
+    channel: 'github' as const,
+    purchaseProvider: 'lemon_squeezy' as const,
+    canSelfUpdate: true,
+    appStoreAppId: null,
+    appStoreCountry: 'us',
+    appStoreUrl: null,
+    legacyImportAvailable: false,
+  },
   translations: {
     appName: 'SyncWatcher',
     'nav.syncTasks': 'Sync Tasks',
@@ -22,10 +32,10 @@ const mockState = vi.hoisted(() => ({
     'about.registered': 'License Supporter',
     'about.purchaseLicense': 'Optional License Support',
     'license.enterLicense': 'Enter License',
-    'about.supportTitle': 'One more pizza bite?',
-    'about.supportHint': 'I am bowing dramatically.',
-    'about.supportButton': 'Bow-and-Beg',
     'license.manage': 'Manage License',
+    'license.appStorePurchase': 'Purchase Supporter',
+    'license.restore': 'Restore',
+    'common.loading': 'Loading...',
   } as Record<string, string>,
 }));
 
@@ -47,10 +57,14 @@ vi.mock('../../hooks/useSettings', () => ({
 
 vi.mock('../../hooks/useDistribution', () => ({
   useDistribution: () => ({
-    info: {
-      channel: 'github',
-    },
+    info: mockState.distributionInfo,
+    loaded: mockState.distributionLoaded,
+    resolve: vi.fn(async () => mockState.distributionInfo),
   }),
+}));
+
+vi.mock('../../config/appLinks', () => ({
+  lemonSqueezyCheckoutUrl: 'https://store.studiojin.dev/checkout/buy/test-link',
 }));
 
 vi.mock('../features/LicenseActivation', () => ({
@@ -63,6 +77,16 @@ describe('Sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.isRegistered = false;
+    mockState.distributionLoaded = true;
+    mockState.distributionInfo = {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    };
     mockGetVersion.mockResolvedValue('1.2.0-beta');
   });
 
@@ -73,7 +97,7 @@ describe('Sidebar', () => {
     const purchaseLink = screen.getByRole('link', { name: 'Optional License Support' });
     expect(purchaseLink).toHaveAttribute(
       'href',
-      'https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97',
+      'https://store.studiojin.dev/checkout/buy/test-link',
     );
     expect(purchaseLink).toHaveAttribute('target', '_blank');
     expect(purchaseLink).toHaveAttribute('rel', 'noopener noreferrer');
@@ -83,21 +107,32 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('license-activation-modal')).toBeInTheDocument();
   });
 
-  it('shows a direct Buy Me a Coffee link for registered users', async () => {
+  it('shows the manage action for registered GitHub users', async () => {
     mockState.isRegistered = true;
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
     await screen.findByText('v1.2.0-beta');
 
-    expect(screen.queryByText('One more pizza bite?')).not.toBeInTheDocument();
-    expect(screen.queryByText('I am bowing dramatically.')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('pizza-bite-animation')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Manage License' })).toBeInTheDocument();
-    const supportLink = screen.getByRole('link', { name: 'Bow-and-Beg' });
-    expect(supportLink).toHaveTextContent('Bow-and-Beg');
-    expect(supportLink).toHaveTextContent('🍕');
-    expect(supportLink).toHaveAttribute('href', 'https://buymeacoffee.com/studiojin_dev');
-    expect(supportLink).toHaveAttribute('target', '_blank');
-    expect(supportLink).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.queryByRole('link', { name: 'Optional License Support' })).not.toBeInTheDocument();
+  });
+
+  it('keeps App Store purchase UI free of external checkout links', async () => {
+    mockState.distributionInfo = {
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreCountry: 'us',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+      legacyImportAvailable: false,
+    };
+
+    render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
+    await screen.findByText('v1.2.0-beta');
+
+    expect(screen.queryByRole('link', { name: 'Optional License Support' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Purchase Supporter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeInTheDocument();
   });
 
   it('renders the runtime app version in the header badge', async () => {

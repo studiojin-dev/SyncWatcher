@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { appStoreListingUrl } from '../../config/appLinks';
 import { useDistribution } from '../../hooks/useDistribution';
+import { getDistributionPolicy } from '../../utils/distributionPolicy';
 import { useToast } from '../ui/Toast';
 
 /**
@@ -44,7 +46,11 @@ interface UpdateCheckerProps {
  */
 function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateCheckerProps) {
     const { t } = useTranslation();
-    const { info: distribution } = useDistribution();
+    const {
+        info: distribution,
+        loaded: distributionLoaded,
+        resolve: resolveDistribution,
+    } = useDistribution();
     const { showToast } = useToast();
     const [state, setState] = useState<UpdateState>('idle');
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -54,6 +60,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     const updateRef = useRef<Awaited<ReturnType<typeof check>> | null>(null);
     const autoCheckStartedRef = useRef(false);
     const lastHandledManualCheckRef = useRef(0);
+    const fallbackStoreUrl = (distribution.appStoreUrl ?? appStoreListingUrl) || null;
 
     const checkForUpdates = useCallback(async (mode: 'auto' | 'manual') => {
         if (state === 'checking' || state === 'downloading' || state === 'installing') {
@@ -73,7 +80,14 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
             setErrorMessage('');
             setProgress(0);
 
-            if (distribution.channel === 'app_store') {
+            const resolvedDistribution = distributionLoaded
+                ? distribution
+                : await resolveDistribution();
+            const policy = getDistributionPolicy(resolvedDistribution);
+            const resolvedFallbackStoreUrl =
+                (resolvedDistribution.appStoreUrl ?? appStoreListingUrl) || null;
+
+            if (!policy.supportsSelfUpdate) {
                 const update = await invoke<AppStoreUpdateCheckResult>('check_app_store_update');
                 if (update.available) {
                     updateRef.current = null;
@@ -81,18 +95,18 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                         version: update.latestVersion ?? update.currentVersion,
                         body: null,
                         date: null,
-                        storeUrl: update.storeUrl ?? distribution.appStoreUrl ?? null,
+                        storeUrl: update.storeUrl ?? resolvedFallbackStoreUrl,
                         manualOnly: false,
                     });
                     setDismissed(false);
                     setState('available');
-                } else if (update.manualOnly && (update.storeUrl ?? distribution.appStoreUrl)) {
+                } else if (update.manualOnly && (update.storeUrl ?? resolvedFallbackStoreUrl)) {
                     updateRef.current = null;
                     setUpdateInfo({
                         version: update.latestVersion ?? '',
                         body: null,
                         date: null,
-                        storeUrl: update.storeUrl ?? distribution.appStoreUrl ?? null,
+                        storeUrl: update.storeUrl ?? resolvedFallbackStoreUrl,
                         manualOnly: true,
                     });
                     setErrorMessage(update.error ?? '');
@@ -138,7 +152,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 showToast(t('update.checkFailed'), 'error');
             }
         }
-    }, [distribution.appStoreUrl, distribution.channel, showToast, state, t]);
+    }, [distribution, distributionLoaded, resolveDistribution, showToast, state, t]);
 
     const handleUpdate = useCallback(async () => {
         const update = updateRef.current;
@@ -175,13 +189,13 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     }, []);
 
     useEffect(() => {
-        if (!autoCheckEnabled || autoCheckStartedRef.current) {
+        if (!autoCheckEnabled || autoCheckStartedRef.current || !distributionLoaded) {
             return;
         }
 
         autoCheckStartedRef.current = true;
         void checkForUpdates('auto');
-    }, [autoCheckEnabled, checkForUpdates]);
+    }, [autoCheckEnabled, checkForUpdates, distributionLoaded]);
 
     useEffect(() => {
         if (manualCheckRequestNonce === 0 || lastHandledManualCheckRef.current === manualCheckRequestNonce) {
@@ -195,6 +209,9 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     if (dismissed || state === 'idle' || state === 'checking') {
         return null;
     }
+
+    const policy = getDistributionPolicy(distribution);
+    const showsAppStoreUpdate = distributionLoaded && !policy.supportsSelfUpdate;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -211,13 +228,13 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                     {state === 'available' && updateInfo && (
                         <>
                             <p className="text-sm font-bold text-[var(--text-primary)]">
-                                {distribution.channel === 'app_store'
+                                {showsAppStoreUpdate
                                     ? updateInfo.manualOnly
                                         ? (errorMessage || t('update.appStoreDescription'))
                                         : t('update.appStoreAvailable', { version: updateInfo.version })
                                     : t('update.available', { version: updateInfo.version })}
                             </p>
-                            {distribution.channel === 'app_store' ? (
+                            {showsAppStoreUpdate ? (
                                 <p className="text-xs text-[var(--text-secondary)]">
                                     {t('update.appStoreDescription')}
                                 </p>
@@ -276,9 +293,9 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                             >
                                 {t('update.later')}
                             </button>
-                            {distribution.channel === 'app_store' ? (
+                            {showsAppStoreUpdate ? (
                                 <a
-                                    href={updateInfo?.storeUrl ?? distribution.appStoreUrl ?? '#'}
+                                    href={updateInfo?.storeUrl ?? fallbackStoreUrl ?? '#'}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="border-2 border-[var(--border-main)] bg-[var(--accent-success)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:opacity-90 shadow-[3px_3px_0_0_var(--shadow-color)] transition-all"

@@ -141,6 +141,17 @@ function installDefaultInvokeMock() {
     if (command === 'list_conflict_review_sessions') {
       return [];
     }
+    if (command === 'get_distribution_info') {
+      return {
+        channel: 'github',
+        purchaseProvider: 'lemon_squeezy',
+        canSelfUpdate: true,
+        appStoreAppId: null,
+        appStoreCountry: 'us',
+        appStoreUrl: null,
+        legacyImportAvailable: false,
+      };
+    }
     if (command === 'get_removable_volumes') {
       return [];
     }
@@ -356,5 +367,105 @@ describe('SyncTasksView sync and watch confirmations', () => {
         level: 'warning',
       }),
     );
+  });
+
+  it('omits empty bookmarks when creating a task in the github channel', async () => {
+    syncTasksState.tasks = [];
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('syncTasks.addTask'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'New Task' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/tmp/new-source' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/new-target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(addTaskMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'New Task',
+          source: '/tmp/new-source',
+          target: '/tmp/new-target',
+        }),
+      );
+    });
+
+    const createdTask = addTaskMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createdTask).not.toHaveProperty('sourceBookmark');
+    expect(createdTask).not.toHaveProperty('targetBookmark');
+  });
+
+  it('resolves App Store distribution authoritatively before capturing task bookmarks', async () => {
+    syncTasksState.tasks = [];
+
+    invokeMock.mockImplementation(async (command: string, payload?: Record<string, unknown>) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_distribution_info') {
+        return {
+          channel: 'app_store',
+          purchaseProvider: 'app_store',
+          canSelfUpdate: false,
+          appStoreAppId: '123456789',
+          appStoreCountry: 'us',
+          appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+          legacyImportAvailable: false,
+        };
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'capture_path_access') {
+        const path = payload?.path as string;
+        return {
+          path,
+          bookmark: `bookmark:${path}`,
+        };
+      }
+      if (command === 'runtime_validate_tasks') {
+        return {
+          ok: true,
+          issue: null,
+        };
+      }
+      return undefined;
+    });
+
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('syncTasks.addTask'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'Sandbox Task' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/Volumes/source' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/Volumes/target' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('capture_path_access', {
+        path: '/Volumes/source',
+      });
+    });
+    await waitFor(() => {
+      expect(addTaskMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceBookmark: 'bookmark:/Volumes/source',
+          targetBookmark: 'bookmark:/Volumes/target',
+        }),
+      );
+    });
   });
 });

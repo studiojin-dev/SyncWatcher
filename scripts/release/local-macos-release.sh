@@ -11,8 +11,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release/local-macos-release.sh [options]
 
-Builds a local signed + notarized macOS app bundle, then creates/signs/notarizes
-a DMG using a clean staging directory so local release packaging is reproducible.
+Builds a local signed + notarized GitHub-distribution macOS app bundle, then
+creates/signs/notarizes a DMG using a clean staging directory so local release
+packaging is reproducible. Mac App Store submissions stay local/manual and do
+not use this DMG helper.
 
 Options:
   --env-file <path>          Path to the env file to source (default: .env)

@@ -4,7 +4,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import LicenseActivation from './LicenseActivation';
 
-const updateSettingsMock = vi.fn();
+const {
+  distributionState,
+  updateSettingsMock,
+} = vi.hoisted(() => {
+  const distributionState = {
+    loaded: true,
+    info: {
+      channel: 'github' as const,
+      purchaseProvider: 'lemon_squeezy' as const,
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    },
+    resolve: vi.fn(async () => distributionState.info),
+  };
+
+  return {
+    distributionState,
+    updateSettingsMock: vi.fn(),
+  };
+});
 const invokeMock = vi.mocked(invoke);
 
 vi.mock('react-i18next', () => ({
@@ -26,6 +48,20 @@ vi.mock('react-i18next', () => ({
         'license.removing': 'Removing...',
         'license.removed': 'License removed.',
         'license.removeFailed': 'Failed to remove license.',
+        'license.appStoreTitle': 'App Store Support',
+        'license.appStoreDescription': 'Support SyncWatcher in the App Store.',
+        'license.appStoreSupportStatus': 'Support status',
+        'license.appStorePurchase': 'Purchase Supporter',
+        'license.appStorePurchasing': 'Purchasing...',
+        'license.appStorePurchased': 'Purchased!',
+        'license.appStorePurchaseFailed': 'Purchase failed.',
+        'license.appStorePending': 'Purchase pending.',
+        'license.appStoreRestored': 'Restored!',
+        'license.appStoreRestoreFailed': 'Restore failed.',
+        'license.appStoreRestoring': 'Restoring...',
+        'license.restore': 'Restore',
+        'about.registered': 'Registered',
+        'about.unregistered': 'Unregistered',
         'common.cancel': 'Cancel',
         'common.ok': 'OK',
         'common.loading': 'Loading...',
@@ -43,9 +79,9 @@ vi.mock('../../hooks/useSettings', () => ({
 
 vi.mock('../../hooks/useDistribution', () => ({
   useDistribution: () => ({
-    info: {
-      channel: 'github',
-    },
+    info: distributionState.info,
+    loaded: distributionState.loaded,
+    resolve: distributionState.resolve,
   }),
 }));
 
@@ -53,11 +89,23 @@ describe('LicenseActivation', () => {
   beforeEach(() => {
     invokeMock.mockReset();
     updateSettingsMock.mockReset();
+    distributionState.loaded = true;
+    distributionState.info = {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    };
   });
 
   it('activates a license key for an unregistered device', async () => {
     invokeMock.mockImplementation(async (command) => {
       switch (command) {
+        case 'get_supporter_status':
+          return { isRegistered: false, provider: 'lemon_squeezy' };
         case 'get_license_status':
           return { isRegistered: false, licenseKey: null };
         case 'activate_license_key':
@@ -87,6 +135,8 @@ describe('LicenseActivation', () => {
   it('shows the current key and removes a registered license', async () => {
     invokeMock.mockImplementation(async (command) => {
       switch (command) {
+        case 'get_supporter_status':
+          return { isRegistered: true, provider: 'lemon_squeezy' };
         case 'get_license_status':
           return { isRegistered: true, licenseKey: 'abcd…1234' };
         case 'deactivate_license_key':
@@ -115,6 +165,8 @@ describe('LicenseActivation', () => {
   it('reloads registered status when the modal is reopened', async () => {
     invokeMock.mockImplementation(async (command) => {
       switch (command) {
+        case 'get_supporter_status':
+          return { isRegistered: true, provider: 'lemon_squeezy' };
         case 'get_license_status':
           return { isRegistered: true, licenseKey: 'abcd…1234' };
         default:
@@ -135,5 +187,35 @@ describe('LicenseActivation', () => {
     expect(
       invokeMock.mock.calls.filter(([command]) => command === 'get_license_status'),
     ).toHaveLength(2);
+  });
+
+  it('renders App Store purchase and restore controls without license-key UI', async () => {
+    distributionState.info = {
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreCountry: 'us',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+      legacyImportAvailable: false,
+    };
+
+    invokeMock.mockImplementation(async (command) => {
+      switch (command) {
+        case 'get_supporter_status':
+          return { isRegistered: false, provider: 'app_store' };
+        default:
+          throw new Error(`Unexpected command: ${command}`);
+      }
+    });
+
+    render(<LicenseActivation open onClose={vi.fn()} />);
+
+    expect(await screen.findByText('Support SyncWatcher in the App Store.')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('License key')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Purchase Supporter' })).toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith('get_license_status');
   });
 });

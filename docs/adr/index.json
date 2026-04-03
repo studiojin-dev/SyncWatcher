@@ -14,7 +14,7 @@
     ],
     "status": "Accepted",
     "date": "2026-04-01",
-    "tldr": "Ship GitHub DMG and Mac App Store as separate channels, keep optional supporter purchases provider-specific, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.",
+    "tldr": "Ship GitHub DMG and Mac App Store as separate channels, keep optional supporter purchases provider-specific, submit the App Store build locally instead of through GitHub release automation, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.",
     "path": "docs/adr/ADR-20260401-0021-MAS-app-store-channel-split-storekit-and-sandbox-bookmarks.md"
   },
   {

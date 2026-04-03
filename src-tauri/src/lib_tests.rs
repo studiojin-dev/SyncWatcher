@@ -51,21 +51,23 @@ mod integration_tests {
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc::{sync_channel, Receiver};
     use std::sync::{Arc, Mutex as StdMutex};
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
     use tauri::Listener;
     use tempfile::tempdir;
     use tokio::sync::{Mutex, Notify, RwLock};
     use tokio_util::sync::CancellationToken;
 
+    static TEMP_CONFIG_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
     fn temp_config_dir() -> PathBuf {
-        let seq = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("syncwatcher-lib-tests-{seq}"))
+        let seq = TEMP_CONFIG_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "syncwatcher-lib-tests-{}-{seq}",
+            std::process::id()
+        ))
     }
 
     fn build_runtime_task(id: &str, source: &str, watch_mode: bool) -> RuntimeSyncTask {
@@ -608,6 +610,48 @@ mod integration_tests {
             .load_tasks()
             .expect("tasks should remain readable");
         assert!(tasks.is_empty(), "invalid create must not persist any task");
+    }
+
+    #[tokio::test]
+    async fn test_create_sync_task_internal_normalizes_empty_bookmarks_before_persist() {
+        let state = build_app_state();
+
+        let created = create_sync_task_internal(
+            SyncTaskRecord {
+                id: "task-empty-bookmarks".to_string(),
+                name: "Task".to_string(),
+                source: "/tmp/source".to_string(),
+                target: "/tmp/target".to_string(),
+                source_bookmark: Some(String::new()),
+                target_bookmark: Some("   ".to_string()),
+                checksum_mode: false,
+                verify_after_copy: true,
+                exclusion_sets: Vec::new(),
+                watch_mode: false,
+                auto_unmount: false,
+                source_type: Some(SourceType::Path),
+                source_uuid: None,
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+                recurring_schedules: Vec::new(),
+            },
+            None,
+            &state,
+        )
+        .await
+        .expect("create should succeed");
+
+        assert_eq!(created.source_bookmark, None);
+        assert_eq!(created.target_bookmark, None);
+
+        let tasks = state
+            .config_store
+            .load_tasks()
+            .expect("tasks should remain readable");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].source_bookmark, None);
+        assert_eq!(tasks[0].target_bookmark, None);
     }
 
     #[test]
@@ -2573,8 +2617,8 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_preflight_target_path_creates_missing_directory_for_sync() {
-        let base = temp_config_dir();
-        let target = base.join("nested/backup");
+        let base = tempdir().expect("tempdir should be created");
+        let target = base.path().join("nested/backup");
 
         let result = preflight_target_path(&target, true)
             .await
@@ -2582,21 +2626,19 @@ mod integration_tests {
 
         assert_eq!(result.kind, TargetPreflightKind::CreatedDirectory);
         assert!(target.is_dir());
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[tokio::test]
     async fn test_sync_dry_run_internal_cleans_up_cancel_token_on_error() {
         let state = build_app_state();
-        let base = temp_config_dir();
-        let target = base.join("target");
+        let base = tempdir().expect("tempdir should be created");
+        let target = base.path().join("target");
         std::fs::create_dir_all(&target).expect("target directory should be created");
 
         let result = sync_dry_run_internal(
             None,
             "task-1".to_string(),
-            base.join("missing-source"),
+            base.path().join("missing-source"),
             target,
             false,
             Vec::new(),
@@ -2608,8 +2650,6 @@ mod integration_tests {
 
         assert!(result.is_err());
         assert!(state.dry_run_cancel_tokens.read().await.is_empty());
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[tokio::test]
@@ -2717,9 +2757,9 @@ mod integration_tests {
     #[tokio::test]
     async fn test_sync_dry_run_internal_returns_sorted_diff_order() {
         let state = build_app_state();
-        let base = temp_config_dir();
-        let source = base.join("source");
-        let target = base.join("target");
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
         std::fs::create_dir_all(&source).expect("source directory should be created");
         std::fs::create_dir_all(&target).expect("target directory should be created");
 
@@ -2747,8 +2787,6 @@ mod integration_tests {
             .collect();
 
         assert_eq!(paths, vec!["a.txt".to_string(), "b.txt".to_string()]);
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -2,6 +2,8 @@
 
 This runbook is for release rehearsal (for example `v1.2.3-rc1`) after enabling SBOM generation and stable-required / prerelease-opt-in cosign attestation in `.github/workflows/release.yml`.
 
+It applies to the GitHub DMG distribution channel only. Mac App Store submission stays local/manual and is not part of the GitHub release workflow.
+
 ## 1) Pre-flight checklist
 
 1. Confirm release workflow uses:

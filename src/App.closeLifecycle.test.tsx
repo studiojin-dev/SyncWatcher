@@ -29,12 +29,24 @@ const runtimeState: MockRuntimeState = {
 
 const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
 const {
+  reloadDistributionMock,
+  resolveDistributionMock,
   setLastLogMock,
   setQueuedMock,
   setLaunchAtLoginMock,
   updateSettingsMock,
   updateCheckerPropsMock,
 } = vi.hoisted(() => ({
+  reloadDistributionMock: vi.fn(),
+  resolveDistributionMock: vi.fn(async () => ({
+    channel: 'github' as const,
+    purchaseProvider: 'lemon_squeezy' as const,
+    canSelfUpdate: true,
+    appStoreAppId: null,
+    appStoreCountry: 'us',
+    appStoreUrl: null,
+    legacyImportAvailable: false,
+  })),
   setLastLogMock: vi.fn(),
   setQueuedMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
@@ -115,7 +127,8 @@ vi.mock('./context/DistributionContext', () => ({
       legacyImportAvailable: false,
     },
     loaded: true,
-    reload: vi.fn(),
+    reload: reloadDistributionMock,
+    resolve: resolveDistributionMock,
   }),
 }));
 
@@ -246,6 +259,17 @@ async function emitEvent(eventName: string, payload?: unknown) {
 describe('App close lifecycle', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    reloadDistributionMock.mockReset();
+    resolveDistributionMock.mockReset();
+    resolveDistributionMock.mockResolvedValue({
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    });
     setLastLogMock.mockReset();
     setQueuedMock.mockReset();
     setLaunchAtLoginMock.mockReset();
@@ -276,6 +300,7 @@ describe('App close lifecycle', () => {
       if (command === 'refresh_supporter_status') {
         return {
           isRegistered: runtimeState.isRegistered,
+          provider: 'lemon_squeezy',
         };
       }
       if (command === 'runtime_get_state') {
@@ -311,7 +336,10 @@ describe('App close lifecycle', () => {
 
   it('keeps registered state while startup supporter refresh is pending or succeeds', async () => {
     runtimeState.isRegistered = true;
-    const deferred = createDeferred<{ isRegistered: boolean }>();
+    const deferred = createDeferred<{
+      isRegistered: boolean;
+      provider: 'lemon_squeezy' | 'app_store';
+    }>();
 
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'refresh_supporter_status') {
@@ -341,7 +369,7 @@ describe('App close lifecycle', () => {
 
     expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
 
-    deferred.resolve({ isRegistered: true });
+    deferred.resolve({ isRegistered: true, provider: 'lemon_squeezy' });
 
     await waitFor(() => {
       expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
@@ -394,7 +422,7 @@ describe('App close lifecycle', () => {
 
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'refresh_supporter_status') {
-        return { isRegistered: false };
+        return { isRegistered: false, provider: 'lemon_squeezy' };
       }
       if (command === 'runtime_get_state') {
         return {

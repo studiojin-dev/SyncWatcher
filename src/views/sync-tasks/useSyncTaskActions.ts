@@ -4,14 +4,17 @@ import { ask } from '@tauri-apps/plugin-dialog';
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type Dispatch,
   type FormEvent,
   type SetStateAction,
 } from 'react';
+import { fetchDistributionInfo } from '../../context/DistributionContext';
 import type { SyncTask } from '../../hooks/useSyncTasks';
 import { useSyncTaskStatusStore, type TaskStatus } from '../../hooks/useSyncTaskStatus';
 import { toRuntimeTask } from '../../types/runtime';
+import { getDistributionPolicy } from '../../utils/distributionPolicy';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
 import { capturePathAccess } from '../../utils/pathAccess';
 import { isUuidSourceResolutionError } from '../../utils/syncTaskSourceRecommendations';
@@ -69,10 +72,6 @@ interface UseSyncTaskActionsOptions {
   onRequestSourceRecommendationReview?: (taskId: string) => void;
 }
 
-interface DistributionInfo {
-  channel: 'github' | 'app_store';
-}
-
 export function useSyncTaskActions({
   tasks,
   statuses,
@@ -103,10 +102,19 @@ export function useSyncTaskActions({
     null,
   );
   const [savingTask, setSavingTask] = useState(false);
+  const savingTaskRef = useRef(false);
   const [conflictSessions, setConflictSessions] = useState<
     ConflictSessionSummary[]
   >([]);
   const [conflictSessionsLoading, setConflictSessionsLoading] = useState(false);
+
+  const normalizeBookmarkForSubmission = useCallback(
+    (bookmark: string | null | undefined): string | undefined => {
+      const trimmed = bookmark?.trim() ?? '';
+      return trimmed || undefined;
+    },
+    [],
+  );
 
   const clearCancelConfirm = useCallback(() => {
     setCancelConfirm(null);
@@ -241,215 +249,229 @@ export function useSyncTaskActions({
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (savingTask) {
+      if (savingTaskRef.current) {
         return;
       }
-      const formData = new FormData(event.currentTarget);
+      savingTaskRef.current = true;
+      setSavingTask(true);
+      try {
+        const formData = new FormData(event.currentTarget);
 
-      let finalSource = form.sourcePath || (formData.get('source') as string);
-      const normalizedSourceSubPath = normalizeUuidSubPath(form.sourceSubPath);
-      const parsedEditingSourceToken =
-        editingTask?.sourceType === 'uuid'
-          ? parseUuidSourceToken(editingTask.source || '')
-          : null;
-      const editingSourceUuid =
-        editingTask?.sourceUuid || parsedEditingSourceToken?.uuid || '';
-      const editingSourceTokenType =
-        editingTask?.sourceUuidType ||
-        (parsedEditingSourceToken?.tokenType === 'disk' ||
-        parsedEditingSourceToken?.tokenType === 'volume'
-          ? parsedEditingSourceToken.tokenType
-          : parsedEditingSourceToken?.tokenType) ||
-        '';
-      const editingSourceSubPath = normalizeUuidSubPath(
-        editingTask?.sourceSubPath ?? parsedEditingSourceToken?.subPath ?? '/',
-      );
-      const resolvedSourceTokenType: UuidTokenType | undefined =
-        form.sourceType === 'uuid'
-          ? form.sourceTokenType ||
-            inferUuidTypeFromVolumes(form.sourceUuid, form.volumes) ||
-            (editingSourceTokenType as UuidTokenType | '') ||
-            'disk'
-          : undefined;
-      const selectedMountedUuidOption = form.selectedUuidOption?.mounted ?? false;
-      const selectedSourceMountPoint = form.selectedUuidOption?.mountPoint ?? null;
-      const isEditingExistingUuidSource = Boolean(
-        editingTask &&
-          (editingTask.sourceType === 'uuid' || parsedEditingSourceToken),
-      );
-      const sourceSelectionChanged =
-        form.sourceType === 'uuid' &&
-        isEditingExistingUuidSource &&
-        (form.sourceUuid !== editingSourceUuid ||
-          resolvedSourceTokenType !== editingSourceTokenType);
-      const sourceSubPathChanged =
-        form.sourceType === 'uuid' &&
-        isEditingExistingUuidSource &&
-        normalizedSourceSubPath !== editingSourceSubPath;
-      const shouldReuseExistingUuidSource = Boolean(
-        isEditingExistingUuidSource &&
-          !sourceSelectionChanged &&
-          !sourceSubPathChanged,
-      );
-      const resolvedSourceUuidType: SourceUuidType | undefined =
-        resolvedSourceTokenType === 'disk' || resolvedSourceTokenType === 'volume'
-          ? resolvedSourceTokenType
-          : undefined;
-
-      if (form.sourceType === 'uuid') {
-        const canKeepUnmountedUuidSource =
-          Boolean(editingTask) &&
+        let finalSource = form.sourcePath || (formData.get('source') as string);
+        const normalizedSourceSubPath = normalizeUuidSubPath(form.sourceSubPath);
+        const parsedEditingSourceToken =
+          editingTask?.sourceType === 'uuid'
+            ? parseUuidSourceToken(editingTask.source || '')
+            : null;
+        const editingSourceUuid =
+          editingTask?.sourceUuid || parsedEditingSourceToken?.uuid || '';
+        const editingSourceTokenType =
+          editingTask?.sourceUuidType ||
+          (parsedEditingSourceToken?.tokenType === 'disk' ||
+          parsedEditingSourceToken?.tokenType === 'volume'
+            ? parsedEditingSourceToken.tokenType
+            : parsedEditingSourceToken?.tokenType) ||
+          '';
+        const editingSourceSubPath = normalizeUuidSubPath(
+          editingTask?.sourceSubPath ?? parsedEditingSourceToken?.subPath ?? '/',
+        );
+        const resolvedSourceTokenType: UuidTokenType | undefined =
+          form.sourceType === 'uuid'
+            ? form.sourceTokenType ||
+              inferUuidTypeFromVolumes(form.sourceUuid, form.volumes) ||
+              (editingSourceTokenType as UuidTokenType | '') ||
+              'disk'
+            : undefined;
+        const selectedMountedUuidOption =
+          form.selectedUuidOption?.mounted ?? false;
+        const selectedSourceMountPoint = form.selectedUuidOption?.mountPoint ?? null;
+        const isEditingExistingUuidSource = Boolean(
+          editingTask &&
+            (editingTask.sourceType === 'uuid' || parsedEditingSourceToken),
+        );
+        const sourceSelectionChanged =
+          form.sourceType === 'uuid' &&
           isEditingExistingUuidSource &&
-          !sourceSelectionChanged;
+          (form.sourceUuid !== editingSourceUuid ||
+            resolvedSourceTokenType !== editingSourceTokenType);
+        const sourceSubPathChanged =
+          form.sourceType === 'uuid' &&
+          isEditingExistingUuidSource &&
+          normalizedSourceSubPath !== editingSourceSubPath;
+        const shouldReuseExistingUuidSource = Boolean(
+          isEditingExistingUuidSource &&
+            !sourceSelectionChanged &&
+            !sourceSubPathChanged,
+        );
+        const resolvedSourceUuidType: SourceUuidType | undefined =
+          resolvedSourceTokenType === 'disk' || resolvedSourceTokenType === 'volume'
+            ? resolvedSourceTokenType
+            : undefined;
 
-        if (
-          !form.sourceUuid ||
-          !resolvedSourceTokenType ||
-          (!selectedMountedUuidOption && !canKeepUnmountedUuidSource)
+        if (form.sourceType === 'uuid') {
+          const canKeepUnmountedUuidSource =
+            Boolean(editingTask) &&
+            isEditingExistingUuidSource &&
+            !sourceSelectionChanged;
+
+          if (
+            !form.sourceUuid ||
+            !resolvedSourceTokenType ||
+            (!selectedMountedUuidOption && !canKeepUnmountedUuidSource)
+          ) {
+            showToast(
+              t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' }),
+              'warning',
+            );
+            return;
+          }
+
+          finalSource = shouldReuseExistingUuidSource && editingTask
+            ? editingTask.source
+            : buildUuidSourceToken(
+                resolvedSourceTokenType,
+                form.sourceUuid,
+                normalizedSourceSubPath,
+              );
+        }
+
+        const distribution = await fetchDistributionInfo();
+        const policy = getDistributionPolicy(distribution);
+        const ensureBookmarkAccess = async (
+          path: string,
+          existingBookmark: string | null | undefined,
+          label: string,
+        ): Promise<{ path: string; bookmark: string } | null> => {
+          const trimmedBookmark = existingBookmark?.trim() ?? '';
+          if (!policy.requiresSecurityScopedBookmarks) {
+            return { path, bookmark: trimmedBookmark };
+          }
+          if (trimmedBookmark) {
+            return { path, bookmark: trimmedBookmark };
+          }
+          if (!path.trim()) {
+            showToast(`${label}: Path is required.`, 'warning');
+            return null;
+          }
+
+          try {
+            const captured = await capturePathAccess(path);
+            const bookmark = captured.bookmark?.trim() ?? '';
+            if (!bookmark) {
+              showToast(
+                `${label}: ${t('syncTasks.selectVolume', {
+                  defaultValue: 'Select the folder again with Browse to grant access.',
+                })}`,
+                'warning',
+              );
+              return null;
+            }
+            return {
+              path: captured.path,
+              bookmark,
+            };
+          } catch (error) {
+            showToast(`${label}: ${getErrorMessage(error)}`, 'error');
+            return null;
+          }
+        };
+
+        let sourceBookmark = form.sourceBookmark ?? '';
+        if (form.sourceType === 'path') {
+          const capturedSource = await ensureBookmarkAccess(
+            finalSource,
+            form.sourceBookmark,
+            t('syncTasks.source'),
+          );
+          if (!capturedSource) {
+            return;
+          }
+          finalSource = capturedSource.path;
+          sourceBookmark = capturedSource.bookmark;
+        } else if (selectedMountedUuidOption && selectedSourceMountPoint) {
+          const capturedSource = await ensureBookmarkAccess(
+            selectedSourceMountPoint,
+            form.sourceBookmark,
+            t('syncTasks.source'),
+          );
+          if (!capturedSource) {
+            return;
+          }
+          sourceBookmark = capturedSource.bookmark;
+        } else if (
+          policy.requiresSecurityScopedBookmarks &&
+          !(form.sourceBookmark ?? '').trim()
         ) {
           showToast(
-            t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' }),
+            t('syncTasks.volumeNotMounted', {
+              defaultValue:
+                'Mount the source volume and select it again to grant folder access.',
+            }),
             'warning',
           );
           return;
         }
 
-        finalSource = shouldReuseExistingUuidSource && editingTask
-          ? editingTask.source
-          : buildUuidSourceToken(
-              resolvedSourceTokenType,
-              form.sourceUuid,
-              normalizedSourceSubPath,
-            );
-      }
-
-      const distribution = await invoke<DistributionInfo>('get_distribution_info');
-      const isAppStoreBuild = distribution.channel === 'app_store';
-      const ensureBookmarkAccess = async (
-        path: string,
-        existingBookmark: string | null | undefined,
-        label: string,
-      ): Promise<{ path: string; bookmark: string } | null> => {
-        const trimmedBookmark = existingBookmark?.trim() ?? '';
-        if (!isAppStoreBuild) {
-          return { path, bookmark: trimmedBookmark };
-        }
-        if (trimmedBookmark) {
-          return { path, bookmark: trimmedBookmark };
-        }
-        if (!path.trim()) {
-          showToast(`${label}: Path is required.`, 'warning');
-          return null;
-        }
-
-        try {
-          const captured = await capturePathAccess(path);
-          const bookmark = captured.bookmark?.trim() ?? '';
-          if (!bookmark) {
-            showToast(
-              `${label}: ${t('syncTasks.selectVolume', {
-                defaultValue: 'Select the folder again with Browse to grant access.',
-              })}`,
-              'warning',
-            );
-            return null;
-          }
-          return {
-            path: captured.path,
-            bookmark,
-          };
-        } catch (error) {
-          showToast(`${label}: ${getErrorMessage(error)}`, 'error');
-          return null;
-        }
-      };
-
-      let sourceBookmark = form.sourceBookmark ?? '';
-      if (form.sourceType === 'path') {
-        const capturedSource = await ensureBookmarkAccess(
-          finalSource,
-          form.sourceBookmark,
-          t('syncTasks.source'),
+        let targetPath = form.targetPath || (formData.get('target') as string);
+        let targetBookmark = form.targetBookmark ?? '';
+        const capturedTarget = await ensureBookmarkAccess(
+          targetPath,
+          form.targetBookmark,
+          t('syncTasks.target'),
         );
-        if (!capturedSource) {
+        if (!capturedTarget) {
           return;
         }
-        finalSource = capturedSource.path;
-        sourceBookmark = capturedSource.bookmark;
-      } else if (selectedMountedUuidOption && selectedSourceMountPoint) {
-        const capturedSource = await ensureBookmarkAccess(
-          selectedSourceMountPoint,
-          form.sourceBookmark,
-          t('syncTasks.source'),
-        );
-        if (!capturedSource) {
-          return;
-        }
-        sourceBookmark = capturedSource.bookmark;
-      } else if (isAppStoreBuild && !(form.sourceBookmark ?? '').trim()) {
-        showToast(
-          t('syncTasks.volumeNotMounted', {
-            defaultValue:
-              'Mount the source volume and select it again to grant folder access.',
-          }),
-          'warning',
-        );
-        return;
-      }
+        targetPath = capturedTarget.path;
+        targetBookmark = capturedTarget.bookmark;
 
-      let targetPath = form.targetPath || (formData.get('target') as string);
-      let targetBookmark = form.targetBookmark ?? '';
-      const capturedTarget = await ensureBookmarkAccess(
-        targetPath,
-        form.targetBookmark,
-        t('syncTasks.target'),
-      );
-      if (!capturedTarget) {
-        return;
-      }
-      targetPath = capturedTarget.path;
-      targetBookmark = capturedTarget.bookmark;
+        const normalizedSourceBookmark =
+          normalizeBookmarkForSubmission(sourceBookmark);
+        const normalizedTargetBookmark =
+          normalizeBookmarkForSubmission(targetBookmark);
 
-      const taskData = {
-        name: formData.get('name') as string,
-        source: finalSource,
-        sourceBookmark,
-        target: targetPath,
-        targetBookmark,
-        checksumMode: formData.get('checksumMode') === 'on',
-        exclusionSets: form.selectedSets,
-        watchMode: form.watchMode,
-        autoUnmount: shouldEnableAutoUnmount({
+        const taskData = {
+          name: formData.get('name') as string,
           source: finalSource,
-          sourceType: form.sourceType,
+          ...(normalizedSourceBookmark
+            ? { sourceBookmark: normalizedSourceBookmark }
+            : {}),
+          target: targetPath,
+          ...(normalizedTargetBookmark
+            ? { targetBookmark: normalizedTargetBookmark }
+            : {}),
+          checksumMode: formData.get('checksumMode') === 'on',
+          exclusionSets: form.selectedSets,
           watchMode: form.watchMode,
-          autoUnmount: form.autoUnmount,
-        }),
-        sourceType: form.sourceType,
-        sourceUuid:
-          form.sourceType === 'uuid'
-            ? shouldReuseExistingUuidSource
-              ? editingTask?.sourceUuid
-              : resolvedSourceUuidType
-                ? form.sourceUuid
-                : undefined
-            : undefined,
-        sourceUuidType:
-          form.sourceType === 'uuid'
-            ? shouldReuseExistingUuidSource
-              ? editingTask?.sourceUuidType
-              : resolvedSourceUuidType
-            : undefined,
-        sourceSubPath:
-          form.sourceType === 'uuid'
-            ? shouldReuseExistingUuidSource
-              ? editingTask?.sourceSubPath
-              : normalizedSourceSubPath
-            : undefined,
-      };
+          autoUnmount: shouldEnableAutoUnmount({
+            source: finalSource,
+            sourceType: form.sourceType,
+            watchMode: form.watchMode,
+            autoUnmount: form.autoUnmount,
+          }),
+          sourceType: form.sourceType,
+          sourceUuid:
+            form.sourceType === 'uuid'
+              ? shouldReuseExistingUuidSource
+                ? editingTask?.sourceUuid
+                : resolvedSourceUuidType
+                  ? form.sourceUuid
+                  : undefined
+              : undefined,
+          sourceUuidType:
+            form.sourceType === 'uuid'
+              ? shouldReuseExistingUuidSource
+                ? editingTask?.sourceUuidType
+                : resolvedSourceUuidType
+              : undefined,
+          sourceSubPath:
+            form.sourceType === 'uuid'
+              ? shouldReuseExistingUuidSource
+                ? editingTask?.sourceSubPath
+                : normalizedSourceSubPath
+              : undefined,
+        };
 
-      setSavingTask(true);
-      try {
         const provisionalTask: SyncTask = editingTask
           ? { ...editingTask, ...taskData }
           : { id: crypto.randomUUID(), ...taskData };
@@ -490,6 +512,7 @@ export function useSyncTaskActions({
       } catch (error) {
         showToast(getErrorMessage(error), 'error');
       } finally {
+        savingTaskRef.current = false;
         setSavingTask(false);
       }
     },
@@ -500,11 +523,11 @@ export function useSyncTaskActions({
       form,
       savingTask,
       setValidationErrorModal,
-      setSavingTask,
       showToast,
       t,
       tasks,
       updateTask,
+      normalizeBookmarkForSubmission,
     ],
   );
 

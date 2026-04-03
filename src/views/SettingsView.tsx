@@ -7,6 +7,7 @@ import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
 import { DataUnitSystem } from '../utils/formatBytes';
 import { capturePathAccess } from '../utils/pathAccess';
+import { getDistributionPolicy } from '../utils/distributionPolicy';
 import LicenseActivation from '../components/features/LicenseActivation';
 import { lemonSqueezyCheckoutUrl, privacyPolicyUrl, termsOfServiceUrl } from '../config/appLinks';
 
@@ -25,10 +26,12 @@ const languages = [
  */
 function SettingsView() {
     const { t } = useTranslation();
-    const { info: distribution } = useDistribution();
+    const { info: distribution, loaded: distributionLoaded } = useDistribution();
     const { settings, updateSettings, setLaunchAtLogin, resetSettings, loaded } = useSettings();
     const [showLicenseModal, setShowLicenseModal] = useState(false);
-    const isAppStoreBuild = distribution.channel === 'app_store';
+    const policy = getDistributionPolicy(distribution);
+    const canShowExternalCheckout =
+        distributionLoaded && policy.supportsExternalCheckout && !!lemonSqueezyCheckoutUrl;
     const themes = [
         { value: 'system', label: t('settings.themeSystem') },
         { value: 'light', label: t('settings.themeLight') },
@@ -185,7 +188,11 @@ function SettingsView() {
                                         stateLocation: e.target.value,
                                         stateLocationBookmark: '',
                                     })}
-                                    readOnly={isAppStoreBuild}
+                                    readOnly={
+                                        distributionLoaded
+                                            ? policy.requiresSecurityScopedBookmarks
+                                            : true
+                                    }
                                     className="neo-input flex-1 font-mono text-sm"
                                     placeholder={t('settings.stateLocationPlaceholder')}
                                 />
@@ -321,7 +328,7 @@ function SettingsView() {
                         </div>
 
                         <div className="flex flex-col gap-3 sm:flex-row">
-                            {!isAppStoreBuild ? (
+                            {canShowExternalCheckout ? (
                                 <a
                                     href={lemonSqueezyCheckoutUrl}
                                     target="_blank"
@@ -334,15 +341,18 @@ function SettingsView() {
                             <button
                                 type="button"
                                 onClick={() => setShowLicenseModal(true)}
+                                disabled={!distributionLoaded}
                                 className="border-3 border-[var(--border-main)] bg-[var(--bg-primary)] px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors hover:bg-[var(--bg-secondary)]"
                             >
-                                {isAppStoreBuild
-                                    ? settings.isRegistered
-                                        ? t('license.restore')
-                                        : t('license.appStorePurchase')
-                                    : settings.isRegistered
-                                        ? t('license.manage')
-                                        : t('license.enterLicense')}
+                                {!distributionLoaded
+                                    ? t('common.loading')
+                                    : policy.supportsStoreKitPurchase
+                                        ? settings.isRegistered
+                                            ? t('license.restore')
+                                            : t('license.appStorePurchase')
+                                        : settings.isRegistered
+                                            ? t('license.manage')
+                                            : t('license.enterLicense')}
                             </button>
                         </div>
                     </div>

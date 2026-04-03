@@ -242,7 +242,7 @@ jobs:
           tagName: ${{ inputs.tag_name || github.ref_name }}
           releaseDraft: true
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           args: --target x86_64-apple-darwin
 
   merge_latest_json:

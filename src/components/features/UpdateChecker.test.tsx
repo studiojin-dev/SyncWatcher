@@ -20,6 +20,36 @@ const { checkMock, relaunchMock, showToastMock } = vi.hoisted(() => ({
   relaunchMock: vi.fn(),
   showToastMock: vi.fn(),
 }));
+const distributionState = vi.hoisted(() => {
+  const distributionState = {
+    loaded: true,
+    info: {
+      channel: 'github' as const,
+      purchaseProvider: 'lemon_squeezy' as const,
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    },
+    resolvedInfo: {
+      channel: 'github' as const,
+      purchaseProvider: 'lemon_squeezy' as const,
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    },
+    resolve: vi.fn(async () => {
+      distributionState.loaded = true;
+      distributionState.info = distributionState.resolvedInfo;
+      return distributionState.resolvedInfo;
+    }),
+  };
+
+  return distributionState;
+});
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -41,10 +71,9 @@ vi.mock('../ui/Toast', () => ({
 
 vi.mock('../../hooks/useDistribution', () => ({
   useDistribution: () => ({
-    info: {
-      channel: 'github',
-      appStoreUrl: null,
-    },
+    info: distributionState.info,
+    loaded: distributionState.loaded,
+    resolve: distributionState.resolve,
   }),
 }));
 
@@ -72,6 +101,12 @@ vi.mock('react-i18next', () => ({
           return 'Update check already in progress.';
         case 'update.checkFailed':
           return 'Failed to check for updates.';
+        case 'update.appStoreDescription':
+          return 'Open the App Store to install this update.';
+        case 'update.appStoreAvailable':
+          return `App Store v${options?.version} is available`;
+        case 'update.openAppStore':
+          return 'Open App Store';
         case 'common.close':
           return 'Close';
         default:
@@ -89,6 +124,17 @@ describe('UpdateChecker', () => {
     relaunchMock.mockReset();
     showToastMock.mockReset();
     invokeMock.mockReset();
+    distributionState.loaded = true;
+    distributionState.info = {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    };
+    distributionState.resolvedInfo = { ...distributionState.info };
   });
 
   it('checks once automatically when enabled and stays hidden when no update exists', async () => {
@@ -265,5 +311,62 @@ describe('UpdateChecker', () => {
     await waitFor(() => {
       expect(showToastMock).toHaveBeenCalledWith('Failed to check for updates.', 'error');
     });
+  });
+
+  it('authoritatively resolves App Store distribution before routing update checks', async () => {
+    distributionState.loaded = false;
+    distributionState.info = {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    };
+    distributionState.resolvedInfo = {
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreCountry: 'us',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+      legacyImportAvailable: false,
+    };
+
+    invokeMock.mockImplementation(async (command) => {
+      if (command === 'check_app_store_update') {
+        return {
+          available: true,
+          currentVersion: '1.0.0',
+          latestVersion: '1.2.0',
+          storeUrl: 'https://apps.apple.com/us/app/id123456789',
+          manualOnly: false,
+        };
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const { rerender } = render(
+      <UpdateChecker
+        autoCheckEnabled={false}
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled={false}
+        manualCheckRequestNonce={1}
+      />,
+    );
+
+    expect(await screen.findByText('App Store v1.2.0 is available')).toBeInTheDocument();
+    expect(checkMock).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith('check_app_store_update');
+    expect(screen.getByRole('link', { name: 'Open App Store' })).toHaveAttribute(
+      'href',
+      'https://apps.apple.com/us/app/id123456789',
+    );
   });
 });
