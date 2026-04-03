@@ -210,7 +210,7 @@
     ],
     "status": "Accepted",
     "date": "2026-03-06",
-    "tldr": "Expose a local stdio MCP relay only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.",
+    "tldr": "Expose a local stdio MCP relay mode on the main SyncWatcher executable only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.",
     "path": "docs/adr/ADR-20260306-0010-MCP-enabled-running-app-control-plane.md"
   },
   {

@@ -2,7 +2,7 @@
 Status: Accepted
 Date: 2026-03-06
 Tags: mcp, control-plane, config-store, runtime, tauri, macos
-TL;DR: Expose a local stdio MCP relay only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.
+TL;DR: Expose a local stdio MCP relay mode on the main SyncWatcher executable only when the user explicitly enables MCP in SyncWatcher settings, and route all MCP actions through the running app backend over a Unix socket with backend-owned canonical config.
 
 ## Context
 
@@ -34,8 +34,8 @@ TL;DR: Expose a local stdio MCP relay only when the user explicitly enables MCP 
    - If the app is not running, MCP requests fail with an actionable error instead of launching anything.
 3. Use a local Unix domain socket control plane under the app support directory.
    - The socket path is derived from bundle identifier `dev.studiojin.syncwatcher`.
-   - The stdio binary `syncwatcher-mcp` is a thin relay from MCP tool calls to that socket.
-   - The relay performs no sync-engine work and holds no canonical state.
+   - The main executable exposes a `--mcp-stdio` relay mode from MCP tool calls to that socket.
+   - The relay mode performs no sync-engine work and holds no canonical state.
 4. Move canonical config ownership to the Rust backend.
    - `settings.yaml`, `tasks.yaml`, and `exclusion_sets.yaml` are the canonical stores.
    - The backend validates, persists, reloads, and applies config.
@@ -80,7 +80,7 @@ TL;DR: Expose a local stdio MCP relay only when the user explicitly enables MCP 
 - MCP-triggered sync operations reuse the same validation and runtime/event flow as UI-triggered operations, so existing safety behavior remains aligned.
 - Frontend runtime progress stays real-time without a separate MCP event bridge because the app backend still emits the same Tauri events.
 - MCP can only work when the user explicitly enables it and keeps the app running, which reduces surprise activation and background exposure.
-- The relay remains small and replaceable because it only translates stdio MCP calls into local socket RPC.
+- The relay mode remains small and replaceable because it only translates stdio MCP calls into local socket RPC.
 - Because MCP clients poll jobs instead of receiving push events, external clients get simpler integration at the cost of polling latency.
 
 ## Alternatives Considered

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import SettingsView from './SettingsView';
 import type { DistributionInfo } from '../context/DistributionContext';
 
@@ -38,6 +39,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
@@ -100,10 +105,21 @@ function renderWithMantine() {
 }
 
 describe('SettingsView', () => {
+  const invokeMock = vi.mocked(invoke);
+
   beforeEach(() => {
     vi.clearAllMocks();
     distributionState.loaded = true;
     distributionState.info = createDistributionInfo();
+    invokeMock.mockImplementation(async (command) => {
+      if (command === 'get_mcp_stdio_config_example') {
+        return {
+          command: '/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher',
+          args: ['--mcp-stdio'],
+        };
+      }
+      return null;
+    });
   });
 
   it('calls setLaunchAtLogin when the launch-at-login switch is toggled', () => {
@@ -148,5 +164,17 @@ describe('SettingsView', () => {
 
     expect(screen.queryByRole('link', { name: 'about.purchaseLicense' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'license.appStorePurchase' })).toBeInTheDocument();
+  });
+
+  it('renders the MCP stdio config example using the installed executable path', async () => {
+    renderWithMantine();
+
+    expect(await screen.findByText('settings.mcpConfigExampleTitle')).toBeInTheDocument();
+    expect(
+      screen.getByText('/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher', {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('--mcp-stdio', { exact: false })).toBeInTheDocument();
   });
 });

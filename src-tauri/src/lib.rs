@@ -7,6 +7,7 @@ pub mod input_validation;
 pub mod license;
 pub mod license_validation;
 pub mod logging;
+pub mod mcp_stdio;
 pub mod mcp_jobs;
 pub mod path_validation;
 pub mod recurring;
@@ -66,6 +67,13 @@ use recurring::{
 use security_scoped::{CapturedPathAccess, LegacyImportStatus, SecurityScopedAccessManager};
 
 use watcher::{WatchEvent, WatcherManager};
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpStdioConfigExample {
+    command: String,
+    args: Vec<String>,
+}
 
 // Consolidated progress state (prevents race conditions and deadlocks)
 struct SyncProgressStateInner {
@@ -4866,6 +4874,16 @@ async fn get_settings(
 }
 
 #[tauri::command]
+async fn get_mcp_stdio_config_example() -> Result<McpStdioConfigExample, String> {
+    let command = std::env::current_exe()
+        .map_err(|error| format!("Failed to resolve current executable path: {error}"))?;
+    Ok(McpStdioConfigExample {
+        command: command.to_string_lossy().into_owned(),
+        args: vec!["--mcp-stdio".to_string()],
+    })
+}
+
+#[tauri::command]
 async fn get_distribution_info(app: tauri::AppHandle) -> Result<DistributionInfo, String> {
     Ok(distribution::distribution_info(
         &app,
@@ -8129,6 +8147,7 @@ pub fn run() {
             greet,
             get_app_version,
             get_settings,
+            get_mcp_stdio_config_example,
             get_distribution_info,
             get_supporter_status,
             refresh_supporter_status,

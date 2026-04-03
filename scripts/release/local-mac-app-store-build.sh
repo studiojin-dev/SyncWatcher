@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
+BUILD_NUMBER_FILE="${REPO_ROOT}/src-tauri/appstore-build-number.txt"
 UPLOAD_WITH_TRANSPORTER=0
 TRANSPORTER_BIN_DEFAULT="/Applications/Transporter.app/Contents/itms/bin/iTMSTransporter"
 TRANSPORTER_BIN="${TRANSPORTER_BIN_DEFAULT}"
@@ -19,6 +20,7 @@ submission .pkg with the App Store installer identity.
 Options:
   --env-file <path>   Path to the env file to source (default: .env)
   --upload            Upload the generated .pkg with Transporter after build
+  --build-number-file Repo-tracked integer file to use for CFBundleVersion
   --transporter-bin   Path to iTMSTransporter binary
   -h, --help          Show this help
 EOF
@@ -33,6 +35,10 @@ while [[ $# -gt 0 ]]; do
     --upload)
       UPLOAD_WITH_TRANSPORTER=1
       shift
+      ;;
+    --build-number-file)
+      BUILD_NUMBER_FILE="$2"
+      shift 2
       ;;
     --transporter-bin)
       TRANSPORTER_BIN="$2"
@@ -50,7 +56,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for bin in pnpm xcrun codesign pkgutil security; do
+for bin in pnpm xcrun codesign pkgutil security node plutil; do
   if ! command -v "$bin" >/dev/null 2>&1; then
     echo "Missing required command: $bin" >&2
     exit 1
@@ -110,6 +116,17 @@ if [[ ! -f "${APPLE_APP_STORE_PROVISIONING_PROFILE_PATH}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${BUILD_NUMBER_FILE}" ]]; then
+  echo "Build number file not found: ${BUILD_NUMBER_FILE}" >&2
+  exit 1
+fi
+
+APP_STORE_BUILD_NUMBER="$(tr -d '[:space:]' < "${BUILD_NUMBER_FILE}")"
+if [[ ! "${APP_STORE_BUILD_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Build number must be a positive integer: ${APP_STORE_BUILD_NUMBER}" >&2
+  exit 1
+fi
+
 if [[ "${UPLOAD_WITH_TRANSPORTER}" -eq 1 ]]; then
   for required in APPLE_API_KEY APPLE_API_ISSUER; do
     if [[ -z "${!required:-}" ]]; then
@@ -135,9 +152,12 @@ PRODUCT_NAME="$(node -p "require('./${CONFIG_PATH}').productName")"
 VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
 APP_BUNDLE="${REPO_ROOT}/src-tauri/target/release/bundle/macos/${PRODUCT_NAME}.app"
 OUTPUT_DIR="${REPO_ROOT}/dist-appstore"
-OUTPUT_PKG="${OUTPUT_DIR}/SyncWatcher-${VERSION}-mac-app-store.pkg"
+OUTPUT_PKG="${OUTPUT_DIR}/SyncWatcher-${VERSION}-b${APP_STORE_BUILD_NUMBER}-mac-app-store.pkg"
+INFO_PLIST="${APP_BUNDLE}/Contents/Info.plist"
+MACOS_BIN_DIR="${APP_BUNDLE}/Contents/MacOS"
+ENTITLEMENTS_PATH="${REPO_ROOT}/src-tauri/Entitlements.plist"
 
-echo "Building Mac App Store app bundle for ${PRODUCT_NAME} ${VERSION}"
+echo "Building Mac App Store app bundle for ${PRODUCT_NAME} ${VERSION} (build ${APP_STORE_BUILD_NUMBER})"
 ORIGINAL_APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
 ORIGINAL_APPLE_API_KEY="${APPLE_API_KEY:-}"
 ORIGINAL_APPLE_API_ISSUER="${APPLE_API_ISSUER:-}"
@@ -181,6 +201,37 @@ if [[ ! -d "${APP_BUNDLE}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${INFO_PLIST}" ]]; then
+  echo "Expected Info.plist not found: ${INFO_PLIST}" >&2
+  exit 1
+fi
+
+echo "Setting CFBundleVersion=${APP_STORE_BUILD_NUMBER}"
+plutil -replace CFBundleVersion -string "${APP_STORE_BUILD_NUMBER}" "${INFO_PLIST}"
+
+MAIN_EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${INFO_PLIST}")"
+if [[ -z "${MAIN_EXECUTABLE_NAME}" ]]; then
+  echo "Unable to determine CFBundleExecutable from ${INFO_PLIST}" >&2
+  exit 1
+fi
+
+echo "Removing nested executables from App Store bundle"
+for executable_path in "${MACOS_BIN_DIR}"/*; do
+  executable_name="$(basename "${executable_path}")"
+  if [[ "${executable_name}" == "${MAIN_EXECUTABLE_NAME}" ]]; then
+    continue
+  fi
+  rm -f "${executable_path}"
+done
+
+echo "Re-signing Mac App Store app bundle"
+codesign \
+  --force \
+  --deep \
+  --sign "${APPLE_APP_STORE_SIGNING_IDENTITY}" \
+  --entitlements "${ENTITLEMENTS_PATH}" \
+  "${APP_BUNDLE}"
+
 mkdir -p "${OUTPUT_DIR}"
 rm -f "${OUTPUT_PKG}"
 
@@ -209,6 +260,10 @@ if [[ "${UPLOAD_WITH_TRANSPORTER}" -eq 1 ]]; then
     -apiKey "${APPLE_API_KEY}" \
     -apiIssuer "${APPLE_API_ISSUER}" \
     -v informational
+
+  NEXT_BUILD_NUMBER="$((APP_STORE_BUILD_NUMBER + 1))"
+  printf '%s\n' "${NEXT_BUILD_NUMBER}" > "${BUILD_NUMBER_FILE}"
+  echo "Incremented App Store build number to ${NEXT_BUILD_NUMBER}"
 fi
 
 echo "Mac App Store local build complete"

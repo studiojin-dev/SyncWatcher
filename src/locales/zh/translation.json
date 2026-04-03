@@ -331,6 +331,8 @@
       "maxLogLines": "最大日志行数",
       "mcpEnabled": "启用 MCP 控制",
       "mcpEnabledDesc": "允许本地 MCP 客户端控制当前正在运行的应用。SyncWatcher 不会因为 MCP 自动启动。",
+      "mcpConfigExampleTitle": "MCP 客户端配置示例",
+      "mcpConfigExampleDesc": "请将已安装的 SyncWatcher 可执行文件路径设为 command，并传入 --mcp-stdio 参数。",
       "closeAction": "关闭动作",
       "closeActionDesc": "选择关闭应用时的行为",
       "closeActionQuit": "退出应用",

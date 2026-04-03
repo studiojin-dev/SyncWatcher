@@ -330,6 +330,8 @@
       "maxLogLines": "Max Log Lines",
       "mcpEnabled": "Enable MCP Control",
       "mcpEnabledDesc": "Allow local MCP clients to control this running app. SyncWatcher never launches itself for MCP.",
+      "mcpConfigExampleTitle": "MCP Client Config Example",
+      "mcpConfigExampleDesc": "Point your MCP client at the installed SyncWatcher executable and pass --mcp-stdio.",
       "closeAction": "Close Action",
       "closeActionDesc": "Choose what happens when closing the app",
       "closeActionQuit": "Quit",

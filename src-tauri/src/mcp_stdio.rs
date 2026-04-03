@@ -12,16 +12,17 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use syncwatcher_lib::config_store::{
+
+use crate::config_store::{
     default_config_dir, DeleteResultEnvelope, SettingsEnvelope, StoredSettings, SyncTaskEnvelope,
     SyncTasksEnvelope, SETTINGS_FILE_NAME,
 };
-use syncwatcher_lib::control_plane::{
+use crate::control_plane::{
     default_socket_path, send_request, ControlPlaneRequest, ControlPlaneResponse,
 };
-use syncwatcher_lib::mcp_jobs::McpJobEnvelope;
-use syncwatcher_lib::recurring::RecurringScheduleRecord;
-use syncwatcher_lib::system_integration::VolumeInfo;
+use crate::mcp_jobs::McpJobEnvelope;
+use crate::recurring::RecurringScheduleRecord;
+use crate::system_integration::VolumeInfo;
 
 static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -535,10 +536,10 @@ impl ServerHandler for SyncWatcherMcpServer {
         ServerInfo::default()
             .with_protocol_version(ProtocolVersion::LATEST)
             .with_server_info(
-                Implementation::new("syncwatcher-mcp", env!("CARGO_PKG_VERSION"))
+                Implementation::new("syncwatcher", env!("CARGO_PKG_VERSION"))
                     .with_title("SyncWatcher MCP Relay")
                     .with_description(
-                        "Thin stdio MCP relay for a manually launched SyncWatcher app.",
+                        "Thin stdio MCP relay mode for a manually launched SyncWatcher app.",
                     ),
             )
             .with_instructions(
@@ -547,10 +548,14 @@ impl ServerHandler for SyncWatcherMcpServer {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let server = SyncWatcherMcpServer::new();
-    let transport = rmcp::transport::io::stdio();
-    server.serve(transport).await?.waiting().await?;
-    Ok(())
+pub fn run_stdio_server() -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let server = SyncWatcherMcpServer::new();
+        let transport = rmcp::transport::io::stdio();
+        server.serve(transport).await?.waiting().await?;
+        Ok(())
+    })
 }

@@ -56,7 +56,3 @@ tempfile = "3.10"
 [[bin]]
 name = "sync-cli"
 path = "src/bin/sync-cli.rs"
-
-[[bin]]
-name = "syncwatcher-mcp"
-path = "src/bin/syncwatcher-mcp.rs"

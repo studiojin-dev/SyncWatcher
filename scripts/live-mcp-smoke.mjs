@@ -114,7 +114,7 @@ function socketFilePath(appSupportDir) {
 }
 
 function mcpBinaryPath() {
-  return path.join(repoRoot, 'src-tauri', 'target', 'debug', 'syncwatcher-mcp');
+  return path.join(repoRoot, 'src-tauri', 'target', 'debug', 'syncwatcher');
 }
 
 function readYamlFile(pathname) {
@@ -162,13 +162,13 @@ function createFixture(layout, payloadMib) {
 
 function ensureMcpBinary() {
   const binaryPath = mcpBinaryPath();
-  log('setup', 'Building syncwatcher-mcp relay binary');
+  log('setup', 'Building syncwatcher binary with MCP stdio mode');
   execFileSync(
     'cargo',
-    ['build', '--manifest-path', 'src-tauri/Cargo.toml', '--bin', 'syncwatcher-mcp'],
+    ['build', '--manifest-path', 'src-tauri/Cargo.toml', '--bin', 'syncwatcher'],
     { cwd: repoRoot, stdio: 'inherit' }
   );
-  assert(fs.existsSync(binaryPath), 'syncwatcher-mcp binary was not built', binaryPath);
+  assert(fs.existsSync(binaryPath), 'syncwatcher binary was not built', binaryPath);
   return binaryPath;
 }
 
@@ -316,7 +316,7 @@ class McpStdioClient {
     this.nextId = 1;
     this.buffer = '';
     this.pending = new Map();
-    this.child = spawn(mcpBinaryPath(), [], {
+    this.child = spawn(mcpBinaryPath(), ['--mcp-stdio'], {
       cwd: repoRoot,
       env: {
         ...process.env,
@@ -324,7 +324,7 @@ class McpStdioClient {
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    this.logs = new LoggedProcess(this.child, 'syncwatcher-mcp', {
+    this.logs = new LoggedProcess(this.child, 'syncwatcher --mcp-stdio', {
       captureStdout: false,
       captureStderr: true,
       useProcessGroup: false,
@@ -335,7 +335,7 @@ class McpStdioClient {
     });
     this.child.on('exit', (code, signal) => {
       for (const { reject } of this.pending.values()) {
-        reject(new Error(`syncwatcher-mcp exited before reply (code=${code ?? 'null'} signal=${signal ?? 'null'})`));
+        reject(new Error(`syncwatcher --mcp-stdio exited before reply (code=${code ?? 'null'} signal=${signal ?? 'null'})`));
       }
       this.pending.clear();
     });
