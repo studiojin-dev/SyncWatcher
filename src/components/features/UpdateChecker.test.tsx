@@ -3,6 +3,22 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import UpdateChecker from './UpdateChecker';
+import type { DistributionInfo } from '../../context/DistributionContext';
+
+function createDistributionInfo(
+  overrides: Partial<DistributionInfo> = {},
+): DistributionInfo {
+  return {
+    channel: 'github',
+    purchaseProvider: 'lemon_squeezy',
+    canSelfUpdate: true,
+    appStoreAppId: null,
+    appStoreCountry: 'us',
+    appStoreUrl: null,
+    legacyImportAvailable: false,
+    ...overrides,
+  };
+}
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -23,24 +39,8 @@ const { checkMock, relaunchMock, showToastMock } = vi.hoisted(() => ({
 const distributionState = vi.hoisted(() => {
   const distributionState = {
     loaded: true,
-    info: {
-      channel: 'github' as const,
-      purchaseProvider: 'lemon_squeezy' as const,
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    },
-    resolvedInfo: {
-      channel: 'github' as const,
-      purchaseProvider: 'lemon_squeezy' as const,
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    },
+    info: createDistributionInfo(),
+    resolvedInfo: createDistributionInfo(),
     resolve: vi.fn(async () => {
       distributionState.loaded = true;
       distributionState.info = distributionState.resolvedInfo;
@@ -125,15 +125,7 @@ describe('UpdateChecker', () => {
     showToastMock.mockReset();
     invokeMock.mockReset();
     distributionState.loaded = true;
-    distributionState.info = {
-      channel: 'github',
-      purchaseProvider: 'lemon_squeezy',
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    };
+    distributionState.info = createDistributionInfo();
     distributionState.resolvedInfo = { ...distributionState.info };
   });
 
@@ -315,24 +307,14 @@ describe('UpdateChecker', () => {
 
   it('authoritatively resolves App Store distribution before routing update checks', async () => {
     distributionState.loaded = false;
-    distributionState.info = {
-      channel: 'github',
-      purchaseProvider: 'lemon_squeezy',
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    };
-    distributionState.resolvedInfo = {
+    distributionState.info = createDistributionInfo();
+    distributionState.resolvedInfo = createDistributionInfo({
       channel: 'app_store',
       purchaseProvider: 'app_store',
       canSelfUpdate: false,
       appStoreAppId: '123456789',
-      appStoreCountry: 'us',
       appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
-      legacyImportAvailable: false,
-    };
+    });
 
     invokeMock.mockImplementation(async (command) => {
       if (command === 'check_app_store_update') {

@@ -3,6 +3,22 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import LicenseActivation from './LicenseActivation';
+import type { DistributionInfo } from '../../context/DistributionContext';
+
+function createDistributionInfo(
+  overrides: Partial<DistributionInfo> = {},
+): DistributionInfo {
+  return {
+    channel: 'github',
+    purchaseProvider: 'lemon_squeezy',
+    canSelfUpdate: true,
+    appStoreAppId: null,
+    appStoreCountry: 'us',
+    appStoreUrl: null,
+    legacyImportAvailable: false,
+    ...overrides,
+  };
+}
 
 const {
   distributionState,
@@ -10,15 +26,7 @@ const {
 } = vi.hoisted(() => {
   const distributionState = {
     loaded: true,
-    info: {
-      channel: 'github' as const,
-      purchaseProvider: 'lemon_squeezy' as const,
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    },
+    info: createDistributionInfo(),
     resolve: vi.fn(async () => distributionState.info),
   };
 
@@ -90,15 +98,7 @@ describe('LicenseActivation', () => {
     invokeMock.mockReset();
     updateSettingsMock.mockReset();
     distributionState.loaded = true;
-    distributionState.info = {
-      channel: 'github',
-      purchaseProvider: 'lemon_squeezy',
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    };
+    distributionState.info = createDistributionInfo();
   });
 
   it('activates a license key for an unregistered device', async () => {
@@ -190,15 +190,13 @@ describe('LicenseActivation', () => {
   });
 
   it('renders App Store purchase and restore controls without license-key UI', async () => {
-    distributionState.info = {
+    distributionState.info = createDistributionInfo({
       channel: 'app_store',
       purchaseProvider: 'app_store',
       canSelfUpdate: false,
       appStoreAppId: '123456789',
-      appStoreCountry: 'us',
       appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
-      legacyImportAvailable: false,
-    };
+    });
 
     invokeMock.mockImplementation(async (command) => {
       switch (command) {

@@ -2,6 +2,22 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Sidebar from './Sidebar';
 import { getVersion } from '@tauri-apps/api/app';
+import type { DistributionInfo } from '../../context/DistributionContext';
+
+function createDistributionInfo(
+  overrides: Partial<DistributionInfo> = {},
+): DistributionInfo {
+  return {
+    channel: 'github',
+    purchaseProvider: 'lemon_squeezy',
+    canSelfUpdate: true,
+    appStoreAppId: null,
+    appStoreCountry: 'us',
+    appStoreUrl: null,
+    legacyImportAvailable: false,
+    ...overrides,
+  };
+}
 
 vi.mock('@tauri-apps/api/app', () => ({
   getVersion: vi.fn(),
@@ -10,15 +26,7 @@ vi.mock('@tauri-apps/api/app', () => ({
 const mockState = vi.hoisted(() => ({
   isRegistered: false,
   distributionLoaded: true,
-  distributionInfo: {
-    channel: 'github' as const,
-    purchaseProvider: 'lemon_squeezy' as const,
-    canSelfUpdate: true,
-    appStoreAppId: null,
-    appStoreCountry: 'us',
-    appStoreUrl: null,
-    legacyImportAvailable: false,
-  },
+  distributionInfo: createDistributionInfo(),
   translations: {
     appName: 'SyncWatcher',
     'nav.syncTasks': 'Sync Tasks',
@@ -78,15 +86,7 @@ describe('Sidebar', () => {
     vi.clearAllMocks();
     mockState.isRegistered = false;
     mockState.distributionLoaded = true;
-    mockState.distributionInfo = {
-      channel: 'github',
-      purchaseProvider: 'lemon_squeezy',
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    };
+    mockState.distributionInfo = createDistributionInfo();
     mockGetVersion.mockResolvedValue('1.2.0-beta');
   });
 
@@ -117,15 +117,13 @@ describe('Sidebar', () => {
   });
 
   it('keeps App Store purchase UI free of external checkout links', async () => {
-    mockState.distributionInfo = {
+    mockState.distributionInfo = createDistributionInfo({
       channel: 'app_store',
       purchaseProvider: 'app_store',
       canSelfUpdate: false,
       appStoreAppId: '123456789',
-      appStoreCountry: 'us',
       appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
-      legacyImportAvailable: false,
-    };
+    });
 
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
     await screen.findByText('v1.2.0-beta');

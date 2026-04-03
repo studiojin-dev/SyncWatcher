@@ -92,6 +92,7 @@ normalize_path_var() {
 }
 
 normalize_path_var "APPLE_APP_STORE_PROVISIONING_PROFILE_PATH"
+normalize_path_var "APPLE_API_KEY_PATH"
 normalize_path_var "TRANSPORTER_BIN"
 
 for required in \
@@ -122,6 +123,11 @@ if [[ "${UPLOAD_WITH_TRANSPORTER}" -eq 1 ]]; then
     echo "Install Transporter.app from the Mac App Store or pass --transporter-bin." >&2
     exit 1
   fi
+
+  if [[ -z "${APPLE_API_KEY_PATH:-}" || ! -f "${APPLE_API_KEY_PATH}" ]]; then
+    echo "Missing required App Store Connect API private key file: APPLE_API_KEY_PATH" >&2
+    exit 1
+  fi
 fi
 
 CONFIG_PATH="src-tauri/tauri.appstore.conf.json"
@@ -132,7 +138,43 @@ OUTPUT_DIR="${REPO_ROOT}/dist-appstore"
 OUTPUT_PKG="${OUTPUT_DIR}/SyncWatcher-${VERSION}-mac-app-store.pkg"
 
 echo "Building Mac App Store app bundle for ${PRODUCT_NAME} ${VERSION}"
+ORIGINAL_APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
+ORIGINAL_APPLE_API_KEY="${APPLE_API_KEY:-}"
+ORIGINAL_APPLE_API_ISSUER="${APPLE_API_ISSUER:-}"
+ORIGINAL_APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:-}"
+ORIGINAL_APPLE_ID="${APPLE_ID:-}"
+ORIGINAL_APPLE_PASSWORD="${APPLE_PASSWORD:-}"
+ORIGINAL_APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
+
+export APPLE_SIGNING_IDENTITY="${APPLE_APP_STORE_SIGNING_IDENTITY}"
+unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+
 pnpm tauri build --bundles app --config "${CONFIG_PATH}"
+
+if [[ -n "${ORIGINAL_APPLE_SIGNING_IDENTITY}" ]]; then
+  export APPLE_SIGNING_IDENTITY="${ORIGINAL_APPLE_SIGNING_IDENTITY}"
+else
+  unset APPLE_SIGNING_IDENTITY
+fi
+
+if [[ -n "${ORIGINAL_APPLE_API_KEY}" ]]; then
+  export APPLE_API_KEY="${ORIGINAL_APPLE_API_KEY}"
+fi
+if [[ -n "${ORIGINAL_APPLE_API_ISSUER}" ]]; then
+  export APPLE_API_ISSUER="${ORIGINAL_APPLE_API_ISSUER}"
+fi
+if [[ -n "${ORIGINAL_APPLE_API_KEY_PATH}" ]]; then
+  export APPLE_API_KEY_PATH="${ORIGINAL_APPLE_API_KEY_PATH}"
+fi
+if [[ -n "${ORIGINAL_APPLE_ID}" ]]; then
+  export APPLE_ID="${ORIGINAL_APPLE_ID}"
+fi
+if [[ -n "${ORIGINAL_APPLE_PASSWORD}" ]]; then
+  export APPLE_PASSWORD="${ORIGINAL_APPLE_PASSWORD}"
+fi
+if [[ -n "${ORIGINAL_APPLE_TEAM_ID}" ]]; then
+  export APPLE_TEAM_ID="${ORIGINAL_APPLE_TEAM_ID}"
+fi
 
 if [[ ! -d "${APP_BUNDLE}" ]]; then
   echo "Expected app bundle not found: ${APP_BUNDLE}" >&2
@@ -156,6 +198,11 @@ pkgutil --check-signature "${OUTPUT_PKG}"
 
 if [[ "${UPLOAD_WITH_TRANSPORTER}" -eq 1 ]]; then
   echo "Uploading package with Transporter"
+  PRIVATE_KEYS_DIR="${HOME}/.appstoreconnect/private_keys"
+  mkdir -p "${PRIVATE_KEYS_DIR}"
+  chmod 700 "${PRIVATE_KEYS_DIR}"
+  ln -sf "${APPLE_API_KEY_PATH}" "${PRIVATE_KEYS_DIR}/AuthKey_${APPLE_API_KEY}.p8"
+
   "${TRANSPORTER_BIN}" \
     -m upload \
     -assetFile "${OUTPUT_PKG}" \

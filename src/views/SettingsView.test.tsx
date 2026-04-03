@@ -2,6 +2,22 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsView from './SettingsView';
+import type { DistributionInfo } from '../context/DistributionContext';
+
+function createDistributionInfo(
+  overrides: Partial<DistributionInfo> = {},
+): DistributionInfo {
+  return {
+    channel: 'github',
+    purchaseProvider: 'lemon_squeezy',
+    canSelfUpdate: true,
+    appStoreAppId: null,
+    appStoreCountry: 'us',
+    appStoreUrl: null,
+    legacyImportAvailable: false,
+    ...overrides,
+  };
+}
 
 const {
   distributionState,
@@ -11,15 +27,7 @@ const {
 } = vi.hoisted(() => ({
   distributionState: {
     loaded: true,
-    info: {
-      channel: 'github' as const,
-      purchaseProvider: 'lemon_squeezy' as const,
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    },
+    info: createDistributionInfo(),
   },
   updateSettingsMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
@@ -95,15 +103,7 @@ describe('SettingsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     distributionState.loaded = true;
-    distributionState.info = {
-      channel: 'github',
-      purchaseProvider: 'lemon_squeezy',
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    };
+    distributionState.info = createDistributionInfo();
   });
 
   it('calls setLaunchAtLogin when the launch-at-login switch is toggled', () => {
@@ -136,15 +136,13 @@ describe('SettingsView', () => {
   });
 
   it('hides the external checkout link in the App Store channel', () => {
-    distributionState.info = {
+    distributionState.info = createDistributionInfo({
       channel: 'app_store',
       purchaseProvider: 'app_store',
       canSelfUpdate: false,
       appStoreAppId: '123456789',
-      appStoreCountry: 'us',
       appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
-      legacyImportAvailable: false,
-    };
+    });
 
     renderWithMantine();
 
