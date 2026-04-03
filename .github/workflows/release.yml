@@ -10,6 +10,11 @@ on:
         description: "Release tag to build and publish"
         required: true
         type: string
+      reuse_published_release:
+        description: "Allow manual recovery by reusing an already-published release for this tag"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   tag_gate:
@@ -62,40 +67,64 @@ jobs:
       contents: write
     outputs:
       release_id: ${{ steps.ensure_release.outputs.release_id }}
+      release_is_draft: ${{ steps.ensure_release.outputs.release_is_draft }}
+      reused_published_release: ${{ steps.ensure_release.outputs.reused_published_release }}
     steps:
       - name: Ensure draft release exists
         id: ensure_release
         env:
+          EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
           IS_PRERELEASE: ${{ needs.tag_gate.outputs.is_prerelease }}
+          REUSE_PUBLISHED_RELEASE: ${{ inputs.reuse_published_release && 'true' || 'false' }}
         run: |
           set -euo pipefail
 
+          release_id=""
+          release_is_draft=""
+          reused_published_release="false"
           release_json="$(gh release view "$TAG_NAME" --json id,isDraft,url 2>/dev/null || true)"
           if [[ -n "$release_json" ]]; then
             release_id="$(jq -r '.id' <<<"$release_json")"
-            is_draft="$(jq -r '.isDraft' <<<"$release_json")"
-            if [[ "$is_draft" != "true" ]]; then
+            release_is_draft="$(jq -r '.isDraft' <<<"$release_json")"
+            if [[ "$release_is_draft" == "true" ]]; then
+              echo "Reusing existing draft release ${TAG_NAME} (${release_id})."
+            elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$REUSE_PUBLISHED_RELEASE" == "true" ]]; then
+              reused_published_release="true"
+              echo "Manual recovery enabled: reusing published release ${TAG_NAME} (${release_id})."
+              echo "Existing assets for this tag may be replaced by the recovery run."
+            else
               echo "Release ${TAG_NAME} is already published."
-              echo "Create and push a new patch tag before re-running the release workflow."
+              if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+                echo "To rebuild this exact tag, manually re-run the workflow with reuse_published_release=true."
+              else
+                echo "Tag-push runs do not mutate published releases."
+                echo "Cut and push a new patch tag, or run workflow_dispatch with reuse_published_release=true."
+              fi
               exit 1
             fi
-
-            echo "Reusing existing draft release ${TAG_NAME} (${release_id})."
           else
-            release_args=(--draft --title "SyncWatcher ${TAG_NAME}" --notes "See the assets to download this version and install.")
+            release_args=(
+              --draft
+              --title "SyncWatcher ${TAG_NAME}"
+              --generate-notes
+              --notes "Installer assets, updater metadata, checksums, and attestations are attached below."
+            )
             if [[ "$IS_PRERELEASE" == "true" ]]; then
               release_args+=(--prerelease)
             fi
 
             gh release create "$TAG_NAME" "${release_args[@]}" >/dev/null
             release_id="$(gh release view "$TAG_NAME" --json id --jq '.id')"
+            release_is_draft="true"
             echo "Created draft release ${TAG_NAME} (${release_id})."
           fi
 
           echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+          echo "release_is_draft=${release_is_draft}" >> "$GITHUB_OUTPUT"
+          echo "reused_published_release=${reused_published_release}" >> "$GITHUB_OUTPUT"
 
   release_aarch64:
     needs: [tag_gate, prepare_release]
@@ -167,7 +196,7 @@ jobs:
         with:
           releaseId: ${{ needs.prepare_release.outputs.release_id }}
           tagName: ${{ inputs.tag_name || github.ref_name }}
-          releaseDraft: true
+          releaseDraft: ${{ needs.prepare_release.outputs.release_is_draft == 'true' }}
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           args: --target aarch64-apple-darwin
 
@@ -240,7 +269,7 @@ jobs:
         with:
           releaseId: ${{ needs.prepare_release.outputs.release_id }}
           tagName: ${{ inputs.tag_name || github.ref_name }}
-          releaseDraft: true
+          releaseDraft: ${{ needs.prepare_release.outputs.release_is_draft == 'true' }}
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           includeUpdaterJson: false
           args: --target x86_64-apple-darwin
@@ -439,14 +468,48 @@ jobs:
         run: |
           gh release upload "$TAG_NAME" attestation-*.bundle.json --clobber
 
-  publish_release:
+  refresh_release_notes:
     needs: [tag_gate, prepare_release, release_aarch64, release_x64, merge_latest_json, sbom_and_attest]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Regenerate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          generated_notes="$(gh api \
+            --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GH_REPO}/releases/generate-notes" \
+            -f tag_name="${TAG_NAME}")"
+
+          generated_title="$(jq -r '.name' <<<"$generated_notes")"
+          notes_file="$(mktemp)"
+          {
+            echo "Installer assets, updater metadata, checksums, and attestations are attached below."
+            echo
+            jq -r '.body' <<<"$generated_notes"
+          } > "$notes_file"
+
+          gh release edit "$TAG_NAME" \
+            --title "$generated_title" \
+            --notes-file "$notes_file"
+
+  publish_release:
+    needs: [tag_gate, prepare_release, release_aarch64, release_x64, merge_latest_json, sbom_and_attest, refresh_release_notes]
+    if: needs.tag_gate.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
       - name: Publish draft release
+        if: needs.prepare_release.outputs.release_is_draft == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -458,3 +521,10 @@ jobs:
           else
             gh release edit "$TAG_NAME" --draft=false
           fi
+
+      - name: Skip publish for published-release recovery
+        if: needs.prepare_release.outputs.release_is_draft != 'true'
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          echo "Skipping publish step because ${TAG_NAME} was already published before this recovery run."

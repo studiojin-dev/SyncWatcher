@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260404-0022-REL",
+    "title": "Manual published-tag release recovery with explicit operator opt-in",
+    "tags": [
+      "release",
+      "ci",
+      "github-actions",
+      "tauri",
+      "updater",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-04",
+    "tldr": "Keep tag-push releases immutable by default, allow an explicit `workflow_dispatch` recovery path that reuses an already-published release only when the operator opts in, and require GitHub-generated release notes for every release creation or recovery run.",
+    "path": "docs/adr/ADR-20260404-0022-REL-manual-published-tag-recovery.md"
+  },
+  {
     "id": "ADR-20260401-0021-MAS",
     "title": "App Store channel split with StoreKit supporter state and sandbox bookmarks",
     "tags": [
@@ -93,9 +109,9 @@
       "updater",
       "macos"
     ],
-    "status": "Accepted",
+    "status": "Deprecated",
     "date": "2026-03-25",
-    "tldr": "Create or reuse one draft release per tag, let the ARM build author the canonical updater metadata first, append x64 assets afterward, and fail fast when a tag already has a published release.",
+    "tldr": "Create or reuse one draft release per tag, let the ARM build author the canonical updater metadata first, append x64 assets afterward, and fail fast when a tag already has a published release; superseded by ADR-20260404-0022-REL for explicit manual published-tag recovery.",
     "path": "docs/adr/ADR-20260325-0017-REL-release-arm-first-draft-reuse-and-published-tag-fail-fast.md"
   },
   {
