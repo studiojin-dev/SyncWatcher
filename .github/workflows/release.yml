@@ -106,29 +106,9 @@ jobs:
               exit 1
             fi
           else
-            tag_ref_json="$(gh api "repos/${GH_REPO}/git/ref/tags/${TAG_NAME}" 2>/dev/null || true)"
-            if [[ -z "$tag_ref_json" ]]; then
-              echo "Tag ${TAG_NAME} does not exist in ${GH_REPO}."
-              echo "Release creation requires an existing remote tag."
-              exit 1
-            fi
-
-            tag_object_type="$(jq -r '.object.type' <<<"$tag_ref_json")"
-            tag_object_sha="$(jq -r '.object.sha' <<<"$tag_ref_json")"
-            if [[ "$tag_object_type" == "commit" ]]; then
-              tag_target_commitish="$tag_object_sha"
-            elif [[ "$tag_object_type" == "tag" ]]; then
-              annotated_tag_json="$(gh api "repos/${GH_REPO}/git/tags/${tag_object_sha}")"
-              tag_target_commitish="$(jq -r '.object.sha' <<<"$annotated_tag_json")"
-            else
-              echo "Unsupported tag object type for ${TAG_NAME}: ${tag_object_type}"
-              exit 1
-            fi
-
             release_args=(
               --draft
               --verify-tag
-              --target "$tag_target_commitish"
               --title "SyncWatcher ${TAG_NAME}"
               --generate-notes
               --notes "Installer assets, updater metadata, checksums, and attestations are attached below."
