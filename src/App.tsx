@@ -121,11 +121,10 @@ function AppContent() {
     let cancelled = false;
 
     const refreshSupporterStatus = async () => {
-      try {
-        const result = await invoke<{
-          isRegistered: boolean;
-          provider: 'lemon_squeezy' | 'app_store';
-        }>('refresh_supporter_status');
+      const applySupporterStatus = (result: {
+        isRegistered: boolean;
+        provider: 'lemon_squeezy' | 'app_store';
+      }) => {
         assertSupporterProviderMatchesPolicy(
           getDistributionPolicy(distribution),
           result.provider,
@@ -133,8 +132,25 @@ function AppContent() {
         if (!cancelled) {
           updateSettings({ isRegistered: result.isRegistered });
         }
+      };
+
+      try {
+        const result = await invoke<{
+          isRegistered: boolean;
+          provider: 'lemon_squeezy' | 'app_store';
+        }>('refresh_supporter_status');
+        applySupporterStatus(result);
       } catch (err) {
         console.error('[App] Supporter status refresh failed:', err);
+        try {
+          const fallback = await invoke<{
+            isRegistered: boolean;
+            provider: 'lemon_squeezy' | 'app_store';
+          }>('get_supporter_status');
+          applySupporterStatus(fallback);
+        } catch (fallbackErr) {
+          console.error('[App] Supporter status fallback read failed:', fallbackErr);
+        }
       }
     };
 

@@ -6,6 +6,7 @@ import { ask, message } from '@tauri-apps/plugin-dialog';
 import type { ReactNode } from 'react';
 import type { SyncTask } from './hooks/useSyncTasks';
 import App from './App';
+import type { DistributionInfo } from './context/DistributionContext';
 
 interface MockRuntimeState {
   settingsLoaded: boolean;
@@ -29,6 +30,7 @@ const runtimeState: MockRuntimeState = {
 
 const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown>();
 const {
+  distributionState,
   reloadDistributionMock,
   resolveDistributionMock,
   setLastLogMock,
@@ -37,16 +39,20 @@ const {
   updateSettingsMock,
   updateCheckerPropsMock,
 } = vi.hoisted(() => ({
+  distributionState: {
+    loaded: true,
+    info: {
+      channel: 'github' as const,
+      purchaseProvider: 'lemon_squeezy' as const,
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    } as DistributionInfo,
+  },
   reloadDistributionMock: vi.fn(),
-  resolveDistributionMock: vi.fn(async () => ({
-    channel: 'github' as const,
-    purchaseProvider: 'lemon_squeezy' as const,
-    canSelfUpdate: true,
-    appStoreAppId: null,
-    appStoreCountry: 'us',
-    appStoreUrl: null,
-    legacyImportAvailable: false,
-  })),
+  resolveDistributionMock: vi.fn(async () => distributionState.info),
   setLastLogMock: vi.fn(),
   setQueuedMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
@@ -117,16 +123,8 @@ vi.mock('./context/SettingsContext', () => ({
 vi.mock('./context/DistributionContext', () => ({
   DistributionProvider: ({ children }: { children: ReactNode }) => children,
   useDistribution: () => ({
-    info: {
-      channel: 'github',
-      purchaseProvider: 'lemon_squeezy',
-      canSelfUpdate: true,
-      appStoreAppId: null,
-      appStoreCountry: 'us',
-      appStoreUrl: null,
-      legacyImportAvailable: false,
-    },
-    loaded: true,
+    info: distributionState.info,
+    loaded: distributionState.loaded,
     reload: reloadDistributionMock,
     resolve: resolveDistributionMock,
   }),
@@ -282,6 +280,16 @@ describe('App close lifecycle', () => {
     runtimeState.notifications = true;
     runtimeState.isRegistered = false;
     runtimeState.tasks = [];
+    distributionState.loaded = true;
+    distributionState.info = {
+      channel: 'github',
+      purchaseProvider: 'lemon_squeezy',
+      canSelfUpdate: true,
+      appStoreAppId: null,
+      appStoreCountry: 'us',
+      appStoreUrl: null,
+      legacyImportAvailable: false,
+    };
     localStorage.clear();
     localStorage.setItem('syncwatcher_bg_intro_shown', '1');
 
@@ -413,6 +421,116 @@ describe('App close lifecycle', () => {
       );
     });
     expect(updateSettingsMock).not.toHaveBeenCalledWith({ isRegistered: false });
+
+    consoleError.mockRestore();
+  });
+
+  it('falls back to locally cached supporter status when startup refresh throws', async () => {
+    runtimeState.isRegistered = false;
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'refresh_supporter_status') {
+        throw new Error('network down');
+      }
+      if (command === 'get_supporter_status') {
+        return {
+          isRegistered: true,
+          provider: 'lemon_squeezy',
+        };
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('get_supporter_status');
+    });
+    await waitFor(() => {
+      expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: true });
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      '[App] Supporter status refresh failed:',
+      expect.any(Error),
+    );
+
+    consoleError.mockRestore();
+  });
+
+  it('falls back to App Store supporter status when startup refresh throws on App Store builds', async () => {
+    distributionState.info = {
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreCountry: 'us',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+      legacyImportAvailable: false,
+    };
+    resolveDistributionMock.mockResolvedValue(distributionState.info);
+    runtimeState.isRegistered = false;
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'refresh_supporter_status') {
+        throw new Error('storekit bridge busy');
+      }
+      if (command === 'get_supporter_status') {
+        return {
+          isRegistered: true,
+          provider: 'app_store',
+        };
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('get_supporter_status');
+    });
+    await waitFor(() => {
+      expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: true });
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      '[App] Supporter status refresh failed:',
+      expect.any(Error),
+    );
 
     consoleError.mockRestore();
   });
