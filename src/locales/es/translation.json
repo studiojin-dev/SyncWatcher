@@ -436,6 +436,14 @@
           "notMounted": "Si el UUID no está montado, falla la resolución de ruta y no puede iniciar sync/watch.",
           "subPath": "Puede definir un sub path dentro del volumen montado para sincronizar solo parte del dispositivo.",
           "autoCopyOnInsert": "Cuando se inserta un disco extraíble como una tarjeta SD, la copia se ejecuta automáticamente. Puede configurar el desmontaje automático al finalizar la copia."
+        },
+        "mcpControl": {
+          "title": "MCP Control",
+          "description": "Cómo los clientes MCP locales pueden controlar de forma segura la app en ejecución.",
+          "runningAppOnly": "SyncWatcher expone MCP como un relay stdio ligero hacia la app en ejecución. El relay no ejecuta directamente la lógica de sincronización.",
+          "enableFirst": "Primero activa Ajustes -> Habilitar control MCP. MCP está desactivado por defecto y nunca inicia la app automáticamente.",
+          "jobPolling": "Las acciones de larga duración, como Dry Run, Sync y Orphan scan, devuelven un jobId. Consulta syncwatcher_get_job para seguir el progreso o leer el resultado final.",
+          "exposedScope": "MCP v1 cubre ajustes, CRUD de SyncTask, dry-run, sync, orphan scan, estado de runtime, control de jobs y listado de volúmenes extraíbles. No expone borrado de huérfanos, resolución de conflictos, control directo de unmount, acciones de licencia ni autoarranque de la app."
         }
       },
       "syncEngine": {

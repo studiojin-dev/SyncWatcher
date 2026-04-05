@@ -438,6 +438,14 @@
           "notMounted": "指定UUIDが未マウントの場合、パス解決に失敗し、同期/監視を開始できません。",
           "subPath": "マウント済みボリューム内のサブパスを指定し、デバイスの一部だけを同期できます。",
           "autoCopyOnInsert": "SDカードなどのリムーバブルディスクを挿入すると、自動でコピーを実行します。設定でコピー完了後の自動アンマウントを有効にできます。"
+        },
+        "mcpControl": {
+          "title": "MCP Control",
+          "description": "ローカル MCP クライアントが実行中のアプリを安全に制御する方法です。",
+          "runningAppOnly": "SyncWatcher の MCP は、実行中アプリへ接続する軽量な stdio リレーとして公開されます。リレー自体が同期ロジックを直接実行することはありません。",
+          "enableFirst": "まず Settings -> Enable MCP Control を有効にしてください。MCP は初期状態で無効であり、アプリを自動起動することはありません。",
+          "jobPolling": "Dry Run、Sync、Orphan scan のような長時間処理は jobId を返します。進捗確認や最終結果の取得には syncwatcher_get_job をポーリングしてください。",
+          "exposedScope": "MCP v1 で扱えるのは、設定、SyncTask の CRUD、dry-run、sync、orphan scan、ランタイム状態、job 制御、リムーバブルボリューム一覧です。orphan 削除、競合解決、直接 unmount 制御、ライセンス操作、アプリ自動起動は公開しません。"
         }
       },
       "syncEngine": {

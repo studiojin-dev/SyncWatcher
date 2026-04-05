@@ -436,6 +436,14 @@
           "notMounted": "若对应 UUID 未挂载，路径解析会失败，无法启动同步/监控。",
           "subPath": "可指定挂载卷内的子路径，仅同步设备中的部分目录。",
           "autoCopyOnInsert": "插入 SD 卡等可移动磁盘时会自动执行复制。你可以在设置中启用复制完成后自动卸载。"
+        },
+        "mcpControl": {
+          "title": "MCP Control",
+          "description": "说明本地 MCP 客户端如何安全地控制正在运行的应用。",
+          "runningAppOnly": "SyncWatcher 将 MCP 暴露为连接到运行中应用的轻量 stdio relay。relay 本身不会直接执行同步逻辑。",
+          "enableFirst": "请先在 Settings 中开启 Enable MCP Control。MCP 默认是关闭的，也不会自动启动应用。",
+          "jobPolling": "Dry Run、Sync、Orphan scan 这类长时间操作会返回 jobId。请轮询 syncwatcher_get_job 来查看进度或读取最终结果。",
+          "exposedScope": "MCP v1 覆盖设置、SyncTask 的增删改查、dry-run、sync、orphan scan、运行时状态、job 控制以及可移动卷列表。不提供 orphan 删除、冲突处理、直接卸载控制、许可证操作或应用自动启动。"
         }
       },
       "syncEngine": {

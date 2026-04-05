@@ -40,6 +40,8 @@ Source와 Target을 고르고, 반복되는 백업 흐름에 맞게 태스크를
 
 - [SyncTask Guide (English)](./docs/synctask.md)
 - [SyncTask Guide (Korean)](./docs/synctask.ko.md)
+- [MCP Control Guide (English)](./docs/mcp.md)
+- [MCP Control Guide (Korean)](./docs/mcp.ko.md)
 
 ## 주요 특징
 

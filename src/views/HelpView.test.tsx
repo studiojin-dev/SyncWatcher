@@ -22,6 +22,9 @@ vi.mock('react-i18next', () => ({
           'Recurring schedules only run while the SyncWatcher process is alive.',
         'help.sections.conflictOrphan.title': 'Conflict / Cleanup Workflow',
         'help.sections.conflictOrphan.orphanWorkflow': 'Use Orphan scan -> select -> confirm delete for target-only files.',
+        'help.sections.mcpControl.title': 'MCP Control',
+        'help.sections.mcpControl.runningAppOnly':
+          'SyncWatcher exposes MCP as a thin stdio relay to the running app. It does not run sync logic directly inside the relay.',
         'help.feedback.title': 'Questions & Suggestions',
         'help.feedback.description': 'Share questions or feature suggestions in GitHub Discussions.',
         'help.feedback.linkText': 'Questions/Suggestions (Discussions)',
@@ -59,6 +62,12 @@ describe('HelpView', () => {
     expect(screen.getByText('Conflict / Cleanup Workflow')).toBeInTheDocument();
     expect(
       screen.getByText('Use Orphan scan -> select -> confirm delete for target-only files.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('MCP Control')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'SyncWatcher exposes MCP as a thin stdio relay to the running app. It does not run sync logic directly inside the relay.'
+      )
     ).toBeInTheDocument();
   });
 

@@ -93,6 +93,18 @@ function HelpView() {
         t('help.sections.uuidSource.autoCopyOnInsert'),
       ],
     },
+    {
+      id: 'mcpControl',
+      icon: IconShield,
+      title: t('help.sections.mcpControl.title'),
+      description: t('help.sections.mcpControl.description'),
+      features: [
+        t('help.sections.mcpControl.runningAppOnly'),
+        t('help.sections.mcpControl.enableFirst'),
+        t('help.sections.mcpControl.jobPolling'),
+        t('help.sections.mcpControl.exposedScope'),
+      ],
+    },
   ];
 
   return (

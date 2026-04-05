@@ -40,6 +40,8 @@ Detailed walkthroughs:
 
 - [SyncTask Guide (English)](./docs/synctask.md)
 - [SyncTask Guide (Korean)](./docs/synctask.ko.md)
+- [MCP Control Guide (English)](./docs/mcp.md)
+- [MCP Control Guide (Korean)](./docs/mcp.ko.md)
 
 ## Feature Highlights
 
