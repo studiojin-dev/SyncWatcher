@@ -194,7 +194,7 @@
     ],
     "status": "Accepted",
     "date": "2026-03-10",
-    "tldr": "Replace per-ecosystem built-in exclusion defaults with one `program` built-in set, automatically migrate legacy built-in IDs in stored exclusion sets and tasks, and remove `.gitignore` from the `git` built-in set.",
+    "tldr": "Replace per-ecosystem built-in exclusion defaults with one `program` built-in set, automatically migrate legacy built-in IDs in stored exclusion sets and tasks, and remove project-authored files like `.gitignore` and `.env` from built-in defaults.",
     "path": "docs/adr/ADR-20260310-0012-PRG-exclusion-defaults-consolidation-into-program.md"
   },
   {

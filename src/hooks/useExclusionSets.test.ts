@@ -85,6 +85,7 @@ describe('useExclusionSets', () => {
         const programSet = result.current.sets.find((set) => set.id === 'program');
         expect(gitSet?.patterns).toEqual(['.git']);
         expect(programSet?.patterns).toContain('.pnpm-store');
+        expect(programSet?.patterns).not.toContain('.env');
         expect(programSet?.patterns).not.toContain('.pnpm_store');
     });
 

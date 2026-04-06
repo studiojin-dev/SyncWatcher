@@ -41,6 +41,7 @@ const LEGACY_PROGRAM_SET_IDS: [&str; 10] = [
     "swift-xcode",
     "infra-terraform",
 ];
+const RETIRED_PROGRAM_DEFAULT_PATTERNS: &[&str] = &[".env"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -1233,6 +1234,21 @@ fn extend_unique_patterns(
     }
 }
 
+fn extend_unique_program_patterns(
+    target: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+    patterns: Vec<String>,
+) {
+    extend_unique_patterns(
+        target,
+        seen,
+        patterns
+            .into_iter()
+            .filter(|pattern| !RETIRED_PROGRAM_DEFAULT_PATTERNS.contains(&pattern.as_str()))
+            .collect(),
+    );
+}
+
 fn normalize_git_patterns(patterns: Vec<String>) -> Vec<String> {
     let mut normalized = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1267,14 +1283,14 @@ fn normalize_exclusion_sets(sets: Vec<ExclusionSetRecord>) -> Vec<ExclusionSetRe
                 git_patterns = Some(normalize_git_patterns(set.patterns));
             }
             PROGRAM_SET_ID => {
-                extend_unique_patterns(
+                extend_unique_program_patterns(
                     &mut program_patterns,
                     &mut seen_program_patterns,
                     set.patterns,
                 );
             }
             id if is_legacy_program_set_id(id) => {
-                extend_unique_patterns(
+                extend_unique_program_patterns(
                     &mut program_patterns,
                     &mut seen_program_patterns,
                     set.patterns,
@@ -1454,7 +1470,16 @@ mod tests {
             ExclusionSetRecord {
                 id: "python".to_string(),
                 name: "Python".to_string(),
-                patterns: vec!["__pycache__".to_string(), "custom-python".to_string()],
+                patterns: vec![
+                    "__pycache__".to_string(),
+                    ".env".to_string(),
+                    "custom-python".to_string(),
+                ],
+            },
+            ExclusionSetRecord {
+                id: PROGRAM_SET_ID.to_string(),
+                name: "Program".to_string(),
+                patterns: vec![".env".to_string(), "custom-program".to_string()],
             },
         ]);
 
@@ -1490,6 +1515,10 @@ mod tests {
         assert!(!normalized[2]
             .patterns
             .iter()
+            .any(|pattern| pattern == ".env"));
+        assert!(!normalized[2]
+            .patterns
+            .iter()
             .any(|pattern| pattern == ".pnpm_store"));
         assert_eq!(
             normalized[2].patterns.first().map(String::as_str),
@@ -1501,7 +1530,7 @@ mod tests {
             .any(|pair| pair[0] == "node_modules" && pair[1] == ".pnpm"));
         assert_eq!(
             normalized[2].patterns.last().map(String::as_str),
-            Some("custom-python")
+            Some("custom-program")
         );
     }
 
