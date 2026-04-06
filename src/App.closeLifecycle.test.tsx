@@ -342,6 +342,75 @@ describe('App close lifecycle', () => {
     expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
   });
 
+  it('shows the hidden owner license debug modal only when the guarded command succeeds', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'get_owner_license_debug_snapshot') {
+        return {
+          appSupportDir: '/Users/test/Library/Application Support/dev.studiojin.syncwatcher',
+          markerPath: '/Users/test/Library/Application Support/dev.studiojin.syncwatcher/.owner-license-debug',
+          licenseStatePath: '/Users/test/Library/Application Support/dev.studiojin.syncwatcher/license_state.json',
+          distribution: {
+            channel: 'github',
+            purchaseProvider: 'lemon_squeezy',
+            canSelfUpdate: true,
+            appStoreAppId: null,
+            appStoreCountry: 'us',
+            appStoreUrl: null,
+            legacyImportAvailable: false,
+          },
+          cachedSupporterStatus: {
+            isRegistered: true,
+            provider: 'lemon_squeezy',
+          },
+          cachedLicenseStatus: {
+            isRegistered: true,
+            licenseKey: 'abcd…1234',
+          },
+          cachedLicenseState: {
+            licenseKey: 'abcd1234',
+            instanceId: 'instance-1',
+            validatedAt: '2026-04-06T00:00:00Z',
+            isValid: true,
+          },
+          refreshSupporterStatus: {
+            ok: true,
+            status: {
+              isRegistered: true,
+              provider: 'lemon_squeezy',
+            },
+            error: null,
+          },
+        };
+      }
+      if (command === 'refresh_supporter_status') {
+        return {
+          isRegistered: runtimeState.isRegistered,
+          provider: 'lemon_squeezy',
+        };
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    render(<App />);
+
+    expect(await screen.findByTestId('owner-license-debug-modal')).toBeInTheDocument();
+    expect(screen.getByText('Owner License Debug')).toBeInTheDocument();
+    expect(screen.getByText(/instance-1/)).toBeInTheDocument();
+  });
+
   it('keeps registered state while startup supporter refresh is pending or succeeds', async () => {
     runtimeState.isRegistered = true;
     const deferred = createDeferred<{

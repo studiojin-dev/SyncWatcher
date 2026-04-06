@@ -75,6 +75,32 @@ struct McpStdioConfigExample {
     args: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnerLicenseRefreshSnapshot {
+    ok: bool,
+    status: Option<supporter::SupporterStatus>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnerLicenseDebugSnapshot {
+    app_support_dir: String,
+    marker_path: String,
+    license_state_path: String,
+    distribution: DistributionInfo,
+    cached_supporter_status: supporter::SupporterStatus,
+    cached_license_status: license_validation::LicenseStatus,
+    cached_license_state: Option<license_validation::LicenseState>,
+    refresh_supporter_status: OwnerLicenseRefreshSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OwnerLicenseDebugAccess {
+    marker_path: PathBuf,
+}
+
 // Consolidated progress state (prevents race conditions and deadlocks)
 struct SyncProgressStateInner {
     last_emit_time: Instant,
@@ -380,6 +406,8 @@ struct AppExitControl {
 }
 
 const AUTOSTART_ARG: &str = "--autostart";
+const OWNER_LICENSE_DEBUG_ARG_PREFIX: &str = "--owner-license-debug=";
+const OWNER_LICENSE_DEBUG_MARKER_FILE: &str = ".owner-license-debug";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AutostartLaunchDecision {
@@ -4904,6 +4932,45 @@ async fn refresh_supporter_status(
 }
 
 #[tauri::command]
+async fn get_owner_license_debug_snapshot(
+    app: tauri::AppHandle,
+) -> Result<OwnerLicenseDebugSnapshot, String> {
+    let access = owner_license_debug_access_for_app(&app)?;
+    let app_support_dir =
+        config_store::app_support_dir_for_app(&app).map_err(config_store_error_to_string)?;
+    let distribution =
+        distribution::distribution_info(&app, security_scoped::legacy_import_available(&app));
+    let cached_supporter_status = supporter::get_supporter_status_for_app(app.clone()).await?;
+    let cached_license_status = license_validation::get_license_status(app.clone()).await?;
+    let license_state_path = license_validation::debug_license_state_path(&app)?;
+    let cached_license_state = license_validation::debug_load_license_state(&app);
+    let refresh_supporter_status = match supporter::refresh_supporter_status_for_app(app.clone()).await
+    {
+        Ok(status) => OwnerLicenseRefreshSnapshot {
+            ok: true,
+            status: Some(status),
+            error: None,
+        },
+        Err(error) => OwnerLicenseRefreshSnapshot {
+            ok: false,
+            status: None,
+            error: Some(error),
+        },
+    };
+
+    Ok(OwnerLicenseDebugSnapshot {
+        app_support_dir: app_support_dir.to_string_lossy().into_owned(),
+        marker_path: access.marker_path.to_string_lossy().into_owned(),
+        license_state_path: license_state_path.to_string_lossy().into_owned(),
+        distribution,
+        cached_supporter_status,
+        cached_license_status,
+        cached_license_state,
+        refresh_supporter_status,
+    })
+}
+
+#[tauri::command]
 async fn purchase_lifetime_supporter(
     app: tauri::AppHandle,
 ) -> Result<supporter::SupporterPurchaseResponse, String> {
@@ -7561,6 +7628,47 @@ where
         .any(|arg| arg.as_ref() == OsStr::new(AUTOSTART_ARG))
 }
 
+pub(crate) fn owner_license_debug_token_from_args<I, S>(args: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    args.into_iter().find_map(|arg| {
+        let value = arg.as_ref().to_string_lossy();
+        value
+            .strip_prefix(OWNER_LICENSE_DEBUG_ARG_PREFIX)
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(ToOwned::to_owned)
+    })
+}
+
+fn owner_license_debug_token() -> Option<String> {
+    owner_license_debug_token_from_args(std::env::args_os())
+}
+
+fn owner_license_debug_marker_path(app: &AppHandle) -> Result<PathBuf, String> {
+    config_store::app_support_dir_for_app(app)
+        .map(|path| path.join(OWNER_LICENSE_DEBUG_MARKER_FILE))
+        .map_err(config_store_error_to_string)
+}
+
+fn owner_license_debug_access_for_app(app: &AppHandle) -> Result<OwnerLicenseDebugAccess, String> {
+    let token = owner_license_debug_token()
+        .ok_or_else(|| "Owner license debug launch token not provided.".to_string())?;
+    let marker_path = owner_license_debug_marker_path(app)?;
+    let expected = std::fs::read_to_string(&marker_path)
+        .map_err(|_| "Owner license debug marker file not found.".to_string())?;
+    let expected = expected.trim();
+    if expected.is_empty() {
+        return Err("Owner license debug marker file is empty.".to_string());
+    }
+    if expected != token {
+        return Err("Owner license debug token mismatch.".to_string());
+    }
+    Ok(OwnerLicenseDebugAccess { marker_path })
+}
+
 fn is_autostart_launch() -> bool {
     has_autostart_arg(std::env::args_os())
 }
@@ -8151,6 +8259,7 @@ pub fn run() {
             get_distribution_info,
             get_supporter_status,
             refresh_supporter_status,
+            get_owner_license_debug_snapshot,
             purchase_lifetime_supporter,
             restore_lifetime_supporter,
             capture_path_access,

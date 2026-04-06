@@ -113,6 +113,12 @@ fn license_state_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, Stri
     Ok(app_data.join(LICENSE_STATE_FILE))
 }
 
+pub(crate) fn debug_license_state_path(
+    app: &tauri::AppHandle,
+) -> Result<std::path::PathBuf, String> {
+    license_state_path(app)
+}
+
 /// 저장된 라이선스 상태를 로드합니다.
 ///
 /// # Arguments
@@ -124,6 +130,10 @@ fn load_license_state(app: &tauri::AppHandle) -> Option<LicenseState> {
     let path = license_state_path(app).ok()?;
     let content = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
+}
+
+pub(crate) fn debug_load_license_state(app: &tauri::AppHandle) -> Option<LicenseState> {
+    load_license_state(app)
 }
 
 fn clear_license_state(app: &tauri::AppHandle) -> Result<(), String> {

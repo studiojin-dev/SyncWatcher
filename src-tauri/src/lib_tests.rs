@@ -31,6 +31,7 @@ mod integration_tests {
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         log_conflict_resolution_failure, log_conflict_resolution_success,
         log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
+        owner_license_debug_token_from_args,
         normalize_uuid_sub_path, parse_uuid_source_path,
         persist_patched_sync_task_and_collect_history_warnings, preflight_target_path,
         progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
@@ -1031,6 +1032,26 @@ mod integration_tests {
     fn test_has_autostart_arg_detects_flag() {
         assert!(has_autostart_arg(["syncwatcher", "--autostart"]));
         assert!(!has_autostart_arg(["syncwatcher", "--verbose"]));
+    }
+
+    #[test]
+    fn test_owner_license_debug_token_from_args_extracts_secret() {
+        let token = owner_license_debug_token_from_args([
+            "syncwatcher",
+            "--owner-license-debug=my-secret-token",
+        ]);
+
+        assert_eq!(token.as_deref(), Some("my-secret-token"));
+    }
+
+    #[test]
+    fn test_owner_license_debug_token_from_args_rejects_empty_secret() {
+        let token = owner_license_debug_token_from_args([
+            "syncwatcher",
+            "--owner-license-debug=",
+        ]);
+
+        assert_eq!(token, None);
     }
 
     #[test]

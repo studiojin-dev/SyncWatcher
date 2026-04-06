@@ -44,6 +44,40 @@ const FIRST_RUN_INTRO_STORAGE_KEY = 'syncwatcher_first_run_intro_seen';
 const APP_STORE_IMPORT_PROMPT_STORAGE_KEY = 'syncwatcher_app_store_legacy_import_prompted';
 type CloseIntent = 'window-close' | 'cmd-quit' | 'tray-quit';
 
+interface OwnerLicenseRefreshSnapshot {
+  ok: boolean;
+  status?: {
+    isRegistered: boolean;
+    provider: 'lemon_squeezy' | 'app_store';
+  } | null;
+  error?: string | null;
+}
+
+interface OwnerLicenseDebugSnapshot {
+  appSupportDir: string;
+  markerPath: string;
+  licenseStatePath: string;
+  distribution: {
+    channel: 'github' | 'app_store';
+    purchaseProvider: 'lemon_squeezy' | 'app_store';
+    canSelfUpdate: boolean;
+    appStoreAppId: string | null;
+    appStoreCountry: string;
+    appStoreUrl: string | null;
+    legacyImportAvailable: boolean;
+  };
+  cachedSupporterStatus: {
+    isRegistered: boolean;
+    provider: 'lemon_squeezy' | 'app_store';
+  };
+  cachedLicenseStatus: {
+    isRegistered: boolean;
+    licenseKey: string | null;
+  };
+  cachedLicenseState?: unknown;
+  refreshSupporterStatus: OwnerLicenseRefreshSnapshot;
+}
+
 function getCurrentWindowLabel(): string {
   try {
     return getCurrentWebviewWindow().label;
@@ -71,6 +105,7 @@ function AppContent() {
   const { loaded: setsLoaded } = useExclusionSetsContext();
   const [initialRuntimeSync, setInitialRuntimeSync] = useState<InitialRuntimeSyncState>('idle');
   const [showFirstRunIntro, setShowFirstRunIntro] = useState(false);
+  const [ownerLicenseDebugSnapshot, setOwnerLicenseDebugSnapshot] = useState<OwnerLicenseDebugSnapshot | null>(null);
   const [isEnablingLaunchAtLogin, setIsEnablingLaunchAtLogin] = useState(false);
   const [requestedTaskEditId, setRequestedTaskEditId] = useState<string | null>(null);
   const [sourceReviewRequest, setSourceReviewRequest] = useState<{
@@ -180,6 +215,29 @@ function AppContent() {
       cancelled = true;
     };
   }, [distribution, distributionLoaded, settingsLoaded, updateSettings]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadOwnerLicenseDebugSnapshot = async () => {
+      try {
+        const snapshot = await invoke<OwnerLicenseDebugSnapshot>('get_owner_license_debug_snapshot');
+        if (!cancelled) {
+          setOwnerLicenseDebugSnapshot(snapshot);
+        }
+      } catch {
+        if (!cancelled) {
+          setOwnerLicenseDebugSnapshot(null);
+        }
+      }
+    };
+
+    void loadOwnerLicenseDebugSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const startupComplete =
     settingsLoaded &&
@@ -797,6 +855,37 @@ function AppContent() {
           void enableLaunchAtLoginFromIntro();
         }}
       />
+      {ownerLicenseDebugSnapshot ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4"
+          data-testid="owner-license-debug-modal"
+        >
+          <div className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden border-4 border-[var(--border-main)] bg-[var(--bg-primary)] shadow-[8px_8px_0_0_var(--shadow-color)]">
+            <div className="flex items-center justify-between border-b-4 border-[var(--border-main)] bg-[var(--accent-warning)] px-5 py-3">
+              <div>
+                <h2 className="text-sm font-black uppercase tracking-wider text-black">
+                  Owner License Debug
+                </h2>
+                <p className="text-xs font-mono text-black/80">
+                  Hidden mode unlocked by launch token + local marker file.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="neo-button px-3 py-2 text-xs"
+                onClick={() => setOwnerLicenseDebugSnapshot(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="overflow-auto bg-black p-4">
+              <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-6 text-green-300">
+                {JSON.stringify(ownerLicenseDebugSnapshot, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <StartupProgressOverlay
         settingsLoaded={settingsLoaded}
         tasksLoaded={tasksLoaded}
