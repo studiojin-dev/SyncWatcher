@@ -121,6 +121,18 @@ function AppContent() {
     let cancelled = false;
 
     const refreshSupporterStatus = async () => {
+      const readCachedSupporterStatus = async () => {
+        const fallback = await invoke<{
+          isRegistered: boolean;
+          provider: 'lemon_squeezy' | 'app_store';
+        }>('get_supporter_status');
+        assertSupporterProviderMatchesPolicy(
+          getDistributionPolicy(distribution),
+          fallback.provider,
+        );
+        return fallback;
+      };
+
       const applySupporterStatus = (result: {
         isRegistered: boolean;
         provider: 'lemon_squeezy' | 'app_store';
@@ -139,14 +151,22 @@ function AppContent() {
           isRegistered: boolean;
           provider: 'lemon_squeezy' | 'app_store';
         }>('refresh_supporter_status');
+        if (!result.isRegistered) {
+          try {
+            const cached = await readCachedSupporterStatus();
+            if (cached.isRegistered) {
+              applySupporterStatus(cached);
+              return;
+            }
+          } catch (cachedErr) {
+            console.error('[App] Cached supporter status read failed after inactive refresh:', cachedErr);
+          }
+        }
         applySupporterStatus(result);
       } catch (err) {
         console.error('[App] Supporter status refresh failed:', err);
         try {
-          const fallback = await invoke<{
-            isRegistered: boolean;
-            provider: 'lemon_squeezy' | 'app_store';
-          }>('get_supporter_status');
+          const fallback = await readCachedSupporterStatus();
           applySupporterStatus(fallback);
         } catch (fallbackErr) {
           console.error('[App] Supporter status fallback read failed:', fallbackErr);

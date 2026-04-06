@@ -535,11 +535,56 @@ describe('App close lifecycle', () => {
     consoleError.mockRestore();
   });
 
+  it('restores locally cached supporter status when startup refresh returns inactive', async () => {
+    runtimeState.isRegistered = false;
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'refresh_supporter_status') {
+        return { isRegistered: false, provider: 'lemon_squeezy' };
+      }
+      if (command === 'get_supporter_status') {
+        return {
+          isRegistered: true,
+          provider: 'lemon_squeezy',
+        };
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return undefined;
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('refresh_supporter_status');
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('get_supporter_status');
+    });
+    await waitFor(() => {
+      expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: true });
+    });
+  });
+
   it('marks the app unregistered when startup supporter refresh returns inactive', async () => {
     runtimeState.isRegistered = true;
 
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'refresh_supporter_status') {
+        return { isRegistered: false, provider: 'lemon_squeezy' };
+      }
+      if (command === 'get_supporter_status') {
         return { isRegistered: false, provider: 'lemon_squeezy' };
       }
       if (command === 'runtime_get_state') {
@@ -560,6 +605,9 @@ describe('App close lifecycle', () => {
 
     render(<App />);
 
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('get_supporter_status');
+    });
     await waitFor(() => {
       expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: false });
     });
