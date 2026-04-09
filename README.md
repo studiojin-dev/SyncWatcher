@@ -3,7 +3,7 @@
 [![English](https://img.shields.io/badge/README-English-111111?style=for-the-badge&logo=readme&logoColor=white)](./README.md)
 [![Korean](https://img.shields.io/badge/README-%ED%95%9C%EA%B5%AD%EC%96%B4-0F766E?style=for-the-badge&logo=readme&logoColor=white)](./README.ko.md)
 [![GitHub release](https://img.shields.io/github/v/release/studiojin-dev/SyncWatcher)](https://github.com/studiojin-dev/SyncWatcher/releases)
-[![GitHub downloads](https://img.shields.io/github/downloads/studiojin-dev/SyncWatcher/latest/total)](https://github.com/studiojin-dev/SyncWatcher/releases/latest)
+[![GitHub downloads](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/studiojin-dev/SyncWatcher/main/docs/badges/installer-downloads.json)](https://github.com/studiojin-dev/SyncWatcher/releases)
 
 SyncWatcher keeps SD cards, USB drives, and working folders backed up on macOS without turning every copy job into a manual routine.
 

@@ -1,0 +1,94 @@
+[
+  {
+    "id": 1001,
+    "tag_name": "v1.2.0",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "Sync.Watcher_1.2.0_aarch64.dmg",
+        "download_count": 10
+      },
+      {
+        "name": "Sync.Watcher_1.2.0_x64.dmg",
+        "download_count": 4
+      },
+      {
+        "name": "Sync.Watcher_1.2.0_aarch64.app.tar.gz",
+        "download_count": 6
+      },
+      {
+        "name": "Sync.Watcher_1.2.0_x64.app.tar.gz",
+        "download_count": 3
+      },
+      {
+        "name": "Sync.Watcher_1.2.0_aarch64.app.tar.gz.sig",
+        "download_count": 99
+      },
+      {
+        "name": "latest.json",
+        "download_count": 77
+      },
+      {
+        "name": "sbom-v1.2.0.cdx.json",
+        "download_count": 55
+      },
+      {
+        "name": "attestation-Sync.Watcher_1.2.0_aarch64.dmg.bundle.json",
+        "download_count": 66
+      }
+    ]
+  },
+  {
+    "id": 1002,
+    "tag_name": "v1.3.0-beta.1",
+    "draft": false,
+    "prerelease": true,
+    "assets": [
+      {
+        "name": "Sync.Watcher_1.3.0-beta.1_aarch64.dmg",
+        "download_count": 100
+      },
+      {
+        "name": "Sync.Watcher_1.3.0-beta.1_aarch64.app.tar.gz",
+        "download_count": 100
+      }
+    ]
+  },
+  {
+    "id": 1003,
+    "tag_name": "v1.1.9",
+    "draft": true,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "Sync.Watcher_1.1.9_x64.dmg",
+        "download_count": 200
+      },
+      {
+        "name": "Sync.Watcher_1.1.9_x64.app.tar.gz",
+        "download_count": 200
+      }
+    ]
+  },
+  {
+    "id": 1004,
+    "tag_name": "v1.1.8",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "Sync.Watcher_1.1.8_x64.dmg",
+        "download_count": 7
+      },
+      {
+        "name": "Sync.Watcher_1.1.8_x64.app.tar.gz",
+        "download_count": 2
+      },
+      {
+        "name": "checksums.txt",
+        "download_count": 500
+      }
+    ]
+  }
+]

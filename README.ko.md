@@ -3,7 +3,7 @@
 [![English](https://img.shields.io/badge/README-English-111111?style=for-the-badge&logo=readme&logoColor=white)](./README.md)
 [![한국어](https://img.shields.io/badge/README-%ED%95%9C%EA%B5%AD%EC%96%B4-0F766E?style=for-the-badge&logo=readme&logoColor=white)](./README.ko.md)
 [![GitHub release](https://img.shields.io/github/v/release/studiojin-dev/SyncWatcher)](https://github.com/studiojin-dev/SyncWatcher/releases)
-[![GitHub downloads](https://img.shields.io/github/downloads/studiojin-dev/SyncWatcher/latest/total)](https://github.com/studiojin-dev/SyncWatcher/releases/latest)
+[![GitHub downloads](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/studiojin-dev/SyncWatcher/main/docs/badges/installer-downloads.json)](https://github.com/studiojin-dev/SyncWatcher/releases)
 
 SyncWatcher는 SD 카드, USB 드라이브, 작업 폴더 백업을 반복 수작업이 아닌 안정적인 흐름으로 바꿔주는 macOS 백업 및 단방향 동기화 앱입니다.
 
