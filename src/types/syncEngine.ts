@@ -1,6 +1,12 @@
 export type FileDiffKind = 'New' | 'Modified';
 export type SyncOperationOrigin = 'manual' | 'watch' | 'scheduled';
 export type SyncFileStatus = 'copied' | 'failed';
+export type SyncProgressPhase =
+  | 'scanningSource'
+  | 'scanningTarget'
+  | 'comparing'
+  | 'validatingDryRun'
+  | 'copying';
 
 export interface FileDiff {
   path: string;
@@ -39,6 +45,7 @@ export interface SyncErrorResult {
 export interface SyncProgressEvent {
   taskId?: string;
   origin?: SyncOperationOrigin;
+  phase?: SyncProgressPhase;
   message?: string;
   current?: number;
   total?: number;

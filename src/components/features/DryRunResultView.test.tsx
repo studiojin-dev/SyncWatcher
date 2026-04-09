@@ -293,4 +293,51 @@ describe('DryRunResultView', () => {
     fireEvent.click(screen.getByText('common.retry'));
     expect(onRequestRerun).toHaveBeenCalledTimes(1);
   });
+
+  it('shows sync now only for completed sessions', () => {
+    const onRequestSyncNow = vi.fn();
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task A',
+      status: 'completed',
+      result: {
+        diffs: [],
+        total_files: 0,
+        files_to_copy: 0,
+        files_modified: 0,
+        bytes_to_copy: 0,
+        targetPreflight: null,
+      },
+    };
+
+    const { rerender } = render(
+      <DryRunResultView
+        taskId="task-1"
+        taskName="Task A"
+        onBack={vi.fn()}
+        onRequestSyncNow={onRequestSyncNow}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('syncTasks.syncNowFromDryRun'));
+    expect(onRequestSyncNow).toHaveBeenCalledTimes(1);
+
+    sessionState.current = {
+      ...sessionState.current,
+      status: 'failed',
+    };
+
+    rerender(
+      <DryRunResultView
+        taskId="task-1"
+        taskName="Task A"
+        onBack={vi.fn()}
+        onRequestSyncNow={onRequestSyncNow}
+      />,
+    );
+
+    expect(
+      screen.queryByText('syncTasks.syncNowFromDryRun'),
+    ).not.toBeInTheDocument();
+  });
 });

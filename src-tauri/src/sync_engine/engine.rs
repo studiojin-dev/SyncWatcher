@@ -1,7 +1,8 @@
 use crate::sync_engine::types::{
     ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunPhase, DryRunProgress,
-    DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile,
-    SyncFileEntry, SyncFileStatus, SyncOptions, SyncResult, TargetNewerConflictCandidate,
+    DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile, SyncFileEntry,
+    SyncFileStatus, SyncOptions, SyncProgress, SyncProgressPhase, SyncResult,
+    TargetNewerConflictCandidate,
 };
 use anyhow::Context;
 use anyhow::Result;
@@ -74,10 +75,7 @@ impl SyncEngine {
         }
     }
 
-    fn compare_modified_time_at_second_precision(
-        left: SystemTime,
-        right: SystemTime,
-    ) -> Ordering {
+    fn compare_modified_time_at_second_precision(left: SystemTime, right: SystemTime) -> Ordering {
         let left_secs = left
             .duration_since(SystemTime::UNIX_EPOCH)
             .ok()
@@ -685,6 +683,25 @@ impl SyncEngine {
         ))
     }
 
+    fn dry_run_progress_to_sync_progress(progress: DryRunProgress) -> SyncProgress {
+        let phase = match progress.phase {
+            DryRunPhase::ScanningSource => SyncProgressPhase::ScanningSource,
+            DryRunPhase::ScanningTarget => SyncProgressPhase::ScanningTarget,
+            DryRunPhase::Comparing => SyncProgressPhase::Comparing,
+        };
+
+        SyncProgress {
+            phase,
+            current_file: Some(progress.message),
+            total_files: progress.total,
+            processed_files: progress.current,
+            total_bytes: progress.total_bytes,
+            processed_bytes: progress.processed_bytes,
+            bytes_copied_current_file: 0,
+            current_file_total_bytes: 0,
+        }
+    }
+
     pub async fn compare_dirs(&self, options: &SyncOptions) -> Result<DryRunResult> {
         let (dry_run, _) = self
             .compare_dirs_internal(options, None, |_| {}, |_, _| {})
@@ -734,16 +751,67 @@ impl SyncEngine {
         Ok(dry_run)
     }
 
-    pub async fn sync_files(
+    pub async fn dry_run_with_progress_and_conflicts<P, D>(
         &self,
         options: &SyncOptions,
-        progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
+        cancel_token: CancellationToken,
+        on_progress: P,
+        on_diff: D,
+    ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)>
+    where
+        P: FnMut(DryRunProgress) + Send + 'static,
+        D: FnMut(FileDiff, DryRunProgress),
+    {
+        self.compare_dirs_internal(options, Some(cancel_token), on_progress, on_diff)
+            .await
+    }
+
+    pub async fn prepare_sync_plan_with_progress<P, D>(
+        &self,
+        options: &SyncOptions,
+        mut on_progress: P,
+        on_diff: D,
+    ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)>
+    where
+        P: FnMut(SyncProgress) + Send + 'static,
+        D: FnMut(FileDiff, DryRunProgress),
+    {
+        self.compare_dirs_internal(
+            options,
+            None,
+            move |progress| on_progress(Self::dry_run_progress_to_sync_progress(progress)),
+            on_diff,
+        )
+        .await
+    }
+
+    pub async fn prepare_sync_plan_with_progress_and_cancel<P, D>(
+        &self,
+        options: &SyncOptions,
+        cancel_token: CancellationToken,
+        mut on_progress: P,
+        on_diff: D,
+    ) -> Result<(DryRunResult, Vec<TargetNewerConflictCandidate>)>
+    where
+        P: FnMut(SyncProgress) + Send + 'static,
+        D: FnMut(FileDiff, DryRunProgress),
+    {
+        self.compare_dirs_internal(
+            options,
+            Some(cancel_token),
+            move |progress| on_progress(Self::dry_run_progress_to_sync_progress(progress)),
+            on_diff,
+        )
+        .await
+    }
+
+    pub async fn sync_files_from_dry_run(
+        &self,
+        dry_run: &DryRunResult,
+        options: &SyncOptions,
+        progress_callback: impl Fn(SyncProgress),
         file_callback: impl Fn(SyncFileEntry),
     ) -> Result<SyncResult> {
-        let (dry_run, _) = self
-            .compare_dirs_internal(options, None, |_| {}, |_, _| {})
-            .await?;
-
         let mut result = SyncResult {
             files_copied: 0,
             bytes_copied: 0,
@@ -764,8 +832,8 @@ impl SyncEngine {
             }
         }
 
-        let mut current_progress = crate::sync_engine::types::SyncProgress {
-            phase: crate::sync_engine::types::SyncPhase::Copying,
+        let mut current_progress = SyncProgress {
+            phase: SyncProgressPhase::Copying,
             current_file: None,
             total_files: total_files_to_copy,
             processed_files: 0,
@@ -775,7 +843,6 @@ impl SyncEngine {
             current_file_total_bytes: 0,
         };
 
-        // Initial progress report
         progress_callback(current_progress.clone());
 
         for diff in &dry_run.diffs {
@@ -849,6 +916,19 @@ impl SyncEngine {
         }
 
         Ok(result)
+    }
+
+    pub async fn sync_files(
+        &self,
+        options: &SyncOptions,
+        progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
+        file_callback: impl Fn(SyncFileEntry),
+    ) -> Result<SyncResult> {
+        let (dry_run, _) = self
+            .compare_dirs_internal(options, None, |_| {}, |_, _| {})
+            .await?;
+        self.sync_files_from_dry_run(&dry_run, options, progress_callback, file_callback)
+            .await
     }
 
     pub async fn find_orphan_files(&self, exclude_patterns: &[String]) -> Result<Vec<OrphanFile>> {
@@ -1143,6 +1223,7 @@ impl SyncEngine {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Arc, Mutex as StdMutex};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -1164,6 +1245,89 @@ mod tests {
 
         let result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepare_sync_plan_with_progress_reports_scan_phases() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        fs::write(source_dir.path().join("a.txt"), b"hello").await?;
+        fs::write(target_dir.path().join("a.txt"), b"older").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions::default();
+        let phases = Arc::new(StdMutex::new(Vec::new()));
+        let phases_for_progress = phases.clone();
+
+        let _ = engine
+            .prepare_sync_plan_with_progress(
+                &options,
+                move |progress| {
+                    phases_for_progress
+                        .lock()
+                        .expect("phase collection lock should succeed")
+                        .push(progress.phase);
+                },
+                |_, _| {},
+            )
+            .await?;
+
+        let recorded = phases
+            .lock()
+            .expect("phase collection lock should succeed")
+            .clone();
+
+        assert!(recorded.contains(&SyncProgressPhase::ScanningSource));
+        assert!(recorded.contains(&SyncProgressPhase::ScanningTarget));
+        assert!(recorded.contains(&SyncProgressPhase::Comparing));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepare_sync_plan_with_progress_and_cancel_stops_mid_scan() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        for index in 0..64 {
+            fs::write(
+                source_dir.path().join(format!("file-{index}.txt")),
+                b"payload",
+            )
+            .await?;
+        }
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions::default();
+        let cancel_token = CancellationToken::new();
+        let cancel_for_progress = cancel_token.clone();
+
+        let result = engine
+            .prepare_sync_plan_with_progress_and_cancel(
+                &options,
+                cancel_token,
+                move |progress| {
+                    if progress.phase == SyncProgressPhase::ScanningSource
+                        && progress.processed_files > 0
+                    {
+                        cancel_for_progress.cancel();
+                    }
+                },
+                |_, _| {},
+            )
+            .await;
+
+        let error = result.expect_err("planning should cancel while scanning");
+        assert!(format!("{:#}", error).contains("cancelled by user"));
 
         Ok(())
     }
@@ -1328,7 +1492,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_source_newer_different_content_same_size_is_modified_without_checksum_mode() -> Result<()> {
+    async fn test_source_newer_different_content_same_size_is_modified_without_checksum_mode(
+    ) -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;
 

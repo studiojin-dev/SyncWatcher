@@ -47,12 +47,22 @@ export type ToastType = 'info' | 'success' | 'warning' | 'error';
 export type ShowToastFn = (message: string, type?: ToastType) => void;
 
 export const WATCH_STATE_TIMEOUT_MS = 3000;
+const DRY_RUN_ARTIFACT_STALE_ERROR_PREFIX = 'Dry Run result is stale.';
+const DRY_RUN_ARTIFACT_MISSING_ERROR_PREFIX =
+  'No reusable Dry Run result is available.';
 
 export function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
   return String(error);
+}
+
+export function isDryRunArtifactReuseError(message: string): boolean {
+  return (
+    message.includes(DRY_RUN_ARTIFACT_STALE_ERROR_PREFIX) ||
+    message.includes(DRY_RUN_ARTIFACT_MISSING_ERROR_PREFIX)
+  );
 }
 
 export function getValidationSummary(

@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260409-0024-DRR",
+    "title": "Dry-run artifact reuse and pre-copy sync visibility",
+    "tags": [
+      "dry-run",
+      "sync",
+      "ux",
+      "runtime",
+      "tauri",
+      "reliability"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-09",
+    "tldr": "Store one backend-owned dry-run artifact per task, allow `Sync Now` to reuse that artifact after a light freshness check, and expose scan/compare progress in manual sync before copying starts.",
+    "path": "docs/adr/ADR-20260409-0024-DRR-dry-run-artifact-reuse-and-pre-copy-sync-visibility.md"
+  },
+  {
     "id": "ADR-20260408-0023-SYN",
     "title": "Manual sync session UI and structured live sync events",
     "tags": [

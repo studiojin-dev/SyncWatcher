@@ -562,6 +562,9 @@ describe('BackendRuntimeBridge', () => {
       queuedTasks: [],
       dryRunningTasks: [],
     });
+    storeState.syncSessions = new Map([
+      ['task-1', { status: 'running' }],
+    ]);
 
     render(<BackendRuntimeBridge />);
 
@@ -592,6 +595,41 @@ describe('BackendRuntimeBridge', () => {
         files_copied: 2,
       }),
     );
+  });
+
+  it('ignores sync-session-finished when the session was already cleared', async () => {
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+    storeState.syncSessions = new Map();
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('sync-session-finished')).toBe(true);
+    });
+
+    act(() => {
+      eventHandlers.get('sync-session-finished')?.({
+        payload: {
+          taskId: 'task-1',
+          origin: 'manual',
+          status: 'failed',
+          files_copied: 0,
+          bytes_copied: 0,
+          errors: [],
+          conflictCount: 0,
+          hasPendingConflicts: false,
+          targetPreflight: null,
+          reason: 'Dry Run result is stale.',
+        },
+      });
+    });
+
+    expect(storeState.completeSyncSession).not.toHaveBeenCalled();
   });
 
   it('requests source review when runtime sync ends with an unresolved UUID source', async () => {

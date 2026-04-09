@@ -79,6 +79,8 @@
       "watchStatusIdle": "No logs yet",
       "autoUnmount": "Auto Unmount",
       "confirmStartSync": "Start sync now?",
+      "syncNowFromDryRun": "Sync Now",
+      "confirmSyncNowFromDryRun": "Use the latest Dry Run result and start syncing now?",
       "confirmDryRun": "Start Dry Run now?",
       "confirmWatchDisable": "Disable Watch Mode for this task?",
       "autoUnmountConfirmTitle": "Auto Unmount Confirmation",
@@ -120,7 +122,8 @@
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
-      "autoUnmountFailedStatus": "Unmount failed"
+      "autoUnmountFailedStatus": "Unmount failed",
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
     },
     "recurringSchedules": {
       "title": "Recurring Schedules",
@@ -378,6 +381,12 @@
       "statusCompleted": "Completed",
       "statusCancelled": "Cancelled",
       "statusFailed": "Failed",
+      "phaseScanningSource": "Scanning source",
+      "phaseScanningTarget": "Scanning target",
+      "phaseComparing": "Comparing",
+      "phaseValidatingDryRun": "Validating cached Dry Run",
+      "phaseCopying": "Copying",
+      "phasePending": "Preparing",
       "completed": "Completed",
       "cancelled": "Cancelled",
       "error": "Error",

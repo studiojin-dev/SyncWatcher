@@ -36,6 +36,38 @@ function getStatusLabel(
   }
 }
 
+function getPhaseLabel(
+  phase: string | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  switch (phase) {
+    case 'scanningSource':
+      return t('sync.phaseScanningSource', {
+        defaultValue: 'Scanning source',
+      });
+    case 'scanningTarget':
+      return t('sync.phaseScanningTarget', {
+        defaultValue: 'Scanning target',
+      });
+    case 'comparing':
+      return t('sync.phaseComparing', {
+        defaultValue: 'Comparing',
+      });
+    case 'validatingDryRun':
+      return t('sync.phaseValidatingDryRun', {
+        defaultValue: 'Validating cached Dry Run',
+      });
+    case 'copying':
+      return t('sync.phaseCopying', {
+        defaultValue: 'Copying',
+      });
+    default:
+      return t('sync.phasePending', {
+        defaultValue: 'Preparing',
+      });
+  }
+}
+
 export default function SyncResultView({
   taskId,
   taskName,
@@ -120,7 +152,8 @@ export default function SyncResultView({
           </p>
           {isRunning && progress ? (
             <p className="text-xs font-mono text-[var(--text-secondary)]">
-              {progress.message || t('syncTasks.watchStatusSyncing')}
+              {getPhaseLabel(progress.phase, t)}
+              {progress.message ? ` · ${progress.message}` : ''}
               {overallPercent !== null ? ` · ${overallPercent}%` : ''}
             </p>
           ) : null}
@@ -195,7 +228,7 @@ export default function SyncResultView({
       {isRunning && progress ? (
         <div className="space-y-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3">
           <div className="flex items-center justify-between gap-3 text-xs font-mono text-[var(--text-secondary)]">
-            <span>{progress.message || t('syncTasks.watchStatusSyncing')}</span>
+            <span>{getPhaseLabel(progress.phase, t)}</span>
             <span>
               {overallPercent !== null
                 ? `${overallPercent}%`
@@ -208,6 +241,11 @@ export default function SyncResultView({
               style={{ width: `${overallPercent ?? 12}%` }}
             />
           </div>
+          {progress.message ? (
+            <div className="text-xs font-mono text-[var(--text-secondary)] break-all">
+              {progress.message}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -219,7 +257,7 @@ export default function SyncResultView({
         ) : result.entries.length === 0 ? (
           <div className="p-4 text-sm font-mono text-[var(--text-secondary)]">
             {isRunning
-              ? t('syncTasks.watchStatusSyncing', { defaultValue: 'Syncing...' })
+              ? getPhaseLabel(progress?.phase, t)
               : t('sync.noEntries', { defaultValue: 'No copied files recorded.' })}
           </div>
         ) : (

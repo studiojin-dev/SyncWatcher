@@ -147,16 +147,19 @@ pub struct TargetPreflightInfo {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum SyncPhase {
-    Scanning,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncProgressPhase {
+    ScanningSource,
+    ScanningTarget,
+    Comparing,
+    ValidatingDryRun,
     Copying,
-    Verifying,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncProgress {
-    pub phase: SyncPhase,
+    pub phase: SyncProgressPhase,
     pub current_file: Option<String>,
     pub total_files: u64,
     pub processed_files: u64,

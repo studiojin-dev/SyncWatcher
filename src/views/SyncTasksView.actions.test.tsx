@@ -5,7 +5,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ask } from '@tauri-apps/plugin-dialog';
 import type { SyncTask } from '../hooks/useSyncTasks';
-import type { DryRunSessionState, SyncSessionState } from '../types/syncEngine';
+import type {
+  DryRunSessionState,
+  SyncSessionFinishedEvent,
+  SyncSessionState,
+} from '../types/syncEngine';
 import type { TaskStatus } from '../hooks/useSyncTaskStatus';
 import SyncTasksView from './SyncTasksView';
 
@@ -234,7 +238,10 @@ describe('SyncTasksView sync and watch confirmations', () => {
         updatedAtUnixMs: Date.now(),
       });
     });
-    statusState.completeSyncSession.mockImplementation((taskId: string, result: any) => {
+    statusState.completeSyncSession.mockImplementation((
+      taskId: string,
+      result: SyncSessionFinishedEvent,
+    ) => {
       const current = statusState.syncSessions.get(taskId);
       if (!current) return;
       statusState.syncSessions.set(taskId, {

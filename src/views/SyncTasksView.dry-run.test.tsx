@@ -9,6 +9,7 @@ import type {
   DryRunResult,
   DryRunSessionState,
   DryRunSessionStatus,
+  SyncSessionFinishedEvent,
   SyncSessionState,
 } from '../types/syncEngine';
 import type { TaskStatus } from '../hooks/useSyncTaskStatus';
@@ -171,6 +172,28 @@ function createDryRunSession(
   };
 }
 
+function createSyncSession(
+  taskId: string,
+  taskName: string,
+  status: 'running' | 'completed' | 'cancelled' | 'failed' = 'running',
+): SyncSessionState {
+  return {
+    taskId,
+    taskName,
+    status,
+    result: {
+      entries: [],
+      files_copied: 0,
+      bytes_copied: 0,
+      errors: [],
+      conflictCount: 0,
+      hasPendingConflicts: false,
+      targetPreflight: null,
+    },
+    updatedAtUnixMs: Date.now(),
+  };
+}
+
 function getOrCreateTaskStatus(taskId: string): TaskStatus {
   return statusState.statuses.get(taskId) ?? { taskId, status: 'idle' };
 }
@@ -243,6 +266,49 @@ function installStatefulStatusMockImplementations() {
   statusState.clearDryRunSession.mockImplementation((taskId: string) => {
     statusState.dryRunSessions.delete(taskId);
   });
+  statusState.beginSyncSession.mockImplementation(
+    (taskId: string, taskName: string) => {
+      statusState.syncSessions.set(taskId, createSyncSession(taskId, taskName));
+    },
+  );
+  statusState.getSyncSession.mockImplementation((taskId: string) =>
+    statusState.syncSessions.get(taskId),
+  );
+  statusState.completeSyncSession.mockImplementation((
+    taskId: string,
+    result: SyncSessionFinishedEvent,
+  ) => {
+    const current =
+      statusState.syncSessions.get(taskId) ?? createSyncSession(taskId, taskId);
+    statusState.syncSessions.set(taskId, {
+      ...current,
+      status: result.status,
+      result: {
+        ...current.result,
+        files_copied: result.files_copied,
+        bytes_copied: result.bytes_copied,
+        errors: result.errors,
+        conflictCount: result.conflictCount,
+        hasPendingConflicts: result.hasPendingConflicts,
+        targetPreflight: result.targetPreflight,
+      },
+      error: result.reason,
+      updatedAtUnixMs: Date.now(),
+    });
+  });
+  statusState.failSyncSession.mockImplementation((taskId: string, error: string) => {
+    const current =
+      statusState.syncSessions.get(taskId) ?? createSyncSession(taskId, taskId);
+    statusState.syncSessions.set(taskId, {
+      ...current,
+      status: error.toLowerCase().includes('cancel') ? 'cancelled' : 'failed',
+      error,
+      updatedAtUnixMs: Date.now(),
+    });
+  });
+  statusState.clearSyncSession.mockImplementation((taskId: string) => {
+    statusState.syncSessions.delete(taskId);
+  });
 }
 
 function renderWithMantine(ui: React.ReactElement) {
@@ -256,6 +322,19 @@ function installDefaultInvokeMock() {
     }
     if (command === 'get_removable_volumes') {
       return [];
+    }
+    if (command === 'start_sync_from_dry_run') {
+      return {
+        syncResult: {
+          files_copied: 0,
+          bytes_copied: 0,
+          errors: [],
+        },
+        conflictSessionId: null,
+        conflictCount: 0,
+        hasPendingConflicts: false,
+        targetPreflight: null,
+      };
     }
     if (command === 'sync_dry_run') {
       return createEmptyDryRunResult();
@@ -285,6 +364,11 @@ describe('SyncTasksView dry-run flows', () => {
     statusState.failDryRunSession.mockReset();
     statusState.getDryRunSession.mockReset();
     statusState.clearDryRunSession.mockReset();
+    statusState.beginSyncSession.mockReset();
+    statusState.getSyncSession.mockReset();
+    statusState.completeSyncSession.mockReset();
+    statusState.failSyncSession.mockReset();
+    statusState.clearSyncSession.mockReset();
     installStatefulStatusMockImplementations();
     listenMock.mockResolvedValue(() => {});
     askMock.mockResolvedValue(true);
@@ -422,5 +506,52 @@ describe('SyncTasksView dry-run flows', () => {
       ).toBe(true);
     });
     expect(statusState.beginDryRunSession).toHaveBeenCalledWith('task-1', 'Task 1');
+  });
+
+  it('returns to the dry-run result when sync now detects a stale reusable result', async () => {
+    statusState.dryRunSessions = new Map([
+      ['task-1', createDryRunSession('task-1', 'Task 1', 'completed')],
+    ]);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'start_sync_from_dry_run') {
+        throw new Error(
+          'Dry Run result is stale. Run Dry Run again before syncing. Changed path: DCIM/a.jpg',
+        );
+      }
+      return undefined;
+    });
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+    fireEvent.click(screen.getByText('syncTasks.syncNowFromDryRun'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('start_sync_from_dry_run', {
+        taskId: 'task-1',
+      });
+    });
+
+    expect(statusState.clearSyncSession).toHaveBeenCalledWith('task-1');
+    expect(statusState.syncSessions.has('task-1')).toBe(false);
+    expect(screen.getByText('syncTasks.dryRun · Task 1')).toBeInTheDocument();
+    expect(
+      screen.queryByText('syncTasks.startSync · Task 1'),
+    ).not.toBeInTheDocument();
+    expect(showToastMock).toHaveBeenCalledWith(
+      'syncTasks.dryRunSyncRequiresRerun',
+      'warning',
+    );
   });
 });

@@ -18,6 +18,7 @@ interface DryRunResultViewProps {
   onBack: () => void;
   onRequestCancel?: () => void;
   onRequestRerun?: () => void;
+  onRequestSyncNow?: () => void;
 }
 
 function getStatusLabel(
@@ -60,6 +61,7 @@ export default function DryRunResultView({
   onBack,
   onRequestCancel,
   onRequestRerun,
+  onRequestSyncNow,
 }: DryRunResultViewProps) {
   const { t } = useTranslation();
   const { settings } = useSettings();
@@ -79,6 +81,7 @@ export default function DryRunResultView({
   const isRunning = status === 'running';
   const isFinished =
     status === 'completed' || status === 'cancelled' || status === 'failed';
+  const canSyncNow = status === 'completed';
   const showEmptyState = result.diffs.length === 0 && !isRunning;
   const entries = useMemo<ResultTreeEntry[]>(
     () =>
@@ -147,6 +150,17 @@ export default function DryRunResultView({
             >
               <IconPlayerStop size={14} />
               {t('common.cancel', { defaultValue: 'Cancel' })}
+            </button>
+          ) : null}
+          {canSyncNow && onRequestSyncNow ? (
+            <button
+              type="button"
+              onClick={onRequestSyncNow}
+              className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs bg-[var(--accent-success)] text-white hover:opacity-90 inline-flex items-center gap-1"
+            >
+              {t('syncTasks.syncNowFromDryRun', {
+                defaultValue: 'Sync Now',
+              })}
             </button>
           ) : null}
           {isFinished && onRequestRerun ? (

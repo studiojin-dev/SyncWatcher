@@ -41,6 +41,7 @@ import {
 import {
   getErrorMessage,
   getValidationSummary,
+  isDryRunArtifactReuseError,
   showTargetPreflightToast,
   waitForWatchState,
   type CancelConfirmState,
@@ -73,6 +74,11 @@ interface UseSyncTaskActionsOptions {
   onRequestSourceRecommendationReview?: (taskId: string) => void;
 }
 
+type PendingSyncRequest = {
+  task: SyncTask;
+  mode: 'fresh' | 'dryRunArtifact';
+};
+
 export function useSyncTaskActions({
   tasks,
   statuses,
@@ -94,7 +100,8 @@ export function useSyncTaskActions({
   onRequestSourceRecommendationReview,
 }: UseSyncTaskActionsOptions) {
   const [syncing, setSyncing] = useState<string | null>(null);
-  const [pendingSyncTask, setPendingSyncTask] = useState<SyncTask | null>(null);
+  const [pendingSyncRequest, setPendingSyncRequest] =
+    useState<PendingSyncRequest | null>(null);
   const [watchTogglePendingIds, setWatchTogglePendingIds] = useState<
     Set<string>
   >(new Set());
@@ -127,7 +134,7 @@ export function useSyncTaskActions({
   }, []);
 
   const cancelPendingSync = useCallback(() => {
-    setPendingSyncTask(null);
+    setPendingSyncRequest(null);
   }, []);
 
   const requestCancel = useCallback(
@@ -549,24 +556,39 @@ export function useSyncTaskActions({
   );
 
   const runSync = useCallback(
-    async (task: SyncTask) => {
+    async (request: PendingSyncRequest) => {
+      const { task, mode } = request;
       const store = useSyncTaskStatusStore.getState();
       store.beginSyncSession(task.id, task.name);
       openSyncSession(task);
 
       try {
         setSyncing(task.id);
-        showToast(t('syncTasks.startSync') + ': ' + task.name, 'info');
+        showToast(
+          mode === 'dryRunArtifact'
+            ? t('syncTasks.syncNowFromDryRun', {
+                defaultValue: 'Sync Now',
+              }) +
+                ': ' +
+                task.name
+            : t('syncTasks.startSync') + ': ' + task.name,
+          'info',
+        );
 
-        const execution = await invoke<SyncExecutionResult>('start_sync', {
-          taskId: task.id,
-          taskName: task.name,
-          source: task.source,
-          target: task.target,
-          checksumMode: task.checksumMode,
-          verifyAfterCopy: task.verifyAfterCopy ?? true,
-          excludePatterns: getPatternsForSets(task.exclusionSets || []),
-        });
+        const execution =
+          mode === 'dryRunArtifact'
+            ? await invoke<SyncExecutionResult>('start_sync_from_dry_run', {
+                taskId: task.id,
+              })
+            : await invoke<SyncExecutionResult>('start_sync', {
+                taskId: task.id,
+                taskName: task.name,
+                source: task.source,
+                target: task.target,
+                checksumMode: task.checksumMode,
+                verifyAfterCopy: task.verifyAfterCopy ?? true,
+                excludePatterns: getPatternsForSets(task.exclusionSets || []),
+              });
         showTargetPreflightToast(execution.targetPreflight, showToast, t);
 
         if (execution.hasPendingConflicts) {
@@ -670,6 +692,18 @@ export function useSyncTaskActions({
       } catch (error) {
         console.error('Sync failed:', error);
         const errorMessage = getErrorMessage(error);
+        if (mode === 'dryRunArtifact' && isDryRunArtifactReuseError(errorMessage)) {
+          useSyncTaskStatusStore.getState().clearSyncSession(task.id);
+          openDryRunSession(task);
+          showToast(
+            t('syncTasks.dryRunSyncRequiresRerun', {
+              defaultValue:
+                'Dry Run result is stale or unavailable. Run Dry Run again before syncing.',
+            }),
+            'warning',
+          );
+          return;
+        }
         if (!isTerminalSyncSessionStatus(store.getSyncSession(task.id)?.status)) {
           store.failSyncSession(task.id, errorMessage);
         }
@@ -685,25 +719,36 @@ export function useSyncTaskActions({
       getPatternsForSets,
       loadConflictSessions,
       onRequestSourceRecommendationReview,
+      openDryRunSession,
       openSyncSession,
       showToast,
       t,
     ],
   );
 
-  const startSync = useCallback((task: SyncTask) => {
-    setPendingSyncTask(task);
-  }, []);
+  const startSync = useCallback(
+    (task: SyncTask, mode: PendingSyncRequest['mode'] = 'fresh') => {
+      setPendingSyncRequest({ task, mode });
+    },
+    [],
+  );
+
+  const startSyncFromDryRun = useCallback(
+    (task: SyncTask) => {
+      setPendingSyncRequest({ task, mode: 'dryRunArtifact' });
+    },
+    [],
+  );
 
   const confirmPendingSync = useCallback(async () => {
-    if (!pendingSyncTask) {
+    if (!pendingSyncRequest) {
       return;
     }
 
-    const task = pendingSyncTask;
-    setPendingSyncTask(null);
-    await runSync(task);
-  }, [pendingSyncTask, runSync]);
+    const request = pendingSyncRequest;
+    setPendingSyncRequest(null);
+    await runSync(request);
+  }, [pendingSyncRequest, runSync]);
 
   const handleSync = useCallback(
     async (task: SyncTask) => {
@@ -716,7 +761,7 @@ export function useSyncTaskActions({
         return;
       }
 
-      startSync(task);
+      startSync(task, 'fresh');
     },
     [requestCancel, startSync, syncing],
   );
@@ -934,7 +979,7 @@ export function useSyncTaskActions({
 
   return {
     syncing,
-    pendingSyncTask,
+    pendingSyncRequest,
     watchTogglePendingIds,
     cancelConfirm,
     pendingDryRunTask,
@@ -955,6 +1000,7 @@ export function useSyncTaskActions({
     loadConflictSessions,
     handleSubmit,
     startSync,
+    startSyncFromDryRun,
     handleSync,
     handleToggleWatchMode,
     startDryRun,

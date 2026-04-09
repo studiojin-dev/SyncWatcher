@@ -18,7 +18,7 @@ mod integration_tests {
     use crate::system_integration::VolumeInfo;
     use crate::watcher::WatcherManager;
     use crate::{
-        build_runtime_watch_upstreams, build_validated_runtime_tasks,
+        build_dry_run_artifact, build_runtime_watch_upstreams, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
         compute_volume_mount_diff, create_sync_task_internal, decide_autostart_launch,
@@ -32,8 +32,7 @@ mod integration_tests {
         is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
         log_conflict_resolution_failure, log_conflict_resolution_success,
         log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
-        owner_license_debug_token_from_args,
-        normalize_uuid_sub_path, parse_uuid_source_path,
+        normalize_uuid_sub_path, owner_license_debug_token_from_args, parse_uuid_source_path,
         persist_patched_sync_task_and_collect_history_warnings, preflight_target_path,
         progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
         read_current_conflict_file_info, record_runtime_validation_issue,
@@ -43,14 +42,14 @@ mod integration_tests {
         runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
         runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
         set_auto_unmount_session_disabled_internal, snapshot_recurring_schedule_detail_entries,
-        sync_dry_run_internal, take_runtime_pending_sync_task, unix_now_ms, validate_runtime_tasks,
-        volume_watch_next_tick_delay, AppState, CancelOperationType, ConflictFileInfo,
-        ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
-        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
-        SyncLiveState,
-        RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
+        sync_dry_run_internal, take_runtime_pending_sync_task, unix_now_ms,
+        validate_dry_run_artifact, validate_runtime_tasks, volume_watch_next_tick_delay, AppState,
+        CancelOperationType, ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction,
+        ConflictResolutionRequest, ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem,
+        DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
         RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
-        RuntimeTaskValidationIssue, TargetNewerConflictItem, VolumeEmitDebounceState,
+        RuntimeTaskValidationIssue, SyncLiveState, TargetNewerConflictItem,
+        VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
@@ -194,6 +193,7 @@ mod integration_tests {
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_running_tasks: Arc::new(RwLock::new(HashSet::new())),
+            dry_run_artifacts: Arc::new(RwLock::new(HashMap::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(Default::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -1048,10 +1048,7 @@ mod integration_tests {
 
     #[test]
     fn test_owner_license_debug_token_from_args_rejects_empty_secret() {
-        let token = owner_license_debug_token_from_args([
-            "syncwatcher",
-            "--owner-license-debug=",
-        ]);
+        let token = owner_license_debug_token_from_args(["syncwatcher", "--owner-license-debug="]);
 
         assert_eq!(token, None);
     }
@@ -2893,6 +2890,244 @@ mod integration_tests {
         assert_eq!(paths, vec!["a.txt".to_string(), "b.txt".to_string()]);
     }
 
+    #[tokio::test]
+    async fn test_sync_dry_run_internal_stores_and_replaces_reusable_artifact() {
+        let state = build_app_state();
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(&source).expect("source directory should be created");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+
+        std::fs::write(source.join("a.txt"), b"aaa").expect("should write a.txt");
+        sync_dry_run_internal(
+            None,
+            "task-1".to_string(),
+            source.clone(),
+            target.clone(),
+            false,
+            Vec::new(),
+            &state,
+            None,
+            None,
+        )
+        .await
+        .expect("first dry run should succeed");
+
+        let first_paths: Vec<String> = {
+            let artifacts = state.dry_run_artifacts.read().await;
+            let artifact = artifacts
+                .get("task-1")
+                .expect("first dry run should store an artifact");
+            artifact
+                .result
+                .diffs
+                .iter()
+                .map(|diff| diff.path.to_string_lossy().to_string())
+                .collect()
+        };
+        assert_eq!(first_paths, vec!["a.txt".to_string()]);
+
+        std::fs::remove_file(source.join("a.txt")).expect("should remove a.txt");
+        std::fs::write(source.join("b.txt"), b"bbb").expect("should write b.txt");
+
+        sync_dry_run_internal(
+            None,
+            "task-1".to_string(),
+            source.clone(),
+            target.clone(),
+            false,
+            Vec::new(),
+            &state,
+            None,
+            None,
+        )
+        .await
+        .expect("second dry run should succeed");
+
+        let second_paths: Vec<String> = {
+            let artifacts = state.dry_run_artifacts.read().await;
+            let artifact = artifacts
+                .get("task-1")
+                .expect("second dry run should replace the artifact");
+            artifact
+                .result
+                .diffs
+                .iter()
+                .map(|diff| diff.path.to_string_lossy().to_string())
+                .collect()
+        };
+        assert_eq!(second_paths, vec!["b.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_validate_dry_run_artifact_accepts_unchanged_snapshot_and_rejects_changes() {
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(&source).expect("source directory should be created");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+        std::fs::write(source.join("clip.mov"), b"original").expect("should write source file");
+
+        let engine = crate::sync_engine::SyncEngine::new(source.clone(), target.clone());
+        let options = crate::sync_engine::types::SyncOptions::default();
+        let (dry_run, conflicts) = engine
+            .prepare_sync_plan_with_progress(&options, |_| {}, |_, _| {})
+            .await
+            .expect("dry run plan should succeed");
+
+        let source_raw = source.to_string_lossy().to_string();
+        let target_raw = target.to_string_lossy().to_string();
+        let artifact = build_dry_run_artifact(
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            &dry_run,
+            &conflicts,
+        )
+        .await
+        .expect("artifact should be created");
+
+        validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            None,
+        )
+        .await
+        .expect("unchanged artifact should validate");
+
+        std::fs::write(source.join("clip.mov"), b"changed-content")
+            .expect("should change source file");
+
+        let error = validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            None,
+        )
+        .await
+        .expect_err("changed candidate should invalidate the reusable dry run");
+
+        assert!(error.contains("Dry Run result is stale"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_dry_run_artifact_stale_check_does_not_create_missing_target() {
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let missing_target = base.path().join("missing-target/nested");
+        std::fs::create_dir_all(&source).expect("source directory should be created");
+        std::fs::write(source.join("clip.mov"), b"original").expect("should write source file");
+
+        let engine = crate::sync_engine::SyncEngine::new(source.clone(), missing_target.clone());
+        let options = crate::sync_engine::types::SyncOptions::default();
+        let (dry_run, conflicts) = engine
+            .prepare_sync_plan_with_progress(&options, |_| {}, |_, _| {})
+            .await
+            .expect("dry run plan should succeed");
+        let source_raw = source.to_string_lossy().to_string();
+        let target_raw = missing_target.to_string_lossy().to_string();
+        let artifact = build_dry_run_artifact(
+            &source_raw,
+            &target_raw,
+            &source,
+            &missing_target,
+            false,
+            &[],
+            &dry_run,
+            &conflicts,
+        )
+        .await
+        .expect("artifact should be created");
+
+        std::fs::write(source.join("clip.mov"), b"changed-content")
+            .expect("should mutate source after artifact creation");
+
+        let error = validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &missing_target,
+            false,
+            &[],
+            None,
+        )
+        .await
+        .expect_err("stale artifact should fail");
+
+        assert!(error.contains("Dry Run result is stale"));
+        assert!(
+            !missing_target.exists(),
+            "stale validation must not create the missing target directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_dry_run_artifact_honors_cancel_token() {
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(&source).expect("source directory should be created");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+
+        for index in 0..64 {
+            std::fs::write(source.join(format!("file-{index}.txt")), b"payload")
+                .expect("should write source file");
+        }
+
+        let engine = crate::sync_engine::SyncEngine::new(source.clone(), target.clone());
+        let options = crate::sync_engine::types::SyncOptions::default();
+        let (dry_run, conflicts) = engine
+            .prepare_sync_plan_with_progress(&options, |_| {}, |_, _| {})
+            .await
+            .expect("dry run plan should succeed");
+        let source_raw = source.to_string_lossy().to_string();
+        let target_raw = target.to_string_lossy().to_string();
+        let artifact = build_dry_run_artifact(
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            &dry_run,
+            &conflicts,
+        )
+        .await
+        .expect("artifact should be created");
+
+        let cancel_token = CancellationToken::new();
+        cancel_token.cancel();
+
+        let error = validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            Some(&cancel_token),
+        )
+        .await
+        .expect_err("cancelled validation should stop immediately");
+
+        assert_eq!(error, "Operation cancelled by user");
+    }
+
     #[test]
     fn test_decide_runtime_auto_unmount_requests_confirmation_when_zero_copy() {
         let decision = decide_runtime_auto_unmount(true, false, 0);
@@ -2935,14 +3170,20 @@ mod integration_tests {
     #[test]
     fn test_progress_phase_to_log_category_mapping() {
         use crate::logging::LogCategory;
-        use crate::sync_engine::types::SyncPhase;
+        use crate::sync_engine::types::SyncProgressPhase;
 
         assert_eq!(
-            progress_phase_to_log_category(&SyncPhase::Copying),
+            progress_phase_to_log_category(&SyncProgressPhase::Copying),
             Some(LogCategory::FileCopied)
         );
-        assert_eq!(progress_phase_to_log_category(&SyncPhase::Scanning), None);
-        assert_eq!(progress_phase_to_log_category(&SyncPhase::Verifying), None);
+        assert_eq!(
+            progress_phase_to_log_category(&SyncProgressPhase::ScanningSource),
+            None
+        );
+        assert_eq!(
+            progress_phase_to_log_category(&SyncProgressPhase::ValidatingDryRun),
+            None
+        );
     }
 
     #[test]

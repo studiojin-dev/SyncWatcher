@@ -1,6 +1,6 @@
 {
-  "last_turn_at": "2026-04-09T02:58:14.168Z",
-  "turn_count": 51,
-  "last_agent_output": "현재도 생성일은 판정에 쓰지 않습니다. 변경 후에도 계속 `modified`만 보고 있고, 이제 그 비교를 “초 단위까지만” 보도록 바꿨습니다.\n\n무엇이 바뀌었는지:\n- 기존: `",
-  "last_progress_at": "2026-04-09T02:58:14.168Z"
+  "last_turn_at": "2026-04-09T06:19:05.480Z",
+  "turn_count": 68,
+  "last_agent_output": "ADR 반영했습니다. [ADR-20260409-0024-DRR-dry-run-artifact-reuse-and-pre-copy-sync-visibility.md](/Volumes/",
+  "last_progress_at": "2026-04-09T06:19:05.480Z"
 }

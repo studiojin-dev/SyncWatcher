@@ -26,6 +26,7 @@ const sessionState = vi.hoisted(() => ({
           targetPreflight: null;
         };
         progress?: {
+          phase?: string;
           message?: string;
           current?: number;
           total?: number;
@@ -97,6 +98,7 @@ describe('SyncResultView', () => {
         targetPreflight: null,
       },
       progress: {
+        phase: 'copying',
         message: 'dir/sub/b.txt',
         current: 1,
         total: 2,
@@ -111,11 +113,56 @@ describe('SyncResultView', () => {
 
     expect(screen.getByText('syncTasks.startSync · Task 1')).toBeInTheDocument();
     expect(screen.getByText('sync.statusRunning')).toBeInTheDocument();
+    expect(screen.getAllByText('sync.phaseCopying').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/25%/).length).toBeGreaterThan(0);
     expect(screen.getByTestId('result-tree-row-dir')).toHaveTextContent('3 KiB');
     expect(screen.getByTestId('result-tree-row-dir/sub/b.txt')).toHaveTextContent(
       'sync.fileFailed',
     );
+  });
+
+  it('renders scan and validation phases before copying starts', () => {
+    sessionState.current = {
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      status: 'running',
+      result: {
+        entries: [],
+        files_copied: 0,
+        bytes_copied: 0,
+        errors: [],
+        conflictCount: 0,
+        hasPendingConflicts: false,
+        targetPreflight: null,
+      },
+      progress: {
+        phase: 'validatingDryRun',
+        message: 'Validating cached Dry Run...',
+        current: 0,
+        total: 2,
+      },
+    };
+
+    const { rerender } = render(
+      <SyncResultView taskId="task-1" taskName="Task 1" onBack={vi.fn()} />,
+    );
+
+    expect(screen.getAllByText('sync.phaseValidatingDryRun').length).toBeGreaterThan(0);
+    expect(screen.getByText('Validating cached Dry Run...')).toBeInTheDocument();
+
+    sessionState.current = {
+      ...sessionState.current,
+      progress: {
+        phase: 'scanningSource',
+        message: 'DCIM/100MEDIA',
+        current: 3,
+        total: 10,
+      },
+    };
+
+    rerender(<SyncResultView taskId="task-1" taskName="Task 1" onBack={vi.fn()} />);
+    expect(screen.getAllByText('sync.phaseScanningSource').length).toBeGreaterThan(0);
+    expect(screen.getByText('DCIM/100MEDIA')).toBeInTheDocument();
   });
 
   it('shows rerun action for terminal sessions', () => {

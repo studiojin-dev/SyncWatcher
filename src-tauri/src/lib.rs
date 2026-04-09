@@ -7,8 +7,8 @@ pub mod input_validation;
 pub mod license;
 pub mod license_validation;
 pub mod logging;
-pub mod mcp_stdio;
 pub mod mcp_jobs;
+pub mod mcp_stdio;
 pub mod path_validation;
 pub mod recurring;
 pub mod security_scoped;
@@ -38,8 +38,8 @@ use tokio_util::sync::CancellationToken;
 use sync_engine::{
     types::{
         DeleteOrphanResult, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, OrphanFile,
-        SyncFileEntry, SyncResult, TargetNewerConflictCandidate, TargetPreflightInfo,
-        TargetPreflightKind,
+        SyncFileEntry, SyncProgressPhase, SyncResult, TargetNewerConflictCandidate,
+        TargetPreflightInfo, TargetPreflightKind,
     },
     DryRunResult, SyncEngine, SyncOptions,
 };
@@ -205,6 +205,11 @@ const DRY_RUN_DIFF_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 const DRY_RUN_DIFF_BATCH_MAX_SIZE: usize = 50;
 const SYNC_FILE_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 const SYNC_FILE_BATCH_MAX_SIZE: usize = 50;
+const DRY_RUN_ARTIFACT_STALE_ERROR: &str =
+    "Dry Run result is stale. Run Dry Run again before syncing.";
+const DRY_RUN_ARTIFACT_MISSING_ERROR: &str =
+    "No reusable Dry Run result is available. Run Dry Run again before syncing.";
+const SYNC_CANCELLED_BY_USER_ERROR: &str = "Operation cancelled by user";
 
 struct DryRunLiveStateInner {
     last_progress_emit_at: Instant,
@@ -380,9 +385,9 @@ impl SyncLiveState {
 
         state.pending_entries.push(entry);
 
-        let should_flush_timed = state
-            .pending_entries_since
-            .is_some_and(|started_at| now.duration_since(started_at) >= SYNC_FILE_BATCH_EMIT_INTERVAL);
+        let should_flush_timed = state.pending_entries_since.is_some_and(|started_at| {
+            now.duration_since(started_at) >= SYNC_FILE_BATCH_EMIT_INTERVAL
+        });
         let should_flush_sized = state.pending_entries.len() >= SYNC_FILE_BATCH_MAX_SIZE;
 
         if should_flush_timed || should_flush_sized {
@@ -413,6 +418,44 @@ impl SyncLiveState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DryRunRootSnapshot {
+    ExistingCanonical(String),
+    MissingResolved(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DryRunCandidatePathSnapshot {
+    exists: bool,
+    size: Option<u64>,
+    modified_unix_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DryRunArtifactCandidate {
+    relative_path: PathBuf,
+    source: DryRunCandidatePathSnapshot,
+    target: DryRunCandidatePathSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DryRunTaskConfigSnapshot {
+    source: String,
+    target: String,
+    checksum_mode: bool,
+    exclude_patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct DryRunArtifact {
+    config: DryRunTaskConfigSnapshot,
+    source_root: DryRunRootSnapshot,
+    target_root: DryRunRootSnapshot,
+    result: DryRunResult,
+    target_newer_conflicts: Vec<TargetNewerConflictCandidate>,
+    candidates: Vec<DryRunArtifactCandidate>,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     config_store: Arc<ConfigStore>,
@@ -423,6 +466,8 @@ pub struct AppState {
     dry_run_cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// 현재 실행 중인 dry-run task 집합
     dry_running_tasks: Arc<RwLock<HashSet<String>>>,
+    /// task별 최신 dry-run 재사용 artifact
+    dry_run_artifacts: Arc<RwLock<HashMap<String, DryRunArtifact>>>,
     /// 파일 시스템 감시 매니저
     watcher_manager: Arc<RwLock<WatcherManager>>,
     /// 프론트엔드에서 전달된 최신 런타임 설정
@@ -597,6 +642,21 @@ struct RuntimeDryRunStateEvent {
     task_id: String,
     dry_running: bool,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncProgressEvent {
+    task_id: String,
+    origin: SyncEventOrigin,
+    phase: SyncProgressPhase,
+    message: String,
+    current: u64,
+    total: u64,
+    processed_bytes: u64,
+    total_bytes: u64,
+    current_file_bytes_copied: u64,
+    current_file_total_bytes: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1160,10 +1220,10 @@ fn validate_repaired_config_store_file(
 }
 
 pub(crate) fn progress_phase_to_log_category(
-    phase: &sync_engine::types::SyncPhase,
+    phase: &sync_engine::types::SyncProgressPhase,
 ) -> Option<LogCategory> {
     match phase {
-        sync_engine::types::SyncPhase::Copying => Some(LogCategory::FileCopied),
+        sync_engine::types::SyncProgressPhase::Copying => Some(LogCategory::FileCopied),
         _ => None,
     }
 }
@@ -1327,6 +1387,10 @@ fn emit_dry_run_diff_batch(app: &tauri::AppHandle, event: &DryRunDiffBatchEvent)
     let _ = app.emit("dry-run-diff-batch", event);
 }
 
+fn emit_sync_progress(app: &tauri::AppHandle, event: &SyncProgressEvent) {
+    let _ = app.emit("sync-progress", event);
+}
+
 fn emit_sync_file_batch(app: &tauri::AppHandle, event: &SyncFileBatchEvent) {
     let _ = app.emit("sync-file-batch", event);
 }
@@ -1345,6 +1409,107 @@ fn dry_run_progress_event(task_id: &str, progress: &DryRunProgress) -> DryRunPro
         processed_bytes: progress.processed_bytes,
         total_bytes: progress.total_bytes,
         summary: progress.summary.clone(),
+    }
+}
+
+fn sync_progress_event(
+    task_id: &str,
+    origin: SyncEventOrigin,
+    progress: &sync_engine::types::SyncProgress,
+) -> SyncProgressEvent {
+    SyncProgressEvent {
+        task_id: task_id.to_string(),
+        origin,
+        phase: progress.phase.clone(),
+        message: progress
+            .current_file
+            .clone()
+            .unwrap_or_else(|| "Syncing...".to_string()),
+        current: progress.processed_files,
+        total: progress.total_files,
+        processed_bytes: progress.processed_bytes,
+        total_bytes: progress.total_bytes,
+        current_file_bytes_copied: progress.bytes_copied_current_file,
+        current_file_total_bytes: progress.current_file_total_bytes,
+    }
+}
+
+fn try_update_mcp_progress_from_sync_event(
+    jobs: &McpJobRegistry,
+    job_id: Option<&str>,
+    event: &SyncProgressEvent,
+) {
+    if let Some(job_id) = job_id {
+        jobs.try_update_progress(
+            job_id,
+            McpJobProgress {
+                message: Some(event.message.clone()),
+                current: event.current,
+                total: event.total,
+                processed_bytes: event.processed_bytes,
+                total_bytes: event.total_bytes,
+                current_file_bytes_copied: event.current_file_bytes_copied,
+                current_file_total_bytes: event.current_file_total_bytes,
+            },
+            unix_now_ms(),
+        );
+    }
+}
+
+fn handle_live_sync_progress(
+    progress_state: &SyncProgressState,
+    task_id_for_log: &str,
+    app_for_log: &tauri::AppHandle,
+    log_manager: &LogManager,
+    recurring_history_detail_entries: &Arc<StdMutex<Vec<RecurringScheduleHistoryDetailEntry>>>,
+    task_id_for_progress: &str,
+    progress_origin: SyncEventOrigin,
+    app_for_progress: &tauri::AppHandle,
+    mcp_jobs: &McpJobRegistry,
+    mcp_job_id: Option<&str>,
+    progress: &sync_engine::types::SyncProgress,
+) {
+    if let Some(current) = &progress.current_file {
+        if let Some(category) = progress_phase_to_log_category(&progress.phase) {
+            if progress_state.should_update_file(&category, current) {
+                let now = chrono::Utc::now().to_rfc3339();
+                let message = match &category {
+                    LogCategory::FileCopied => {
+                        let file_size = format_bytes(progress.current_file_total_bytes);
+                        format!("Copy: {} ({})", current, file_size)
+                    }
+                    LogCategory::FileDeleted => format!("Delete: {}", current),
+                    _ => current.to_string(),
+                };
+                let entry = logging::LogEntry {
+                    id: now.clone(),
+                    timestamp: now,
+                    level: "info".to_string(),
+                    message,
+                    task_id: Some(task_id_for_log.to_string()),
+                    category,
+                };
+
+                if let Some(batch) = progress_state.add_log(entry) {
+                    capture_recurring_schedule_detail_entries(
+                        recurring_history_detail_entries,
+                        &batch,
+                    );
+                    log_manager.log_batch_entries(
+                        batch,
+                        Some(task_id_for_log.to_string()),
+                        Some(app_for_log),
+                    );
+                }
+            }
+        }
+    }
+
+    let should_emit = progress_state.should_emit_progress();
+    if should_emit || progress.processed_files == progress.total_files {
+        let event = sync_progress_event(task_id_for_progress, progress_origin, progress);
+        emit_sync_progress(app_for_progress, &event);
+        try_update_mcp_progress_from_sync_event(mcp_jobs, mcp_job_id, &event);
     }
 }
 
@@ -1394,6 +1559,235 @@ fn system_time_to_unix_ms(value: SystemTime) -> Option<i64> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .ok()
         .map(|duration| duration.as_millis() as i64)
+}
+
+fn display_path(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
+async fn resolve_existing_canonical_dir(path: &Path, label: &str) -> Result<PathBuf, String> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|error| format!("Failed to access {label}: {error}"))?;
+    if !metadata.is_dir() {
+        return Err(format!(
+            "{label} is not a directory: {}",
+            display_path(path)
+        ));
+    }
+
+    tokio::fs::canonicalize(path)
+        .await
+        .map_err(|error| format!("Failed to canonicalize {label}: {error}"))
+}
+
+async fn resolve_target_snapshot_root(path: &Path) -> Result<PathBuf, String> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                return Err(format!(
+                    "Target path exists but is not a directory: {}",
+                    display_path(path)
+                ));
+            }
+            tokio::fs::canonicalize(path)
+                .await
+                .map_err(|error| format!("Failed to canonicalize target: {error}"))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
+        Err(error) => Err(format!("Failed to access target: {error}")),
+    }
+}
+
+async fn capture_dry_run_root_snapshot(
+    canonical_source_root: &Path,
+    resolved_target_root: &Path,
+) -> Result<(DryRunRootSnapshot, DryRunRootSnapshot), String> {
+    let source_root = DryRunRootSnapshot::ExistingCanonical(display_path(canonical_source_root));
+    let target_root = match tokio::fs::metadata(resolved_target_root).await {
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                return Err(format!(
+                    "Target path exists but is not a directory: {}",
+                    display_path(resolved_target_root)
+                ));
+            }
+            let canonical = tokio::fs::canonicalize(resolved_target_root)
+                .await
+                .map_err(|error| format!("Failed to canonicalize target: {error}"))?;
+            DryRunRootSnapshot::ExistingCanonical(display_path(&canonical))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            DryRunRootSnapshot::MissingResolved(display_path(resolved_target_root))
+        }
+        Err(error) => return Err(format!("Failed to access target: {error}")),
+    };
+
+    Ok((source_root, target_root))
+}
+
+async fn capture_dry_run_candidate_path_snapshot(
+    path: &Path,
+) -> Result<DryRunCandidatePathSnapshot, String> {
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => Ok(DryRunCandidatePathSnapshot {
+            exists: true,
+            size: metadata.is_file().then_some(metadata.len()),
+            modified_unix_ms: metadata.modified().ok().and_then(system_time_to_unix_ms),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(DryRunCandidatePathSnapshot {
+                exists: false,
+                size: None,
+                modified_unix_ms: None,
+            })
+        }
+        Err(error) => Err(format!(
+            "Failed to read candidate metadata '{}': {}",
+            display_path(path),
+            error
+        )),
+    }
+}
+
+async fn clear_dry_run_artifact(task_id: &str, state: &AppState) {
+    let mut artifacts = state.dry_run_artifacts.write().await;
+    artifacts.remove(task_id);
+}
+
+async fn store_dry_run_artifact(task_id: &str, artifact: DryRunArtifact, state: &AppState) {
+    let mut artifacts = state.dry_run_artifacts.write().await;
+    artifacts.insert(task_id.to_string(), artifact);
+}
+
+async fn load_dry_run_artifact(task_id: &str, state: &AppState) -> Option<DryRunArtifact> {
+    let artifacts = state.dry_run_artifacts.read().await;
+    artifacts.get(task_id).cloned()
+}
+
+async fn build_dry_run_artifact(
+    raw_source: &str,
+    raw_target: &str,
+    source: &Path,
+    target: &Path,
+    checksum_mode: bool,
+    exclude_patterns: &[String],
+    result: &DryRunResult,
+    target_newer_conflicts: &[TargetNewerConflictCandidate],
+) -> Result<DryRunArtifact, String> {
+    let canonical_source_root = resolve_existing_canonical_dir(source, "source").await?;
+    let target_snapshot_root = resolve_target_snapshot_root(target).await?;
+    let (source_root, target_root) =
+        capture_dry_run_root_snapshot(&canonical_source_root, target).await?;
+
+    let mut seen_paths = HashSet::new();
+    let mut candidates = Vec::new();
+
+    for diff in &result.diffs {
+        if !seen_paths.insert(diff.path.clone()) {
+            continue;
+        }
+
+        candidates.push(DryRunArtifactCandidate {
+            relative_path: diff.path.clone(),
+            source: capture_dry_run_candidate_path_snapshot(
+                &canonical_source_root.join(&diff.path),
+            )
+            .await?,
+            target: capture_dry_run_candidate_path_snapshot(&target_snapshot_root.join(&diff.path))
+                .await?,
+        });
+    }
+
+    for conflict in target_newer_conflicts {
+        if !seen_paths.insert(conflict.path.clone()) {
+            continue;
+        }
+
+        candidates.push(DryRunArtifactCandidate {
+            relative_path: conflict.path.clone(),
+            source: capture_dry_run_candidate_path_snapshot(
+                &canonical_source_root.join(&conflict.path),
+            )
+            .await?,
+            target: capture_dry_run_candidate_path_snapshot(
+                &target_snapshot_root.join(&conflict.path),
+            )
+            .await?,
+        });
+    }
+
+    Ok(DryRunArtifact {
+        config: DryRunTaskConfigSnapshot {
+            source: raw_source.to_string(),
+            target: raw_target.to_string(),
+            checksum_mode,
+            exclude_patterns: exclude_patterns.to_vec(),
+        },
+        source_root,
+        target_root,
+        result: result.clone(),
+        target_newer_conflicts: target_newer_conflicts.to_vec(),
+        candidates,
+    })
+}
+
+async fn validate_dry_run_artifact(
+    artifact: &DryRunArtifact,
+    raw_source: &str,
+    raw_target: &str,
+    source: &Path,
+    target: &Path,
+    checksum_mode: bool,
+    exclude_patterns: &[String],
+    cancel_token: Option<&CancellationToken>,
+) -> Result<(), String> {
+    if cancel_token.is_some_and(CancellationToken::is_cancelled) {
+        return Err(SYNC_CANCELLED_BY_USER_ERROR.to_string());
+    }
+
+    let current_config = DryRunTaskConfigSnapshot {
+        source: raw_source.to_string(),
+        target: raw_target.to_string(),
+        checksum_mode,
+        exclude_patterns: exclude_patterns.to_vec(),
+    };
+
+    if artifact.config != current_config {
+        return Err(DRY_RUN_ARTIFACT_STALE_ERROR.to_string());
+    }
+
+    let canonical_source_root = resolve_existing_canonical_dir(source, "source").await?;
+    let target_snapshot_root = resolve_target_snapshot_root(target).await?;
+    let (source_root, target_root) =
+        capture_dry_run_root_snapshot(&canonical_source_root, target).await?;
+
+    if artifact.source_root != source_root || artifact.target_root != target_root {
+        return Err(DRY_RUN_ARTIFACT_STALE_ERROR.to_string());
+    }
+
+    for candidate in &artifact.candidates {
+        if cancel_token.is_some_and(CancellationToken::is_cancelled) {
+            return Err(SYNC_CANCELLED_BY_USER_ERROR.to_string());
+        }
+        let current_source = capture_dry_run_candidate_path_snapshot(
+            &canonical_source_root.join(&candidate.relative_path),
+        )
+        .await?;
+        let current_target = capture_dry_run_candidate_path_snapshot(
+            &target_snapshot_root.join(&candidate.relative_path),
+        )
+        .await?;
+
+        if current_source != candidate.source || current_target != candidate.target {
+            return Err(format!(
+                "{DRY_RUN_ARTIFACT_STALE_ERROR} Changed path: {}",
+                candidate.relative_path.to_string_lossy()
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn conflict_file_info_changed(before: &ConflictFileInfo, current: &ConflictFileInfo) -> bool {
@@ -2490,6 +2884,7 @@ async fn run_due_recurring_schedule(
         state.clone(),
         false,
         SyncOrigin::Scheduled,
+        None,
         None,
         None,
     )
@@ -4287,6 +4682,7 @@ async fn execute_sync_internal(
     sync_origin: SyncOrigin,
     external_cancel_token: Option<CancellationToken>,
     mcp_job_id: Option<String>,
+    prepared_dry_run_artifact: Option<DryRunArtifact>,
 ) -> Result<SyncExecutionResult, SyncExecutionFailure> {
     if !sync_slot_pre_acquired && !acquire_sync_slot(&task_id, &state).await {
         return Err(SyncExecutionFailure::new(
@@ -4302,6 +4698,8 @@ async fn execute_sync_internal(
 
     let recurring_history_detail_entries = Arc::new(StdMutex::new(Vec::new()));
     let sync_result = async {
+        let requested_source = source.to_string_lossy().to_string();
+        let requested_target = target.to_string_lossy().to_string();
         activate_task_path_access(&task_id, &state)
             .await
             .map_err(SyncExecutionFailure::new)?;
@@ -4337,10 +4735,6 @@ async fn execute_sync_internal(
         )
         .await;
         let sync_result = async {
-            let target_preflight = preflight_target_path(&target, true)
-                .await
-                .map_err(SyncExecutionFailure::new)?;
-
             // 취소 토큰 생성 및 등록
             let cancel_token = CancellationToken::new();
             if let Some(external_cancel_token) = external_cancel_token {
@@ -4355,21 +4749,6 @@ async fn execute_sync_internal(
                 tokens.insert(task_id.clone(), cancel_token.clone());
             }
 
-            state.log_manager.log_with_category(
-                "info",
-                "Sync started",
-                Some(task_id.clone()),
-                LogCategory::SyncStarted,
-            );
-            if target_preflight.kind == TargetPreflightKind::CreatedDirectory {
-                state.log_manager.log_with_category(
-                    "info",
-                    &format!("Target directory created: {}", target_preflight.path),
-                    Some(task_id.clone()),
-                    LogCategory::Other,
-                );
-            }
-
             let engine = SyncEngine::new(source.clone(), target.clone());
             let options = SyncOptions {
                 checksum_mode,
@@ -4379,31 +4758,8 @@ async fn execute_sync_internal(
                 exclude_patterns,
             };
 
-            let target_newer_conflicts = engine
-                .target_newer_conflicts(&options)
-                .await
-                .map_err(|e| format!("{:#}", e))
-                .map_err(SyncExecutionFailure::new)?;
-
             // 동기화 실행 (취소 토큰과 함께)
             let task_id_clone = task_id.clone();
-            let task_id_for_event = task_id.clone(); // Closure용 별도 복사본
-            let app_clone = app.clone();
-
-            #[derive(serde::Serialize, Clone)]
-            #[serde(rename_all = "camelCase")]
-            struct ProgressEvent {
-                task_id: String,
-                origin: SyncEventOrigin,
-                message: String,
-                current: u64,
-                total: u64,
-                processed_bytes: u64,
-                total_bytes: u64,
-                current_file_bytes_copied: u64,
-                current_file_total_bytes: u64,
-            }
-
             let progress_state = SyncProgressState::new();
             let sync_live_state = SyncLiveState::new();
             let log_manager = state.log_manager.clone();
@@ -4414,269 +4770,351 @@ async fn execute_sync_internal(
             let mcp_jobs = state.mcp_jobs.clone();
             let mcp_job_id_for_progress = mcp_job_id.clone();
             let sync_event_origin_value = sync_event_origin(sync_origin);
-            let task_id_for_file_batch = task_id_for_event.clone();
-            let app_for_file_batch = app_clone.clone();
+            let task_id_for_file_batch = task_id.clone();
+            let app_for_file_batch = app.clone();
             let sync_event_origin_for_file_batch = sync_event_origin_value.clone();
             let sync_live_state_for_file_batch = sync_live_state.clone();
+            let task_id_for_progress = task_id.clone();
+            let app_for_progress = app.clone();
+            let mcp_jobs_for_progress = mcp_jobs.clone();
+            let sync_event_origin_for_progress = sync_event_origin_value.clone();
 
-            // Create clones for the closure
-            let progress_state_closure = progress_state.clone();
-            let log_manager_closure = log_manager.clone();
-            let recurring_history_detail_entries_closure =
-                recurring_history_detail_entries_for_progress.clone();
+            let operation_result = async {
+                let (dry_run_plan, target_newer_conflicts) =
+                    if let Some(artifact) = prepared_dry_run_artifact.as_ref() {
+                    let validating_progress = sync_engine::types::SyncProgress {
+                        phase: SyncProgressPhase::ValidatingDryRun,
+                        current_file: Some("Validating cached Dry Run...".to_string()),
+                        total_files: artifact.candidates.len() as u64,
+                        processed_files: 0,
+                        total_bytes: 0,
+                        processed_bytes: 0,
+                        bytes_copied_current_file: 0,
+                        current_file_total_bytes: 0,
+                    };
+                    let validating_event = sync_progress_event(
+                        &task_id,
+                        sync_event_origin_value.clone(),
+                        &validating_progress,
+                    );
+                    emit_sync_progress(&app, &validating_event);
+                    try_update_mcp_progress_from_sync_event(
+                        &mcp_jobs,
+                        mcp_job_id.as_deref(),
+                        &validating_event,
+                    );
 
-            let result = tokio::select! {
-                res = engine.sync_files(&options, move |progress| {
-                     // 1. Detailed Logging: Batching
-                    if let Some(current) = &progress.current_file {
-                        if let Some(category) = progress_phase_to_log_category(&progress.phase) {
-                            if progress_state_closure.should_update_file(&category, current) {
-                                let now = chrono::Utc::now().to_rfc3339();
-                                let message = match &category {
-                                    LogCategory::FileCopied => {
-                                        let file_size = format_bytes(progress.current_file_total_bytes);
-                                        format!("Copy: {} ({})", current, file_size)
-                                    }
-                                    LogCategory::FileDeleted => format!("Delete: {}", current),
-                                    _ => current.to_string(),
-                                };
-                                let entry = logging::LogEntry {
-                                    id: now.clone(),
-                                    timestamp: now,
-                                    level: "info".to_string(),
-                                    message,
-                                    task_id: Some(task_id_for_log.clone()),
-                                    category,
-                                };
+                    validate_dry_run_artifact(
+                        artifact,
+                        &requested_source,
+                        &requested_target,
+                        &source,
+                        &target,
+                        checksum_mode,
+                        &options.exclude_patterns,
+                        Some(&cancel_token),
+                    )
+                    .await
+                    .map_err(SyncExecutionFailure::new)?;
 
-                                if let Some(batch) = progress_state_closure.add_log(entry) {
-                                    capture_recurring_schedule_detail_entries(
-                                        &recurring_history_detail_entries_closure,
-                                        &batch,
+                    let validated_progress = sync_engine::types::SyncProgress {
+                        phase: SyncProgressPhase::ValidatingDryRun,
+                        current_file: Some("Cached Dry Run validated".to_string()),
+                        total_files: artifact.candidates.len() as u64,
+                        processed_files: artifact.candidates.len() as u64,
+                        total_bytes: 0,
+                        processed_bytes: 0,
+                        bytes_copied_current_file: 0,
+                        current_file_total_bytes: 0,
+                    };
+                    let validated_event = sync_progress_event(
+                        &task_id,
+                        sync_event_origin_value.clone(),
+                        &validated_progress,
+                    );
+                    emit_sync_progress(&app, &validated_event);
+                    try_update_mcp_progress_from_sync_event(
+                        &mcp_jobs,
+                        mcp_job_id.as_deref(),
+                        &validated_event,
+                    );
+
+                        (artifact.result.clone(), artifact.target_newer_conflicts.clone())
+                    } else {
+                        let progress_state_for_plan = progress_state.clone();
+                        let log_manager_for_plan = log_manager.clone();
+                        let recurring_entries_for_plan =
+                            recurring_history_detail_entries_for_progress.clone();
+                        let task_id_for_log_plan = task_id_for_log.clone();
+                        let task_id_for_progress_plan = task_id_for_progress.clone();
+                        let app_for_log_plan = app_for_log.clone();
+                        let app_for_progress_plan = app_for_progress.clone();
+                        let mcp_jobs_for_plan = mcp_jobs_for_progress.clone();
+                        let mcp_job_id_for_plan = mcp_job_id_for_progress.clone();
+                        let sync_origin_for_plan = sync_event_origin_for_progress.clone();
+                        engine
+                            .prepare_sync_plan_with_progress_and_cancel(
+                                &options,
+                                cancel_token.clone(),
+                                move |progress| {
+                                    handle_live_sync_progress(
+                                        &progress_state_for_plan,
+                                        &task_id_for_log_plan,
+                                        &app_for_log_plan,
+                                        &log_manager_for_plan,
+                                        &recurring_entries_for_plan,
+                                        &task_id_for_progress_plan,
+                                        sync_origin_for_plan.clone(),
+                                        &app_for_progress_plan,
+                                        &mcp_jobs_for_plan,
+                                        mcp_job_id_for_plan.as_deref(),
+                                        &progress,
                                     );
-                                    log_manager_closure.log_batch_entries(
-                                        batch,
-                                        Some(task_id_for_log.clone()),
-                                        Some(&app_for_log),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    // 2. UI Throttling: 100ms
-                    let should_emit = progress_state_closure.should_emit_progress();
-
-                    if should_emit || progress.processed_files == progress.total_files {
-                            let event = ProgressEvent {
-                                task_id: task_id_for_event.clone(),
-                                origin: sync_event_origin_value.clone(),
-                            message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
-                            current: progress.processed_files,
-                            total: progress.total_files,
-                            processed_bytes: progress.processed_bytes,
-                            total_bytes: progress.total_bytes,
-                            current_file_bytes_copied: progress.bytes_copied_current_file,
-                            current_file_total_bytes: progress.current_file_total_bytes,
-                        };
-                        let _ = app_clone.emit("sync-progress", &event);
-                        if let Some(job_id) = mcp_job_id_for_progress.as_deref() {
-                            mcp_jobs.try_update_progress(
-                                job_id,
-                                McpJobProgress {
-                                    message: Some(event.message.clone()),
-                                    current: event.current,
-                                    total: event.total,
-                                    processed_bytes: event.processed_bytes,
-                                    total_bytes: event.total_bytes,
-                                    current_file_bytes_copied: event.current_file_bytes_copied,
-                                    current_file_total_bytes: event.current_file_total_bytes,
                                 },
-                                unix_now_ms(),
+                                |_, _| {},
+                            )
+                            .await
+                            .map_err(|error| format!("{:#}", error))
+                            .map_err(SyncExecutionFailure::new)?
+                    };
+
+                if cancel_token.is_cancelled() {
+                    return Err(SyncExecutionFailure::new(
+                        SYNC_CANCELLED_BY_USER_ERROR.to_string(),
+                    ));
+                }
+
+                let target_preflight = preflight_target_path(&target, true)
+                    .await
+                    .map_err(SyncExecutionFailure::new)?;
+
+                state.log_manager.log_with_category(
+                    "info",
+                    "Sync started",
+                    Some(task_id.clone()),
+                    LogCategory::SyncStarted,
+                );
+                if target_preflight.kind == TargetPreflightKind::CreatedDirectory {
+                    state.log_manager.log_with_category(
+                        "info",
+                        &format!("Target directory created: {}", target_preflight.path),
+                        Some(task_id.clone()),
+                        LogCategory::Other,
+                    );
+                }
+
+                let copy_result = tokio::select! {
+                    res = engine.sync_files_from_dry_run(&dry_run_plan, &options, {
+                        let progress_state_for_copy = progress_state.clone();
+                        let log_manager_for_copy = log_manager.clone();
+                        let recurring_entries_for_copy = recurring_history_detail_entries_for_progress.clone();
+                        let task_id_for_log_copy = task_id_for_log.clone();
+                        let task_id_for_progress_copy = task_id_for_progress.clone();
+                        let app_for_log_copy = app_for_log.clone();
+                        let app_for_progress_copy = app_for_progress.clone();
+                        let mcp_jobs_for_copy = mcp_jobs_for_progress.clone();
+                        let mcp_job_id_for_copy = mcp_job_id_for_progress.clone();
+                        let sync_origin_for_copy = sync_event_origin_for_progress.clone();
+                        move |progress| {
+                            handle_live_sync_progress(
+                                &progress_state_for_copy,
+                                &task_id_for_log_copy,
+                                &app_for_log_copy,
+                                &log_manager_for_copy,
+                                &recurring_entries_for_copy,
+                                &task_id_for_progress_copy,
+                                sync_origin_for_copy.clone(),
+                                &app_for_progress_copy,
+                                &mcp_jobs_for_copy,
+                                mcp_job_id_for_copy.as_deref(),
+                                &progress,
                             );
                         }
+                    }, move |entry| {
+                        let now = Instant::now();
+                        if let Some(entries) = sync_live_state_for_file_batch.record_entry(entry, now) {
+                            let event = SyncFileBatchEvent {
+                                task_id: task_id_for_file_batch.clone(),
+                                origin: sync_event_origin_for_file_batch.clone(),
+                                entries,
+                            };
+                            emit_sync_file_batch(&app_for_file_batch, &event);
+                        }
+                    }) => {
+                        if let Some(entries) = sync_live_state.flush_pending_entries() {
+                            let event = SyncFileBatchEvent {
+                                task_id: task_id.clone(),
+                                origin: sync_event_origin_value.clone(),
+                                entries,
+                            };
+                            emit_sync_file_batch(&app, &event);
+                        }
+                        if let Some(batch) = progress_state.flush_logs() {
+                            capture_recurring_schedule_detail_entries(
+                                &recurring_history_detail_entries_for_progress,
+                                &batch,
+                            );
+                            log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
+                        }
+                        res
+                    },
+                    _ = cancel_token.cancelled() => {
+                        if let Some(entries) = sync_live_state.flush_pending_entries() {
+                            let event = SyncFileBatchEvent {
+                                task_id: task_id.clone(),
+                                origin: sync_event_origin_value.clone(),
+                                entries,
+                            };
+                            emit_sync_file_batch(&app, &event);
+                        }
+                        if let Some(batch) = progress_state.flush_logs() {
+                            capture_recurring_schedule_detail_entries(
+                                &recurring_history_detail_entries_for_progress,
+                                &batch,
+                            );
+                            log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
+                        }
+                        Err(anyhow::anyhow!(SYNC_CANCELLED_BY_USER_ERROR))
                     }
-                }, move |entry| {
-                    let now = Instant::now();
-                    if let Some(entries) = sync_live_state_for_file_batch.record_entry(entry, now) {
-                        let event = SyncFileBatchEvent {
-                            task_id: task_id_for_file_batch.clone(),
-                            origin: sync_event_origin_for_file_batch.clone(),
-                            entries,
-                        };
-                        emit_sync_file_batch(&app_for_file_batch, &event);
-                    }
-                }) => {
-                    if let Some(entries) = sync_live_state.flush_pending_entries() {
-                        let event = SyncFileBatchEvent {
-                            task_id: task_id.clone(),
-                            origin: sync_event_origin_value.clone(),
-                            entries,
-                        };
-                        emit_sync_file_batch(&app, &event);
-                    }
-                    // Flush remaining logs on completion
-                    if let Some(batch) = progress_state.flush_logs() {
-                        capture_recurring_schedule_detail_entries(
-                            &recurring_history_detail_entries_for_progress,
-                            &batch,
-                        );
-                        log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
-                    }
-                    res
-                },
-                _ = cancel_token.cancelled() => {
-                    if let Some(entries) = sync_live_state.flush_pending_entries() {
-                        let event = SyncFileBatchEvent {
-                            task_id: task_id.clone(),
-                            origin: sync_event_origin_value.clone(),
-                            entries,
-                        };
-                        emit_sync_file_batch(&app, &event);
-                    }
-                     // Flush logs on cancel too
-                    if let Some(batch) = progress_state.flush_logs() {
-                        capture_recurring_schedule_detail_entries(
-                            &recurring_history_detail_entries_for_progress,
-                            &batch,
-                        );
-                        log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
-                    }
-                    Err(anyhow::anyhow!("Operation cancelled by user"))
-                }
-            };
+                };
 
-            // 취소 토큰 정리
+                match &copy_result {
+                    Ok(res) => {
+                        let unit_system = state.runtime_config.read().await.settings.data_unit_system;
+                        let msg = format!(
+                            "Sync completed.\nCopied: {} files\nData transferred: {}",
+                            format_number(res.files_copied),
+                            format_bytes_with_unit(res.bytes_copied, unit_system)
+                        );
+                        state.log_manager.log_with_category(
+                            "success",
+                            &msg,
+                            Some(task_id.clone()),
+                            LogCategory::SyncCompleted,
+                        );
+
+                        let conflict_session_id = create_conflict_review_session(
+                            &task_id,
+                            &task_name,
+                            &source,
+                            &target,
+                            &target_newer_conflicts,
+                            sync_origin,
+                            &state,
+                            &app,
+                        )
+                        .await;
+                        if conflict_session_id.is_some() && sync_origin == SyncOrigin::Watch {
+                            maybe_notify_conflict_for_watch(&app, &task_name, target_newer_conflicts.len())
+                                .await;
+                        }
+
+                        emit_sync_session_finished(
+                            &app,
+                            &SyncSessionFinishedEvent {
+                                task_id: task_id.clone(),
+                                origin: sync_event_origin_value,
+                                status: "completed".to_string(),
+                                files_copied: res.files_copied,
+                                bytes_copied: res.bytes_copied,
+                                errors: res.errors.clone(),
+                                conflict_count: target_newer_conflicts.len(),
+                                has_pending_conflicts: !target_newer_conflicts.is_empty(),
+                                target_preflight: Some(target_preflight.clone()),
+                                reason: None,
+                            },
+                        );
+
+                        Ok(SyncExecutionResult {
+                            sync_result: res.clone(),
+                            conflict_session_id,
+                            conflict_count: target_newer_conflicts.len(),
+                            has_pending_conflicts: !target_newer_conflicts.is_empty(),
+                            target_preflight: Some(target_preflight.clone()),
+                            recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
+                                &recurring_history_detail_entries,
+                            ),
+                        })
+                    }
+                    Err(e) => {
+                        let err_text = format!("{:#}", e);
+                        if err_text.contains("cancelled by user")
+                            || err_text.contains(SYNC_CANCELLED_BY_USER_ERROR)
+                        {
+                            emit_sync_session_finished(
+                                &app,
+                                &SyncSessionFinishedEvent {
+                                    task_id: task_id.clone(),
+                                    origin: sync_event_origin_value,
+                                    status: "cancelled".to_string(),
+                                    files_copied: 0,
+                                    bytes_copied: 0,
+                                    errors: Vec::new(),
+                                    conflict_count: 0,
+                                    has_pending_conflicts: false,
+                                    target_preflight: Some(target_preflight.clone()),
+                                    reason: Some(SYNC_CANCELLED_BY_USER_ERROR.to_string()),
+                                },
+                            );
+                            emit_task_log_with_recurring_detail(
+                                &state.log_manager,
+                                Some(&recurring_history_detail_entries),
+                                "warning",
+                                "Sync cancelled by user",
+                                Some(task_id.clone()),
+                                LogCategory::SyncError,
+                                Some(&app),
+                            );
+                            Err(SyncExecutionFailure {
+                                error_detail: SYNC_CANCELLED_BY_USER_ERROR.to_string(),
+                                recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
+                                    &recurring_history_detail_entries,
+                                ),
+                            })
+                        } else {
+                            emit_sync_session_finished(
+                                &app,
+                                &SyncSessionFinishedEvent {
+                                    task_id: task_id.clone(),
+                                    origin: sync_event_origin_value,
+                                    status: "failed".to_string(),
+                                    files_copied: 0,
+                                    bytes_copied: 0,
+                                    errors: Vec::new(),
+                                    conflict_count: 0,
+                                    has_pending_conflicts: false,
+                                    target_preflight: Some(target_preflight.clone()),
+                                    reason: Some(err_text.clone()),
+                                },
+                            );
+                            let msg = format!("Sync failed: {err_text}");
+                            emit_task_log_with_recurring_detail(
+                                &state.log_manager,
+                                Some(&recurring_history_detail_entries),
+                                "error",
+                                &msg,
+                                Some(task_id.clone()),
+                                LogCategory::SyncError,
+                                Some(&app),
+                            );
+                            Err(SyncExecutionFailure {
+                                error_detail: err_text,
+                                recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
+                                    &recurring_history_detail_entries,
+                                ),
+                            })
+                        }
+                    }
+                }
+            }
+            .await;
+
             {
                 let mut tokens = state.cancel_tokens.write().await;
                 tokens.remove(&task_id_clone);
             }
 
-            match &result {
-                Ok(res) => {
-                    let unit_system = state.runtime_config.read().await.settings.data_unit_system;
-                    let msg = format!(
-                        "Sync completed.\nCopied: {} files\nData transferred: {}",
-                        format_number(res.files_copied),
-                        format_bytes_with_unit(res.bytes_copied, unit_system)
-                    );
-                    state.log_manager.log_with_category(
-                        "success",
-                        &msg,
-                        Some(task_id.clone()),
-                        LogCategory::SyncCompleted,
-                    );
-
-                    let conflict_session_id = create_conflict_review_session(
-                        &task_id,
-                        &task_name,
-                        &source,
-                        &target,
-                        &target_newer_conflicts,
-                        sync_origin,
-                        &state,
-                        &app,
-                    )
-                    .await;
-                    if conflict_session_id.is_some() && sync_origin == SyncOrigin::Watch {
-                        maybe_notify_conflict_for_watch(&app, &task_name, target_newer_conflicts.len())
-                            .await;
-                    }
-
-                    emit_sync_session_finished(
-                        &app,
-                        &SyncSessionFinishedEvent {
-                            task_id: task_id.clone(),
-                            origin: sync_event_origin_value,
-                            status: "completed".to_string(),
-                            files_copied: res.files_copied,
-                            bytes_copied: res.bytes_copied,
-                            errors: res.errors.clone(),
-                            conflict_count: target_newer_conflicts.len(),
-                            has_pending_conflicts: !target_newer_conflicts.is_empty(),
-                            target_preflight: Some(target_preflight.clone()),
-                            reason: None,
-                        },
-                    );
-
-                    Ok(SyncExecutionResult {
-                        sync_result: res.clone(),
-                        conflict_session_id,
-                        conflict_count: target_newer_conflicts.len(),
-                        has_pending_conflicts: !target_newer_conflicts.is_empty(),
-                        target_preflight: Some(target_preflight.clone()),
-                        recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
-                            &recurring_history_detail_entries,
-                        ),
-                    })
-                }
-                Err(e) => {
-                    let err_text = format!("{:#}", e);
-                    if err_text.contains("cancelled by user") || err_text.contains("Operation cancelled by user") {
-                        emit_sync_session_finished(
-                            &app,
-                            &SyncSessionFinishedEvent {
-                                task_id: task_id.clone(),
-                                origin: sync_event_origin_value,
-                                status: "cancelled".to_string(),
-                                files_copied: 0,
-                                bytes_copied: 0,
-                                errors: Vec::new(),
-                                conflict_count: 0,
-                                has_pending_conflicts: false,
-                                target_preflight: Some(target_preflight.clone()),
-                                reason: Some("Operation cancelled by user".to_string()),
-                            },
-                        );
-                        emit_task_log_with_recurring_detail(
-                            &state.log_manager,
-                            Some(&recurring_history_detail_entries),
-                            "warning",
-                            "Sync cancelled by user",
-                            Some(task_id.clone()),
-                            LogCategory::SyncError,
-                            Some(&app),
-                        );
-                        Err(SyncExecutionFailure {
-                            error_detail: "Operation cancelled by user".to_string(),
-                            recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
-                                &recurring_history_detail_entries,
-                            ),
-                        })
-                    } else {
-                        emit_sync_session_finished(
-                            &app,
-                            &SyncSessionFinishedEvent {
-                                task_id: task_id.clone(),
-                                origin: sync_event_origin_value,
-                                status: "failed".to_string(),
-                                files_copied: 0,
-                                bytes_copied: 0,
-                                errors: Vec::new(),
-                                conflict_count: 0,
-                                has_pending_conflicts: false,
-                                target_preflight: Some(target_preflight.clone()),
-                                reason: Some(err_text.clone()),
-                            },
-                        );
-                        let msg = format!("Sync failed: {err_text}");
-                        emit_task_log_with_recurring_detail(
-                            &state.log_manager,
-                            Some(&recurring_history_detail_entries),
-                            "error",
-                            &msg,
-                            Some(task_id.clone()),
-                            LogCategory::SyncError,
-                            Some(&app),
-                        );
-                        Err(SyncExecutionFailure {
-                            error_detail: err_text,
-                            recurring_history_detail_entries: snapshot_recurring_schedule_detail_entries(
-                                &recurring_history_detail_entries,
-                            ),
-                        })
-                    }
-                }
-            }
+            operation_result
         }
         .await;
 
@@ -4788,6 +5226,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         state.clone(),
         true,
         SyncOrigin::Watch,
+        None,
         None,
         None,
     )
@@ -5172,19 +5611,19 @@ async fn get_owner_license_debug_snapshot(
     let cached_license_status = license_validation::get_license_status(app.clone()).await?;
     let license_state_path = license_validation::debug_license_state_path(&app)?;
     let cached_license_state = license_validation::debug_load_license_state(&app);
-    let refresh_supporter_status = match supporter::refresh_supporter_status_for_app(app.clone()).await
-    {
-        Ok(status) => OwnerLicenseRefreshSnapshot {
-            ok: true,
-            status: Some(status),
-            error: None,
-        },
-        Err(error) => OwnerLicenseRefreshSnapshot {
-            ok: false,
-            status: None,
-            error: Some(error),
-        },
-    };
+    let refresh_supporter_status =
+        match supporter::refresh_supporter_status_for_app(app.clone()).await {
+            Ok(status) => OwnerLicenseRefreshSnapshot {
+                ok: true,
+                status: Some(status),
+                error: None,
+            },
+            Err(error) => OwnerLicenseRefreshSnapshot {
+                ok: false,
+                status: None,
+                error: Some(error),
+            },
+        };
 
     Ok(OwnerLicenseDebugSnapshot {
         app_support_dir: app_support_dir.to_string_lossy().into_owned(),
@@ -5501,6 +5940,9 @@ async fn sync_dry_run_internal(
     mcp_job_id: Option<String>,
 ) -> Result<DryRunResult, String> {
     try_acquire_task_operation(&task_id, TaskOperationKind::DryRun, state).await?;
+    clear_dry_run_artifact(&task_id, state).await;
+    let requested_source = source.to_string_lossy().to_string();
+    let requested_target = target.to_string_lossy().to_string();
 
     let result: Result<DryRunResult, String> = async {
         let source =
@@ -5544,7 +5986,7 @@ async fn sync_dry_run_internal(
             );
         }
 
-        let engine = SyncEngine::new(source, target);
+        let engine = SyncEngine::new(source.clone(), target.clone());
         let options = SyncOptions {
             checksum_mode,
             preserve_permissions: true,
@@ -5649,7 +6091,7 @@ async fn sync_dry_run_internal(
         };
 
         let result = engine
-            .dry_run_with_progress(
+            .dry_run_with_progress_and_conflicts(
                 &options,
                 cancel_token.clone(),
                 progress_emit,
@@ -5663,7 +6105,7 @@ async fn sync_dry_run_internal(
             tokens.remove(&task_id);
         }
 
-        let result = match result {
+        let (result, target_newer_conflicts) = match result {
             Ok(result) => result,
             Err(err) => {
                 if let Some(final_progress) = live_state.latest_progress() {
@@ -5759,11 +6201,26 @@ async fn sync_dry_run_internal(
             }
         }
 
-        Ok({
+        let result = {
             let mut result = result;
             result.target_preflight = Some(target_preflight.clone());
             result
-        })
+        };
+
+        let artifact = build_dry_run_artifact(
+            &requested_source,
+            &requested_target,
+            &source,
+            &target,
+            checksum_mode,
+            &options.exclude_patterns,
+            &result,
+            &target_newer_conflicts,
+        )
+        .await?;
+        store_dry_run_artifact(&task_id, artifact, state).await;
+
+        Ok(result)
     }
     .await;
 
@@ -6717,6 +7174,40 @@ async fn start_sync(
         SyncOrigin::Manual,
         None,
         None,
+        None,
+    )
+    .await
+    .map_err(|error| error.error_detail)?;
+
+    Ok(result)
+}
+
+#[tauri::command]
+async fn start_sync_from_dry_run(
+    task_id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncExecutionResult, String> {
+    let (task, exclude_patterns) = load_task_context(&task_id, state.inner()).await?;
+    let artifact = load_dry_run_artifact(&task_id, state.inner())
+        .await
+        .ok_or_else(|| DRY_RUN_ARTIFACT_MISSING_ERROR.to_string())?;
+
+    let result = execute_sync_internal(
+        task.id.clone(),
+        task.name.clone(),
+        PathBuf::from(task.source.clone()),
+        PathBuf::from(task.target.clone()),
+        task.checksum_mode,
+        task.verify_after_copy,
+        exclude_patterns,
+        app,
+        state.inner().clone(),
+        false,
+        SyncOrigin::Manual,
+        None,
+        None,
+        Some(artifact),
     )
     .await
     .map_err(|error| error.error_detail)?;
@@ -7139,6 +7630,7 @@ async fn spawn_mcp_sync_job(
             SyncOrigin::Manual,
             Some(cancel_token.clone()),
             Some(job_id_for_job.clone()),
+            None,
         )
         .await;
         state_for_job
@@ -7718,6 +8210,7 @@ async fn patch_sync_task_internal(
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
     let (task, warnings) = persist_patched_sync_task_and_collect_history_warnings(update, state)?;
+    clear_dry_run_artifact(&task.id, state).await;
     for message in warnings {
         state.log_manager.log_with_category_and_event(
             "warning",
@@ -7750,6 +8243,7 @@ async fn delete_sync_task_internal(
             .config_store
             .save_tasks(&tasks)
             .map_err(config_store_error_to_string)?;
+        clear_dry_run_artifact(&task_id, state).await;
         state
             .recurring_schedule_history_store
             .clear_all_task_history(&task_id)?;
@@ -8453,6 +8947,7 @@ pub fn run() {
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_running_tasks: Arc::new(RwLock::new(HashSet::new())),
+            dry_run_artifacts: Arc::new(RwLock::new(HashMap::new())),
             watcher_manager: Arc::new(RwLock::new(WatcherManager::new())),
             runtime_config: Arc::new(RwLock::new(RuntimeConfigPayload::default())),
             syncing_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -8510,6 +9005,7 @@ pub fn run() {
             resolve_path_by_uuid,
             unmount_volume,
             start_sync,
+            start_sync_from_dry_run,
             list_sync_tasks,
             find_sync_task_source_recommendations,
             get_sync_task,

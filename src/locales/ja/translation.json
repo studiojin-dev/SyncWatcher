@@ -82,6 +82,8 @@
       "watchStatusIdle": "まだログがありません",
       "autoUnmount": "自動アンマウント",
       "confirmStartSync": "今すぐ同期を開始しますか？",
+      "syncNowFromDryRun": "今すぐ同期",
+      "confirmSyncNowFromDryRun": "最新の Dry Run 結果を再利用して今すぐ同期を開始しますか？",
       "confirmDryRun": "今すぐ Dry Run を開始しますか？",
       "confirmWatchDisable": "このタスクの Watch Mode を無効にしますか？",
       "autoUnmountConfirmTitle": "自動アンマウント確認",
@@ -123,7 +125,8 @@
       "autoUnmountCancelledStatus": "Unmount cancelled (kept mounted)",
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
-      "autoUnmountFailedStatus": "Unmount failed"
+      "autoUnmountFailedStatus": "Unmount failed",
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
     },
     "recurringSchedules": {
       "title": "定期実行",
@@ -381,6 +384,12 @@
       "statusCompleted": "完了",
       "statusCancelled": "キャンセル",
       "statusFailed": "失敗",
+      "phaseScanningSource": "ソースをスキャン中",
+      "phaseScanningTarget": "ターゲットをスキャン中",
+      "phaseComparing": "比較中",
+      "phaseValidatingDryRun": "保存済み Dry Run を検証中",
+      "phaseCopying": "コピー中",
+      "phasePending": "準備中",
       "completed": "完了",
       "cancelled": "キャンセル",
       "error": "エラー",

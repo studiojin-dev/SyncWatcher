@@ -1,15 +1,15 @@
 {
   "version": 1,
   "active": true,
-  "skill": "code-review",
-  "keyword": "$code-review",
+  "skill": "cancel",
+  "keyword": "cancel",
   "phase": "planning",
-  "activated_at": "2026-04-08T11:50:34.341Z",
-  "updated_at": "2026-04-08T11:50:34.341Z",
+  "activated_at": "2026-04-09T05:39:18.639Z",
+  "updated_at": "2026-04-09T05:49:10.117Z",
   "source": "keyword-detector",
   "session_id": "",
-  "thread_id": "019d6c61-47ee-7123-96c6-06aa3e4a0df0",
-  "turn_id": "019d6ceb-59d0-7630-ae78-b37071565eac",
-  "iteration": 12,
-  "last_turn_at": "2026-04-09T02:58:14.047Z"
+  "thread_id": "019d7035-b79b-73c3-a2c9-5e05f2b49b5a",
+  "turn_id": "019d70c0-9e03-7223-8a8e-1ed96c1cd29d",
+  "iteration": 3,
+  "last_turn_at": "2026-04-09T06:19:05.375Z"
 }

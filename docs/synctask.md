@@ -53,3 +53,5 @@ Choose file types that should be excluded from copying. Additional patterns can 
 5. Manual copy button
 6. `watchmode` toggle button
 7. Deleted-item finder for files present only in Target
+
+After a `dry-run` completes, the result screen can launch `Sync Now` directly from the cached Dry Run result. Manual sync now also shows the pre-copy scan and compare phase so users can see which path is currently being inspected before file copying starts.

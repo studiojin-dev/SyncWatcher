@@ -110,11 +110,12 @@ function SyncTasksView({
     openEditTask,
     openLogsView,
     openOrphansView,
-    pendingSyncTask,
+    pendingSyncRequest,
     pendingDryRunTask,
     requestCancel,
     savingTask,
     startSync,
+    startSyncFromDryRun,
     startDryRun,
     syncing,
     watchTogglePendingIds,
@@ -224,15 +225,28 @@ function SyncTasksView({
       />
 
       <CancelConfirmModal
-        opened={!!pendingSyncTask}
+        opened={!!pendingSyncRequest}
         onConfirm={() => {
           void confirmPendingSync();
         }}
         onCancel={cancelPendingSync}
-        title={t('syncTasks.startSync')}
-        message={t('syncTasks.confirmStartSync', {
-          defaultValue: '지금 동기화를 시작할까요?',
-        })}
+        title={
+          pendingSyncRequest?.mode === 'dryRunArtifact'
+            ? t('syncTasks.syncNowFromDryRun', {
+                defaultValue: 'Sync Now',
+              })
+            : t('syncTasks.startSync')
+        }
+        message={
+          pendingSyncRequest?.mode === 'dryRunArtifact'
+            ? t('syncTasks.confirmSyncNowFromDryRun', {
+                defaultValue:
+                  'Use the latest Dry Run result and start syncing now?',
+              })
+            : t('syncTasks.confirmStartSync', {
+                defaultValue: '지금 동기화를 시작할까요?',
+              })
+        }
         confirmLabel={t('common.confirm', { defaultValue: '확인' })}
         cancelLabel={t('common.cancel', { defaultValue: '취소' })}
       />
@@ -310,6 +324,13 @@ function SyncTasksView({
           taskName={subView.taskName}
           onBack={() => setSubView({ kind: 'list' })}
           onRequestCancel={() => requestCancel('dryRun', subView.taskId)}
+          onRequestSyncNow={
+            activeDryRunTask
+              ? () => {
+                  startSyncFromDryRun(activeDryRunTask);
+                }
+              : undefined
+          }
           onRequestRerun={
             activeDryRunTask
               ? () => {

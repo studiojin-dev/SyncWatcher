@@ -296,6 +296,10 @@ function BackendRuntimeBridge({
                 }
 
                 const store = useSyncTaskStatusStore.getState();
+                const currentSession = store.getSyncSession(taskId);
+                if (!currentSession || isTerminalSyncSessionStatus(currentSession.status)) {
+                    return;
+                }
                 store.completeSyncSession(taskId, event.payload);
             },
         );
