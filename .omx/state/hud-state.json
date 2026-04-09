@@ -1,6 +1,6 @@
 {
-  "last_turn_at": "2026-04-09T06:19:05.480Z",
-  "turn_count": 68,
-  "last_agent_output": "ADR 반영했습니다. [ADR-20260409-0024-DRR-dry-run-artifact-reuse-and-pre-copy-sync-visibility.md](/Volumes/",
-  "last_progress_at": "2026-04-09T06:19:05.480Z"
+  "last_turn_at": "2026-04-09T08:46:29.029Z",
+  "turn_count": 81,
+  "last_agent_output": "COMPLETE\n\n아니요. Mac App Store 배포라면 `local-mac-app-store-build.sh` 다음에 `local-macos-release.sh`를 이어서 실",
+  "last_progress_at": "2026-04-09T08:46:29.029Z"
 }
