@@ -180,7 +180,7 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     pb.set_message(format!("{:?}", progress.phase));
                 }
-            })
+            }, |_| {})
             .await
         {
             Ok(result) => {

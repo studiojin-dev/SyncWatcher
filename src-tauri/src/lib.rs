@@ -38,7 +38,8 @@ use tokio_util::sync::CancellationToken;
 use sync_engine::{
     types::{
         DeleteOrphanResult, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, OrphanFile,
-        SyncResult, TargetNewerConflictCandidate, TargetPreflightInfo, TargetPreflightKind,
+        SyncFileEntry, SyncResult, TargetNewerConflictCandidate, TargetPreflightInfo,
+        TargetPreflightKind,
     },
     DryRunResult, SyncEngine, SyncOptions,
 };
@@ -202,6 +203,8 @@ impl SyncProgressState {
 const DRY_RUN_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const DRY_RUN_DIFF_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 const DRY_RUN_DIFF_BATCH_MAX_SIZE: usize = 50;
+const SYNC_FILE_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
+const SYNC_FILE_BATCH_MAX_SIZE: usize = 50;
 
 struct DryRunLiveStateInner {
     last_progress_emit_at: Instant,
@@ -337,6 +340,76 @@ impl DryRunLiveState {
         };
 
         state.latest_progress.clone()
+    }
+}
+
+struct SyncLiveStateInner {
+    pending_entries_since: Option<Instant>,
+    pending_entries: Vec<SyncFileEntry>,
+}
+
+impl SyncLiveStateInner {
+    fn new() -> Self {
+        Self {
+            pending_entries_since: None,
+            pending_entries: Vec::with_capacity(SYNC_FILE_BATCH_MAX_SIZE),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SyncLiveState {
+    inner: Arc<StdMutex<SyncLiveStateInner>>,
+}
+
+impl SyncLiveState {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(StdMutex::new(SyncLiveStateInner::new())),
+        }
+    }
+
+    fn record_entry(&self, entry: SyncFileEntry, now: Instant) -> Option<Vec<SyncFileEntry>> {
+        let Ok(mut state) = self.inner.lock() else {
+            return None;
+        };
+
+        if state.pending_entries.is_empty() {
+            state.pending_entries_since = Some(now);
+        }
+
+        state.pending_entries.push(entry);
+
+        let should_flush_timed = state
+            .pending_entries_since
+            .is_some_and(|started_at| now.duration_since(started_at) >= SYNC_FILE_BATCH_EMIT_INTERVAL);
+        let should_flush_sized = state.pending_entries.len() >= SYNC_FILE_BATCH_MAX_SIZE;
+
+        if should_flush_timed || should_flush_sized {
+            state.pending_entries_since = None;
+            return Some(std::mem::replace(
+                &mut state.pending_entries,
+                Vec::with_capacity(SYNC_FILE_BATCH_MAX_SIZE),
+            ));
+        }
+
+        None
+    }
+
+    fn flush_pending_entries(&self) -> Option<Vec<SyncFileEntry>> {
+        let Ok(mut state) = self.inner.lock() else {
+            return None;
+        };
+
+        if state.pending_entries.is_empty() {
+            return None;
+        }
+
+        state.pending_entries_since = None;
+        Some(std::mem::replace(
+            &mut state.pending_entries,
+            Vec::with_capacity(SYNC_FILE_BATCH_MAX_SIZE),
+        ))
     }
 }
 
@@ -493,11 +566,20 @@ struct RuntimeWatchStateEvent {
     reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+enum SyncEventOrigin {
+    Manual,
+    Watch,
+    Scheduled,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeSyncStateEvent {
     task_id: String,
     syncing: bool,
+    origin: SyncEventOrigin,
     reason: Option<String>,
 }
 
@@ -514,6 +596,30 @@ struct RuntimeSyncQueueStateEvent {
 struct RuntimeDryRunStateEvent {
     task_id: String,
     dry_running: bool,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncFileBatchEvent {
+    task_id: String,
+    origin: SyncEventOrigin,
+    entries: Vec<SyncFileEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncSessionFinishedEvent {
+    task_id: String,
+    origin: SyncEventOrigin,
+    status: String,
+    files_copied: u64,
+    bytes_copied: u64,
+    errors: Vec<sync_engine::types::SyncError>,
+    conflict_count: usize,
+    has_pending_conflicts: bool,
+    #[serde(rename = "targetPreflight")]
+    target_preflight: Option<TargetPreflightInfo>,
     reason: Option<String>,
 }
 
@@ -1173,11 +1279,13 @@ fn emit_runtime_sync_state(
     app: &tauri::AppHandle,
     task_id: &str,
     syncing: bool,
+    origin: SyncEventOrigin,
     reason: Option<String>,
 ) {
     let event = RuntimeSyncStateEvent {
         task_id: task_id.to_string(),
         syncing,
+        origin,
         reason,
     };
     let _ = app.emit("runtime-sync-state", &event);
@@ -1217,6 +1325,14 @@ fn emit_dry_run_progress(app: &tauri::AppHandle, event: &DryRunProgressEvent) {
 
 fn emit_dry_run_diff_batch(app: &tauri::AppHandle, event: &DryRunDiffBatchEvent) {
     let _ = app.emit("dry-run-diff-batch", event);
+}
+
+fn emit_sync_file_batch(app: &tauri::AppHandle, event: &SyncFileBatchEvent) {
+    let _ = app.emit("sync-file-batch", event);
+}
+
+fn emit_sync_session_finished(app: &tauri::AppHandle, event: &SyncSessionFinishedEvent) {
+    let _ = app.emit("sync-session-finished", event);
 }
 
 fn dry_run_progress_event(task_id: &str, progress: &DryRunProgress) -> DryRunProgressEvent {
@@ -4039,6 +4155,14 @@ enum SyncOrigin {
     Scheduled,
 }
 
+fn sync_event_origin(sync_origin: SyncOrigin) -> SyncEventOrigin {
+    match sync_origin {
+        SyncOrigin::Manual => SyncEventOrigin::Manual,
+        SyncOrigin::Watch => SyncEventOrigin::Watch,
+        SyncOrigin::Scheduled => SyncEventOrigin::Scheduled,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeAutoUnmountDecision {
     SkipDisabled,
@@ -4173,7 +4297,7 @@ async fn execute_sync_internal(
         .await
         .map_err(SyncExecutionFailure::new)?;
     if sync_origin == SyncOrigin::Manual {
-        emit_runtime_sync_state(&app, &task_id, true, None);
+        emit_runtime_sync_state(&app, &task_id, true, sync_event_origin(sync_origin), None);
     }
 
     let recurring_history_detail_entries = Arc::new(StdMutex::new(Vec::new()));
@@ -4270,6 +4394,7 @@ async fn execute_sync_internal(
             #[serde(rename_all = "camelCase")]
             struct ProgressEvent {
                 task_id: String,
+                origin: SyncEventOrigin,
                 message: String,
                 current: u64,
                 total: u64,
@@ -4280,6 +4405,7 @@ async fn execute_sync_internal(
             }
 
             let progress_state = SyncProgressState::new();
+            let sync_live_state = SyncLiveState::new();
             let log_manager = state.log_manager.clone();
             let task_id_for_log = task_id.clone();
             let app_for_log = app.clone(); // For log events
@@ -4287,6 +4413,11 @@ async fn execute_sync_internal(
                 recurring_history_detail_entries.clone();
             let mcp_jobs = state.mcp_jobs.clone();
             let mcp_job_id_for_progress = mcp_job_id.clone();
+            let sync_event_origin_value = sync_event_origin(sync_origin);
+            let task_id_for_file_batch = task_id_for_event.clone();
+            let app_for_file_batch = app_clone.clone();
+            let sync_event_origin_for_file_batch = sync_event_origin_value.clone();
+            let sync_live_state_for_file_batch = sync_live_state.clone();
 
             // Create clones for the closure
             let progress_state_closure = progress_state.clone();
@@ -4336,8 +4467,9 @@ async fn execute_sync_internal(
                     let should_emit = progress_state_closure.should_emit_progress();
 
                     if should_emit || progress.processed_files == progress.total_files {
-                         let event = ProgressEvent {
-                            task_id: task_id_for_event.clone(),
+                            let event = ProgressEvent {
+                                task_id: task_id_for_event.clone(),
+                                origin: sync_event_origin_value.clone(),
                             message: progress.clone().current_file.unwrap_or_else(|| "Syncing...".to_string()),
                             current: progress.processed_files,
                             total: progress.total_files,
@@ -4363,7 +4495,25 @@ async fn execute_sync_internal(
                             );
                         }
                     }
+                }, move |entry| {
+                    let now = Instant::now();
+                    if let Some(entries) = sync_live_state_for_file_batch.record_entry(entry, now) {
+                        let event = SyncFileBatchEvent {
+                            task_id: task_id_for_file_batch.clone(),
+                            origin: sync_event_origin_for_file_batch.clone(),
+                            entries,
+                        };
+                        emit_sync_file_batch(&app_for_file_batch, &event);
+                    }
                 }) => {
+                    if let Some(entries) = sync_live_state.flush_pending_entries() {
+                        let event = SyncFileBatchEvent {
+                            task_id: task_id.clone(),
+                            origin: sync_event_origin_value.clone(),
+                            entries,
+                        };
+                        emit_sync_file_batch(&app, &event);
+                    }
                     // Flush remaining logs on completion
                     if let Some(batch) = progress_state.flush_logs() {
                         capture_recurring_schedule_detail_entries(
@@ -4375,6 +4525,14 @@ async fn execute_sync_internal(
                     res
                 },
                 _ = cancel_token.cancelled() => {
+                    if let Some(entries) = sync_live_state.flush_pending_entries() {
+                        let event = SyncFileBatchEvent {
+                            task_id: task_id.clone(),
+                            origin: sync_event_origin_value.clone(),
+                            entries,
+                        };
+                        emit_sync_file_batch(&app, &event);
+                    }
                      // Flush logs on cancel too
                     if let Some(batch) = progress_state.flush_logs() {
                         capture_recurring_schedule_detail_entries(
@@ -4424,6 +4582,22 @@ async fn execute_sync_internal(
                             .await;
                     }
 
+                    emit_sync_session_finished(
+                        &app,
+                        &SyncSessionFinishedEvent {
+                            task_id: task_id.clone(),
+                            origin: sync_event_origin_value,
+                            status: "completed".to_string(),
+                            files_copied: res.files_copied,
+                            bytes_copied: res.bytes_copied,
+                            errors: res.errors.clone(),
+                            conflict_count: target_newer_conflicts.len(),
+                            has_pending_conflicts: !target_newer_conflicts.is_empty(),
+                            target_preflight: Some(target_preflight.clone()),
+                            reason: None,
+                        },
+                    );
+
                     Ok(SyncExecutionResult {
                         sync_result: res.clone(),
                         conflict_session_id,
@@ -4438,6 +4612,21 @@ async fn execute_sync_internal(
                 Err(e) => {
                     let err_text = format!("{:#}", e);
                     if err_text.contains("cancelled by user") || err_text.contains("Operation cancelled by user") {
+                        emit_sync_session_finished(
+                            &app,
+                            &SyncSessionFinishedEvent {
+                                task_id: task_id.clone(),
+                                origin: sync_event_origin_value,
+                                status: "cancelled".to_string(),
+                                files_copied: 0,
+                                bytes_copied: 0,
+                                errors: Vec::new(),
+                                conflict_count: 0,
+                                has_pending_conflicts: false,
+                                target_preflight: Some(target_preflight.clone()),
+                                reason: Some("Operation cancelled by user".to_string()),
+                            },
+                        );
                         emit_task_log_with_recurring_detail(
                             &state.log_manager,
                             Some(&recurring_history_detail_entries),
@@ -4454,6 +4643,21 @@ async fn execute_sync_internal(
                             ),
                         })
                     } else {
+                        emit_sync_session_finished(
+                            &app,
+                            &SyncSessionFinishedEvent {
+                                task_id: task_id.clone(),
+                                origin: sync_event_origin_value,
+                                status: "failed".to_string(),
+                                files_copied: 0,
+                                bytes_copied: 0,
+                                errors: Vec::new(),
+                                conflict_count: 0,
+                                has_pending_conflicts: false,
+                                target_preflight: Some(target_preflight.clone()),
+                                reason: Some(err_text.clone()),
+                            },
+                        );
                         let msg = format!("Sync failed: {err_text}");
                         emit_task_log_with_recurring_detail(
                             &state.log_manager,
@@ -4496,7 +4700,13 @@ async fn execute_sync_internal(
     release_task_operation(&task_id, &state).await;
     release_sync_slot(&task_id, &state).await;
     if sync_origin == SyncOrigin::Manual {
-        emit_runtime_sync_state(&app, &task_id, false, completion_reason);
+        emit_runtime_sync_state(
+            &app,
+            &task_id,
+            false,
+            sync_event_origin(sync_origin),
+            completion_reason,
+        );
     }
     sync_result
 }
@@ -4540,7 +4750,13 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         }
     }
 
-    emit_runtime_sync_state(&app, &task.id, true, None);
+    emit_runtime_sync_state(
+        &app,
+        &task.id,
+        true,
+        sync_event_origin(SyncOrigin::Watch),
+        None,
+    );
 
     if let Err(error) = activate_task_path_access(&task.id, &state).await {
         state.log_manager.log(
@@ -4548,7 +4764,13 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
             &format!("Sandbox access failed: {error}"),
             Some(task.id.clone()),
         );
-        emit_runtime_sync_state(&app, &task.id, false, Some(error));
+        emit_runtime_sync_state(
+            &app,
+            &task.id,
+            false,
+            sync_event_origin(SyncOrigin::Watch),
+            Some(error),
+        );
         schedule_runtime_sync_dispatcher(app, state);
         return;
     }
@@ -4631,7 +4853,13 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     }
 
     let reason = result.err().map(|error| error.error_detail);
-    emit_runtime_sync_state(&app, &task.id, false, reason);
+    emit_runtime_sync_state(
+        &app,
+        &task.id,
+        false,
+        sync_event_origin(SyncOrigin::Watch),
+        reason,
+    );
 
     let should_replay = take_runtime_pending_sync_task(&task.id, &state).await;
     if should_replay && is_runtime_watch_task_active(&task.id, &state).await {

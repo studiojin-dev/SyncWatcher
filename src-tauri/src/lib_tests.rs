@@ -12,7 +12,8 @@ mod integration_tests {
     };
     use crate::security_scoped::SecurityScopedAccessManager;
     use crate::sync_engine::types::{
-        DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, TargetPreflightKind,
+        DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, SyncFileEntry,
+        SyncFileStatus, TargetPreflightKind,
     };
     use crate::system_integration::VolumeInfo;
     use crate::watcher::WatcherManager;
@@ -46,6 +47,7 @@ mod integration_tests {
         volume_watch_next_tick_delay, AppState, CancelOperationType, ConflictFileInfo,
         ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
         ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
+        SyncLiveState,
         RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
         RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
         RuntimeTaskValidationIssue, TargetNewerConflictItem, VolumeEmitDebounceState,
@@ -2773,6 +2775,87 @@ mod integration_tests {
         let (diffs, batch_progress) = batch.expect("batch size flush should trigger");
         assert_eq!(diffs.len(), 50);
         assert_eq!(batch_progress.phase, DryRunPhase::Comparing);
+    }
+
+    #[test]
+    fn test_sync_live_state_flushes_timed_batches() {
+        let live = SyncLiveState::new();
+        let base = Instant::now();
+
+        assert!(live
+            .record_entry(
+                SyncFileEntry {
+                    path: PathBuf::from("a.txt"),
+                    kind: FileDiffKind::New,
+                    status: SyncFileStatus::Copied,
+                    source_size: Some(1),
+                    target_size: Some(0),
+                    error: None,
+                },
+                base,
+            )
+            .is_none());
+
+        let batch = live.record_entry(
+            SyncFileEntry {
+                path: PathBuf::from("b.txt"),
+                kind: FileDiffKind::Modified,
+                status: SyncFileStatus::Failed,
+                source_size: Some(2),
+                target_size: Some(1),
+                error: Some("copy failed".to_string()),
+            },
+            base + Duration::from_millis(250),
+        );
+
+        let entries = batch.expect("timed batch should flush");
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn test_sync_live_state_flushes_on_batch_size_limit() {
+        let live = SyncLiveState::new();
+
+        let mut batch = None;
+        for index in 0..50 {
+            batch = live.record_entry(
+                SyncFileEntry {
+                    path: PathBuf::from(format!("file-{index}.txt")),
+                    kind: FileDiffKind::New,
+                    status: SyncFileStatus::Copied,
+                    source_size: Some(1),
+                    target_size: Some(0),
+                    error: None,
+                },
+                Instant::now(),
+            );
+        }
+
+        let entries = batch.expect("batch size flush should trigger");
+        assert_eq!(entries.len(), 50);
+    }
+
+    #[test]
+    fn test_sync_live_state_flushes_pending_entries_explicitly() {
+        let live = SyncLiveState::new();
+        assert!(live
+            .record_entry(
+                SyncFileEntry {
+                    path: PathBuf::from("tail.txt"),
+                    kind: FileDiffKind::New,
+                    status: SyncFileStatus::Copied,
+                    source_size: Some(1),
+                    target_size: Some(0),
+                    error: None,
+                },
+                Instant::now(),
+            )
+            .is_none());
+
+        let entries = live
+            .flush_pending_entries()
+            .expect("explicit flush should return pending entries");
+        assert_eq!(entries.len(), 1);
     }
 
     #[tokio::test]

@@ -70,10 +70,18 @@ const storeState = {
   failDryRunSession: vi.fn(),
   getDryRunSession: vi.fn((taskId: string) => storeState.dryRunSessions.get(taskId)),
   clearDryRunSession: vi.fn(),
+  beginSyncSession: vi.fn(),
+  setSyncProgress: vi.fn(),
+  appendSyncFileBatch: vi.fn(),
+  completeSyncSession: vi.fn(),
+  failSyncSession: vi.fn(),
+  getSyncSession: vi.fn((taskId: string) => storeState.syncSessions.get(taskId)),
+  clearSyncSession: vi.fn(),
   queuedTaskIds: new Set<string>(),
   syncingTaskIds: new Set<string>(),
   dryRunningTaskIds: new Set<string>(),
   dryRunSessions: new Map<string, unknown>(),
+  syncSessions: new Map<string, unknown>(),
 };
 
 vi.mock('../../hooks/useSyncTaskStatus', () => ({
@@ -109,6 +117,7 @@ describe('BackendRuntimeBridge', () => {
     storeState.syncingTaskIds = new Set<string>();
     storeState.dryRunningTaskIds = new Set<string>();
     storeState.dryRunSessions = new Map<string, unknown>();
+    storeState.syncSessions = new Map<string, unknown>();
     storeState.getStatus.mockImplementation(() => undefined);
     storeState.setLastLog.mockImplementation(() => undefined);
     storeState.setProgress.mockImplementation(() => undefined);
@@ -120,6 +129,11 @@ describe('BackendRuntimeBridge', () => {
     storeState.completeDryRunSession.mockImplementation(() => undefined);
     storeState.failDryRunSession.mockImplementation(() => undefined);
     storeState.getDryRunSession.mockImplementation((taskId: string) => storeState.dryRunSessions.get(taskId));
+    storeState.setSyncProgress.mockImplementation(() => undefined);
+    storeState.appendSyncFileBatch.mockImplementation(() => undefined);
+    storeState.completeSyncSession.mockImplementation(() => undefined);
+    storeState.failSyncSession.mockImplementation(() => undefined);
+    storeState.getSyncSession.mockImplementation((taskId: string) => storeState.syncSessions.get(taskId));
     mockListen.mockImplementation(async (eventName: string, handler: (event: { payload?: unknown }) => void) => {
       eventHandlers.set(eventName, handler);
       return () => {
@@ -441,6 +455,7 @@ describe('BackendRuntimeBridge', () => {
       handler({
         payload: {
           taskId: 'task-1',
+          origin: 'manual',
           message: 'copying.mov',
           current: 1,
           total: 2,
@@ -453,6 +468,7 @@ describe('BackendRuntimeBridge', () => {
       handler({
         payload: {
           taskId: 'task-1',
+          origin: 'manual',
           message: 'copying.mov',
           current: 1,
           total: 2,
@@ -466,6 +482,116 @@ describe('BackendRuntimeBridge', () => {
 
     expect(storeState.setProgress).toHaveBeenCalledTimes(2);
     expect(storeState.setLastLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates manual sync sessions from sync progress and file batches only', async () => {
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+    storeState.syncSessions = new Map([
+      ['task-1', { status: 'running' }],
+    ]);
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('sync-progress')).toBe(true);
+      expect(eventHandlers.has('sync-file-batch')).toBe(true);
+      expect(eventHandlers.has('sync-session-finished')).toBe(true);
+    });
+
+    act(() => {
+      eventHandlers.get('sync-progress')?.({
+        payload: {
+          taskId: 'task-1',
+          origin: 'manual',
+          message: 'copying.mov',
+        },
+      });
+      eventHandlers.get('sync-file-batch')?.({
+        payload: {
+          taskId: 'task-1',
+          origin: 'manual',
+          entries: [
+            {
+              path: 'copying.mov',
+              kind: 'New',
+              status: 'copied',
+              source_size: 10,
+              target_size: 0,
+            },
+            {
+              path: 'copying-2.mov',
+              kind: 'Modified',
+              status: 'failed',
+              source_size: 5,
+              target_size: 3,
+              error: 'copy failed',
+            },
+          ],
+        },
+      });
+      eventHandlers.get('sync-file-batch')?.({
+        payload: {
+          taskId: 'task-1',
+          origin: 'watch',
+          entries: [
+            {
+              path: 'ignored.mov',
+              kind: 'Modified',
+              status: 'copied',
+              source_size: 1,
+              target_size: 1,
+            },
+          ],
+        },
+      });
+    });
+
+    expect(storeState.setSyncProgress).toHaveBeenCalledTimes(1);
+    expect(storeState.appendSyncFileBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('terminalizes manual sync sessions from sync-session-finished', async () => {
+    mockInvoke.mockResolvedValue({
+      watchingTasks: [],
+      syncingTasks: [],
+      queuedTasks: [],
+      dryRunningTasks: [],
+    });
+
+    render(<BackendRuntimeBridge />);
+
+    await waitFor(() => {
+      expect(eventHandlers.has('sync-session-finished')).toBe(true);
+    });
+
+    act(() => {
+      eventHandlers.get('sync-session-finished')?.({
+        payload: {
+          taskId: 'task-1',
+          origin: 'manual',
+          status: 'completed',
+          files_copied: 2,
+          bytes_copied: 20,
+          errors: [],
+          conflictCount: 0,
+          hasPendingConflicts: false,
+          targetPreflight: null,
+        },
+      });
+    });
+
+    expect(storeState.completeSyncSession).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        status: 'completed',
+        files_copied: 2,
+      }),
+    );
   });
 
   it('requests source review when runtime sync ends with an unresolved UUID source', async () => {
@@ -497,6 +623,7 @@ describe('BackendRuntimeBridge', () => {
         payload: {
           taskId: 'task-1',
           syncing: false,
+          origin: 'manual',
           reason: 'Volume with DISK_UUID old-disk not found (not mounted?)',
         },
       });
@@ -697,6 +824,7 @@ describe('BackendRuntimeBridge', () => {
         payload: {
           taskId: 'task-1',
           syncing: false,
+          origin: 'manual',
         },
       });
     });
@@ -734,6 +862,7 @@ describe('BackendRuntimeBridge', () => {
         payload: {
           taskId: 'task-1',
           syncing: false,
+          origin: 'manual',
           reason: 'sync failed',
         },
       });

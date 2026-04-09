@@ -10,6 +10,7 @@ describe('useSyncTaskStatusStore queued snapshot sync', () => {
       syncingTaskIds: new Set(),
       dryRunningTaskIds: new Set(),
       dryRunSessions: new Map(),
+      syncSessions: new Map(),
     });
   });
 
@@ -145,5 +146,108 @@ describe('useSyncTaskStatusStore queued snapshot sync', () => {
     store.clearDryRunSession('task-1');
 
     expect(useSyncTaskStatusStore.getState().getDryRunSession('task-1')).toBeUndefined();
+  });
+
+  it('does not mutate a terminal sync session with later progress or file batches', () => {
+    const store = useSyncTaskStatusStore.getState();
+
+    store.beginSyncSession('task-1', 'Task 1');
+    store.completeSyncSession('task-1', {
+      taskId: 'task-1',
+      origin: 'manual',
+      status: 'completed',
+      files_copied: 1,
+      bytes_copied: 1,
+      errors: [],
+      conflictCount: 0,
+      hasPendingConflicts: false,
+      targetPreflight: null,
+    });
+
+    store.setSyncProgress('task-1', {
+      taskId: 'task-1',
+      origin: 'manual',
+      message: 'late progress',
+    });
+    store.appendSyncFileBatch('task-1', {
+      taskId: 'task-1',
+      origin: 'manual',
+      entries: [
+        {
+          path: 'b.txt',
+          kind: 'Modified',
+          status: 'failed',
+          source_size: 2,
+          target_size: 1,
+          error: 'late failure',
+        },
+      ],
+    });
+
+    const session = useSyncTaskStatusStore.getState().getSyncSession('task-1');
+    expect(session?.status).toBe('completed');
+    expect(session?.progress).toBeUndefined();
+    expect(session?.result.entries).toHaveLength(0);
+    expect(session?.result.files_copied).toBe(1);
+  });
+
+  it('preserves live sync entries when the terminal summary arrives', () => {
+    const store = useSyncTaskStatusStore.getState();
+
+    store.beginSyncSession('task-1', 'Task 1');
+    store.appendSyncFileBatch('task-1', {
+      taskId: 'task-1',
+      origin: 'manual',
+      entries: [
+        {
+          path: 'partial.txt',
+          kind: 'New',
+          status: 'copied',
+          source_size: 10,
+          target_size: 0,
+        },
+      ],
+    });
+
+    store.completeSyncSession('task-1', {
+      taskId: 'task-1',
+      origin: 'manual',
+      status: 'completed',
+      files_copied: 2,
+      bytes_copied: 20,
+      errors: [],
+      conflictCount: 0,
+      hasPendingConflicts: false,
+      targetPreflight: null,
+    });
+
+    const session = useSyncTaskStatusStore.getState().getSyncSession('task-1');
+    expect(session?.result.entries.map((entry) => entry.path)).toEqual(['partial.txt']);
+    expect(session?.result.files_copied).toBe(2);
+  });
+
+  it('replaces an existing sync session when a new run begins', () => {
+    const store = useSyncTaskStatusStore.getState();
+
+    store.beginSyncSession('task-1', 'Task 1');
+    store.appendSyncFileBatch('task-1', {
+      taskId: 'task-1',
+      origin: 'manual',
+      entries: [
+        {
+          path: 'a.txt',
+          kind: 'New',
+          status: 'copied',
+          source_size: 1,
+          target_size: 0,
+        },
+      ],
+    });
+
+    store.beginSyncSession('task-1', 'Task 1');
+
+    const session = useSyncTaskStatusStore.getState().getSyncSession('task-1');
+    expect(session?.status).toBe('running');
+    expect(session?.result.entries).toHaveLength(0);
   });
 });

@@ -12,6 +12,7 @@ import YamlEditorModal from '../components/ui/YamlEditorModal';
 import TaskLogsModal from '../components/features/TaskLogsModal';
 import OrphanFilesModal from '../components/features/OrphanFilesModal';
 import DryRunResultView from '../components/features/DryRunResultView';
+import SyncResultView from '../components/features/SyncResultView';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
 import SyncTaskValidationErrorModal from '../components/features/SyncTaskValidationErrorModal';
 import type { RuntimeTaskValidationIssue } from '../types/runtime';
@@ -53,7 +54,9 @@ function SyncTasksView({
     watchingTaskIds,
     queuedTaskIds,
     dryRunSessions,
+    syncSessions,
     clearDryRunSession,
+    clearSyncSession,
   } = useSyncTaskStatusStore();
 
   const form = useSyncTaskFormController({
@@ -86,9 +89,11 @@ function SyncTasksView({
   });
   const {
     cancelConfirm,
+    cancelPendingSync,
     cancelPendingDryRun,
     clearCancelConfirm,
     closeForm,
+    confirmPendingSync,
     confirmPendingDryRun,
     conflictSessions,
     conflictSessionsLoading,
@@ -105,9 +110,11 @@ function SyncTasksView({
     openEditTask,
     openLogsView,
     openOrphansView,
+    pendingSyncTask,
     pendingDryRunTask,
     requestCancel,
     savingTask,
+    startSync,
     startDryRun,
     syncing,
     watchTogglePendingIds,
@@ -122,10 +129,26 @@ function SyncTasksView({
       }
     }
 
-    if (subView.kind === 'dryRun' && !taskIds.has(subView.taskId)) {
+    for (const taskId of syncSessions.keys()) {
+      if (!taskIds.has(taskId)) {
+        clearSyncSession(taskId);
+      }
+    }
+
+    if (
+      (subView.kind === 'dryRun' || subView.kind === 'sync') &&
+      !taskIds.has(subView.taskId)
+    ) {
       setSubView({ kind: 'list' });
     }
-  }, [clearDryRunSession, dryRunSessions, subView, tasks]);
+  }, [
+    clearDryRunSession,
+    clearSyncSession,
+    dryRunSessions,
+    subView,
+    syncSessions,
+    tasks,
+  ]);
 
   useEffect(() => {
     if (!requestedEditTaskId) {
@@ -149,6 +172,14 @@ function SyncTasksView({
   const activeDryRunTask = useMemo(
     () =>
       subView.kind === 'dryRun'
+        ? tasks.find((task) => task.id === subView.taskId) ?? null
+        : null,
+    [subView, tasks],
+  );
+
+  const activeSyncTask = useMemo(
+    () =>
+      subView.kind === 'sync'
         ? tasks.find((task) => task.id === subView.taskId) ?? null
         : null,
     [subView, tasks],
@@ -187,6 +218,20 @@ function SyncTasksView({
         title={t('syncTasks.dryRun')}
         message={t('syncTasks.confirmDryRun', {
           defaultValue: 'Dry Run을 시작할까요?',
+        })}
+        confirmLabel={t('common.confirm', { defaultValue: '확인' })}
+        cancelLabel={t('common.cancel', { defaultValue: '취소' })}
+      />
+
+      <CancelConfirmModal
+        opened={!!pendingSyncTask}
+        onConfirm={() => {
+          void confirmPendingSync();
+        }}
+        onCancel={cancelPendingSync}
+        title={t('syncTasks.startSync')}
+        message={t('syncTasks.confirmStartSync', {
+          defaultValue: '지금 동기화를 시작할까요?',
         })}
         confirmLabel={t('common.confirm', { defaultValue: '확인' })}
         cancelLabel={t('common.cancel', { defaultValue: '취소' })}
@@ -269,6 +314,22 @@ function SyncTasksView({
             activeDryRunTask
               ? () => {
                   void startDryRun(activeDryRunTask);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {subView.kind === 'sync' ? (
+        <SyncResultView
+          taskId={subView.taskId}
+          taskName={subView.taskName}
+          onBack={() => setSubView({ kind: 'list' })}
+          onRequestCancel={() => requestCancel('sync', subView.taskId)}
+          onRequestRerun={
+            activeSyncTask
+              ? () => {
+                  void startSync(activeSyncTask);
                 }
               : undefined
           }

@@ -2,6 +2,7 @@ import { SyncTask } from '../hooks/useSyncTasks';
 import { ExclusionSet } from '../hooks/useExclusionSets';
 import { DataUnitSystem } from '../utils/formatBytes';
 import { shouldEnableAutoUnmount } from '../utils/autoUnmount';
+import type { SyncOperationOrigin } from './syncEngine';
 
 export interface RuntimeSyncTask {
     id: string;
@@ -53,6 +54,7 @@ export interface RuntimeWatchStateEvent {
 export interface RuntimeSyncStateEvent {
     taskId: string;
     syncing: boolean;
+    origin: SyncOperationOrigin;
     reason?: string;
 }
 

@@ -7,6 +7,13 @@ pub enum FileDiffKind {
     Modified,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncFileStatus {
+    Copied,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDiff {
     pub path: PathBuf,
@@ -15,6 +22,16 @@ pub struct FileDiff {
     pub target_size: Option<u64>,
     pub checksum_source: Option<String>,
     pub checksum_target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncFileEntry {
+    pub path: PathBuf,
+    pub kind: FileDiffKind,
+    pub status: SyncFileStatus,
+    pub source_size: Option<u64>,
+    pub target_size: Option<u64>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

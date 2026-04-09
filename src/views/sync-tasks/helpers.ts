@@ -29,6 +29,7 @@ export type SubView =
       target: string;
       excludePatterns: string[];
     }
+  | { kind: 'sync'; taskId: string; taskName: string }
   | { kind: 'dryRun'; taskId: string; taskName: string };
 
 export interface CancelConfirmState {

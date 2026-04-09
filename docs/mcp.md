@@ -192,4 +192,3 @@ This is intentional. MCP is meant to control the running app within a narrower t
 - Long-running jobs should be polled through `syncwatcher_get_job`.
 - The MCP relay is local only and uses stdio plus a local Unix socket.
 - SyncWatcher UI and MCP share the same backend-owned config and runtime behavior, so MCP-triggered actions follow the same validation and safety constraints as UI-triggered actions.
-

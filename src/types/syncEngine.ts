@@ -1,4 +1,6 @@
 export type FileDiffKind = 'New' | 'Modified';
+export type SyncOperationOrigin = 'manual' | 'watch' | 'scheduled';
+export type SyncFileStatus = 'copied' | 'failed';
 
 export interface FileDiff {
   path: string;
@@ -26,6 +28,67 @@ export interface DryRunResult {
   files_modified: number;
   bytes_to_copy: number;
   targetPreflight: TargetPreflightInfo | null;
+}
+
+export interface SyncErrorResult {
+  path: string;
+  message: string;
+  kind: 'CopyFailed' | 'VerificationFailed' | 'Other' | string;
+}
+
+export interface SyncProgressEvent {
+  taskId?: string;
+  origin?: SyncOperationOrigin;
+  message?: string;
+  current?: number;
+  total?: number;
+  processedBytes?: number;
+  totalBytes?: number;
+  currentFileBytesCopied?: number;
+  currentFileTotalBytes?: number;
+}
+
+export interface SyncFileEntry {
+  path: string;
+  kind: FileDiffKind;
+  status: SyncFileStatus;
+  source_size: number | null;
+  target_size: number | null;
+  error?: string;
+}
+
+export interface SyncFileBatchEvent {
+  taskId?: string;
+  origin?: SyncOperationOrigin;
+  entries: SyncFileEntry[];
+}
+
+export interface SyncSessionResult {
+  entries: SyncFileEntry[];
+  files_copied: number;
+  bytes_copied: number;
+  errors: SyncErrorResult[];
+  conflictCount: number;
+  hasPendingConflicts: boolean;
+  targetPreflight: TargetPreflightInfo | null;
+}
+
+export type SyncSessionStatus = 'running' | 'completed' | 'cancelled' | 'failed';
+
+export interface SyncSessionState {
+  taskId: string;
+  taskName: string;
+  status: SyncSessionStatus;
+  result: SyncSessionResult;
+  progress?: SyncProgressEvent;
+  error?: string;
+  updatedAtUnixMs: number;
+}
+
+export function isTerminalSyncSessionStatus(
+  status: SyncSessionStatus | undefined,
+): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'failed';
 }
 
 export type DryRunSessionStatus = 'running' | 'completed' | 'cancelled' | 'failed';
@@ -160,14 +223,23 @@ export interface SyncExecutionResult {
   syncResult: {
     files_copied: number;
     bytes_copied: number;
-    errors: Array<{
-      path: string;
-      message: string;
-      kind: 'CopyFailed' | 'VerificationFailed' | 'Other' | string;
-    }>;
+    errors: SyncErrorResult[];
   };
   conflictSessionId: string | null;
   conflictCount: number;
   hasPendingConflicts: boolean;
   targetPreflight: TargetPreflightInfo | null;
+}
+
+export interface SyncSessionFinishedEvent {
+  taskId: string;
+  origin: SyncOperationOrigin;
+  status: SyncSessionStatus;
+  files_copied: number;
+  bytes_copied: number;
+  errors: SyncErrorResult[];
+  conflictCount: number;
+  hasPendingConflicts: boolean;
+  targetPreflight: TargetPreflightInfo | null;
+  reason?: string;
 }

@@ -6,13 +6,11 @@ import {
 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { useSettings } from '../../hooks/useSettings';
-import { useDryRunSession } from '../../hooks/useSyncTaskStatus';
-import type { ResultTreeEntry } from './ResultTreeTable';
-import ResultTreeTable from './ResultTreeTable';
+import { useSyncSession } from '../../hooks/useSyncTaskStatus';
+import ResultTreeTable, { type ResultTreeEntry } from './ResultTreeTable';
 import { formatBytes } from '../../utils/formatBytes';
-import type { DryRunSessionState } from '../../types/syncEngine';
 
-interface DryRunResultViewProps {
+interface SyncResultViewProps {
   taskId: string;
   taskName: string;
   onBack: () => void;
@@ -21,80 +19,48 @@ interface DryRunResultViewProps {
 }
 
 function getStatusLabel(
-  status: DryRunSessionState['status'],
+  status: 'running' | 'completed' | 'cancelled' | 'failed',
   t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
   switch (status) {
     case 'running':
-      return t('dryRun.statusRunning', { defaultValue: 'Running' });
+      return t('sync.statusRunning', { defaultValue: 'Running' });
     case 'completed':
-      return t('dryRun.statusCompleted', { defaultValue: 'Completed' });
+      return t('sync.statusCompleted', { defaultValue: 'Completed' });
     case 'cancelled':
-      return t('dryRun.statusCancelled', { defaultValue: 'Cancelled' });
+      return t('sync.statusCancelled', { defaultValue: 'Cancelled' });
     case 'failed':
-      return t('dryRun.statusFailed', { defaultValue: 'Failed' });
+      return t('sync.statusFailed', { defaultValue: 'Failed' });
     default:
       return status;
   }
 }
 
-function getPhaseLabel(
-  phase: string | undefined,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  switch (phase) {
-    case 'scanningSource':
-      return t('dryRun.phaseScanningSource', { defaultValue: 'Scanning source' });
-    case 'scanningTarget':
-      return t('dryRun.phaseScanningTarget', { defaultValue: 'Scanning target' });
-    case 'comparing':
-      return t('dryRun.phaseComparing', { defaultValue: 'Comparing' });
-    default:
-      return phase || t('dryRun.phasePending', { defaultValue: 'Preparing' });
-  }
-}
-
-export default function DryRunResultView({
+export default function SyncResultView({
   taskId,
   taskName,
   onBack,
   onRequestCancel,
   onRequestRerun,
-}: DryRunResultViewProps) {
+}: SyncResultViewProps) {
   const { t } = useTranslation();
   const { settings } = useSettings();
-  const session = useDryRunSession(taskId);
+  const session = useSyncSession(taskId);
   const result = session?.result ?? {
-    diffs: [],
-    total_files: 0,
-    files_to_copy: 0,
-    files_modified: 0,
-    bytes_to_copy: 0,
+    entries: [],
+    files_copied: 0,
+    bytes_copied: 0,
+    errors: [],
+    conflictCount: 0,
+    hasPendingConflicts: false,
     targetPreflight: null,
   };
   const status = session?.status ?? 'running';
   const progress = session?.progress;
-  const showTargetPreviewWarning =
-    result.targetPreflight?.kind === 'willCreateDirectory';
   const isRunning = status === 'running';
   const isFinished =
     status === 'completed' || status === 'cancelled' || status === 'failed';
-  const showEmptyState = result.diffs.length === 0 && !isRunning;
-  const entries = useMemo<ResultTreeEntry[]>(
-    () =>
-      result.diffs.map((diff) => ({
-        path: diff.path,
-        typeLabel:
-          diff.kind === 'New'
-            ? t('dryRun.newFile')
-            : t('dryRun.modifiedFile'),
-        sourceSize: diff.source_size,
-        targetSize: diff.target_size,
-        icon: diff.kind === 'New' ? 'new' : 'modified',
-      })),
-    [result.diffs, t],
-  );
-
+  const showEmptyState = result.entries.length === 0 && !isRunning;
   const overallPercent =
     progress?.totalBytes && progress.totalBytes > 0
       ? Math.min(
@@ -104,6 +70,28 @@ export default function DryRunResultView({
       : progress?.total && progress.total > 0
         ? Math.min(100, Math.round(((progress.current || 0) / progress.total) * 100))
         : null;
+  const entries = useMemo<ResultTreeEntry[]>(
+    () =>
+      result.entries.map((entry) => ({
+        path: entry.path,
+        typeLabel:
+          entry.status === 'failed'
+            ? t('sync.fileFailed', { defaultValue: 'Failed' })
+            : entry.kind === 'New'
+              ? t('sync.fileCopiedNew', { defaultValue: 'Copied (New)' })
+              : t('sync.fileCopiedModified', { defaultValue: 'Copied (Modified)' }),
+        sourceSize: entry.source_size,
+        targetSize: entry.target_size,
+        icon:
+          entry.status === 'failed'
+            ? 'failed'
+            : entry.kind === 'New'
+              ? 'new'
+              : 'modified',
+        tone: entry.status === 'failed' ? 'error' : 'default',
+      })),
+    [result.entries, t],
+  );
 
   return (
     <div className="neo-box p-5 bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[6px_6px_0_0_var(--shadow-color)] space-y-4">
@@ -111,7 +99,7 @@ export default function DryRunResultView({
         <div className="space-y-2 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl font-heading font-bold uppercase">
-              {t('syncTasks.dryRun')} · {taskName}
+              {t('syncTasks.startSync')} · {taskName}
             </h2>
             <span
               className={`px-2 py-1 border-2 text-[10px] font-mono uppercase ${
@@ -128,12 +116,11 @@ export default function DryRunResultView({
             </span>
           </div>
           <p className="text-xs font-mono text-[var(--text-secondary)]">
-            {result.diffs.length} {result.diffs.length === 1 ? 'DIFF' : 'DIFFS'}
+            {result.entries.length} {result.entries.length === 1 ? 'ENTRY' : 'ENTRIES'}
           </p>
           {isRunning && progress ? (
             <p className="text-xs font-mono text-[var(--text-secondary)]">
-              {getPhaseLabel(progress.phase, t)}
-              {progress.message ? ` · ${progress.message}` : ''}
+              {progress.message || t('syncTasks.watchStatusSyncing')}
               {overallPercent !== null ? ` · ${overallPercent}%` : ''}
             </p>
           ) : null}
@@ -169,19 +156,6 @@ export default function DryRunResultView({
         </div>
       </div>
 
-      {showTargetPreviewWarning ? (
-        <div className="flex items-start gap-2 border-2 border-[var(--border-main)] bg-[var(--color-accent-warning)]/20 px-3 py-3 text-sm">
-          <IconAlertTriangle size={18} className="mt-0.5 shrink-0" />
-          <p>
-            {t('dryRun.targetWillBeCreatedBanner', {
-              path: result.targetPreflight?.path ?? '',
-              defaultValue:
-                "Target directory doesn't exist yet. Dry Run is previewing it as empty, so items can appear as New and Target Size stays blank until sync creates {{path}}.",
-            })}
-          </p>
-        </div>
-      ) : null}
-
       {session?.error && isFinished ? (
         <div className="flex items-start gap-2 border-2 border-[var(--border-main)] bg-[var(--color-accent-error)]/15 px-3 py-3 text-sm">
           <IconAlertTriangle size={18} className="mt-0.5 shrink-0" />
@@ -192,40 +166,40 @@ export default function DryRunResultView({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <div className="p-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
           <p className="text-[10px] font-mono text-[var(--text-secondary)] uppercase">
-            {t('dryRun.totalFiles')}
+            {t('sync.filesCopied', { defaultValue: 'Files Copied' })}
           </p>
-          <p className="font-bold text-lg">{result.total_files}</p>
+          <p className="font-bold text-lg">{result.files_copied}</p>
         </div>
         <div className="p-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
           <p className="text-[10px] font-mono text-[var(--text-secondary)] uppercase">
-            {t('dryRun.filesToCopy')}
-          </p>
-          <p className="font-bold text-lg">{result.files_to_copy}</p>
-        </div>
-        <div className="p-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
-          <p className="text-[10px] font-mono text-[var(--text-secondary)] uppercase">
-            {t('dryRun.filesModified')}
-          </p>
-          <p className="font-bold text-lg">{result.files_modified}</p>
-        </div>
-        <div className="p-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
-          <p className="text-[10px] font-mono text-[var(--text-secondary)] uppercase">
-            {t('dryRun.bytesToCopy')}
+            {t('sync.bytesCopied', { defaultValue: 'Bytes Copied' })}
           </p>
           <p className="font-bold text-lg">
-            {formatBytes(result.bytes_to_copy, settings.dataUnitSystem)}
+            {formatBytes(result.bytes_copied, settings.dataUnitSystem)}
           </p>
+        </div>
+        <div className="p-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
+          <p className="text-[10px] font-mono text-[var(--text-secondary)] uppercase">
+            {t('sync.errorCount', { defaultValue: 'Errors' })}
+          </p>
+          <p className="font-bold text-lg">{result.errors.length}</p>
+        </div>
+        <div className="p-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
+          <p className="text-[10px] font-mono text-[var(--text-secondary)] uppercase">
+            {t('sync.conflictCount', { defaultValue: 'Conflicts' })}
+          </p>
+          <p className="font-bold text-lg">{result.conflictCount}</p>
         </div>
       </div>
 
       {isRunning && progress ? (
         <div className="space-y-2 border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3">
           <div className="flex items-center justify-between gap-3 text-xs font-mono text-[var(--text-secondary)]">
-            <span>{getPhaseLabel(progress.phase, t)}</span>
+            <span>{progress.message || t('syncTasks.watchStatusSyncing')}</span>
             <span>
               {overallPercent !== null
                 ? `${overallPercent}%`
-                : t('dryRun.statusRunning', { defaultValue: 'Running' })}
+                : t('sync.statusRunning', { defaultValue: 'Running' })}
             </span>
           </div>
           <div className="h-2 border border-[var(--border-main)] bg-[var(--bg-primary)] overflow-hidden">
@@ -234,24 +208,19 @@ export default function DryRunResultView({
               style={{ width: `${overallPercent ?? 12}%` }}
             />
           </div>
-          {progress.message ? (
-            <div className="text-xs font-mono text-[var(--text-secondary)] break-all">
-              {progress.message}
-            </div>
-          ) : null}
         </div>
       ) : null}
 
       <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">
         {showEmptyState ? (
           <div className="p-4 text-sm font-mono text-[var(--text-secondary)]">
-            {t('dryRun.noChanges')}
+            {t('sync.noEntries', { defaultValue: 'No copied files recorded.' })}
           </div>
-        ) : result.diffs.length === 0 ? (
+        ) : result.entries.length === 0 ? (
           <div className="p-4 text-sm font-mono text-[var(--text-secondary)]">
             {isRunning
-              ? t('dryRun.scanning', { defaultValue: 'Scanning...' })
-              : t('dryRun.noChanges')}
+              ? t('syncTasks.watchStatusSyncing', { defaultValue: 'Syncing...' })
+              : t('sync.noEntries', { defaultValue: 'No copied files recorded.' })}
           </div>
         ) : (
           <ResultTreeTable

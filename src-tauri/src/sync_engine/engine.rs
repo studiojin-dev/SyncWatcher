@@ -1,11 +1,12 @@
 use crate::sync_engine::types::{
     ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunPhase, DryRunProgress,
-    DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile, SyncOptions,
-    SyncResult, TargetNewerConflictCandidate,
+    DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile,
+    SyncFileEntry, SyncFileStatus, SyncOptions, SyncResult, TargetNewerConflictCandidate,
 };
 use anyhow::Context;
 use anyhow::Result;
 use globset::{Glob, GlobSetBuilder};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::hash::Hasher;
@@ -70,6 +71,25 @@ impl SyncEngine {
             size: meta.size,
             modified_unix_ms: Self::system_time_to_unix_ms(Some(meta.modified)),
             created_unix_ms: Self::system_time_to_unix_ms(meta.created),
+        }
+    }
+
+    fn compare_modified_time_at_second_precision(
+        left: SystemTime,
+        right: SystemTime,
+    ) -> Ordering {
+        let left_secs = left
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()
+            .map(|duration| duration.as_secs());
+        let right_secs = right
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()
+            .map(|duration| duration.as_secs());
+
+        match (left_secs, right_secs) {
+            (Some(left_secs), Some(right_secs)) => left_secs.cmp(&right_secs),
+            _ => left.cmp(&right),
         }
     }
 
@@ -472,7 +492,11 @@ impl SyncEngine {
                         .unwrap_or_else(|| self.target.join(&path));
                     let mut already_checked_equal_hash = false;
 
-                    if target_meta.modified > source_meta.modified {
+                    if Self::compare_modified_time_at_second_precision(
+                        target_meta.modified,
+                        source_meta.modified,
+                    ) == Ordering::Greater
+                    {
                         // If target is newer but binary-identical, treat as no-op instead of conflict.
                         if source_meta.size != target_meta.size {
                             target_newer_conflicts.push(TargetNewerConflictCandidate {
@@ -531,11 +555,23 @@ impl SyncEngine {
                         already_checked_equal_hash = true;
                     }
 
-                    // 1. First check metadata (fastest)
-                    let mut needs_copy = source_meta.size != target_meta.size
-                        || source_meta.modified > target_meta.modified;
+                    // 1. Fast path for different sizes
+                    let mut needs_copy = source_meta.size != target_meta.size;
 
-                    // 2. If metadata matches but checksum mode is on, check content (slower but accurate)
+                    // 2. Same-size mtime drift can still be a no-op, so verify content.
+                    if !needs_copy
+                        && Self::compare_modified_time_at_second_precision(
+                            source_meta.modified,
+                            target_meta.modified,
+                        ) == Ordering::Greater
+                    {
+                        let source_hash = self.calculate_checksum(&source_path).await?;
+                        let target_hash = self.calculate_checksum(&target_path).await?;
+                        already_checked_equal_hash = true;
+                        needs_copy = source_hash != target_hash;
+                    }
+
+                    // 3. If metadata matches but checksum mode is on, check content (slower but accurate)
                     if !needs_copy && options.checksum_mode && !already_checked_equal_hash {
                         let source_hash = self.calculate_checksum(&source_path).await?;
                         let target_hash = self.calculate_checksum(&target_path).await?;
@@ -702,6 +738,7 @@ impl SyncEngine {
         &self,
         options: &SyncOptions,
         progress_callback: impl Fn(crate::sync_engine::types::SyncProgress),
+        file_callback: impl Fn(SyncFileEntry),
     ) -> Result<SyncResult> {
         let (dry_run, _) = self
             .compare_dirs_internal(options, None, |_| {}, |_, _| {})
@@ -781,10 +818,28 @@ impl SyncEngine {
                             message: e.to_string(),
                             kind,
                         });
+                        let entry = SyncFileEntry {
+                            path: diff.path.clone(),
+                            kind: diff.kind.clone(),
+                            status: SyncFileStatus::Failed,
+                            source_size: diff.source_size,
+                            target_size: diff.target_size,
+                            error: Some(e.to_string()),
+                        };
+                        file_callback(entry);
                     } else {
                         result.files_copied += 1;
                         result.bytes_copied += file_size;
                         current_progress.bytes_copied_current_file = file_size;
+                        let entry = SyncFileEntry {
+                            path: diff.path.clone(),
+                            kind: diff.kind.clone(),
+                            status: SyncFileStatus::Copied,
+                            source_size: diff.source_size,
+                            target_size: diff.target_size.or(Some(0)),
+                            error: None,
+                        };
+                        file_callback(entry);
                     }
 
                     current_progress.processed_files += 1;
@@ -1107,7 +1162,7 @@ mod tests {
         let dry_run = engine.dry_run(&options).await?;
         assert_eq!(dry_run.files_to_copy, 1);
 
-        let result = engine.sync_files(&options, |_| {}).await?;
+        let result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
 
         Ok(())
@@ -1179,7 +1234,7 @@ mod tests {
         assert_eq!(conflicts.len(), 1);
         assert_eq!(conflicts[0].path, relative);
 
-        let sync_result = engine.sync_files(&options, |_| {}).await?;
+        let sync_result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(sync_result.files_copied, 0);
 
         let target_content = fs::read(&target_file).await?;
@@ -1225,8 +1280,133 @@ mod tests {
         let conflicts = engine.target_newer_conflicts(&options).await?;
         assert_eq!(conflicts.len(), 0);
 
-        let sync_result = engine.sync_files(&options, |_| {}).await?;
+        let sync_result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(sync_result.files_copied, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_source_newer_same_content_is_not_modified_without_checksum_mode() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let relative = PathBuf::from("media/photo.jpg");
+        let source_file = source_dir.path().join(&relative);
+        let target_file = target_dir.path().join(&relative);
+        fs::create_dir_all(source_file.parent().unwrap()).await?;
+        fs::create_dir_all(target_file.parent().unwrap()).await?;
+
+        fs::write(&source_file, b"same-content").await?;
+        fs::write(&target_file, b"same-content").await?;
+
+        let target_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let source_time = target_time + std::time::Duration::from_secs(60);
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_system_time(source_time),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_system_time(target_time),
+        )?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions {
+            checksum_mode: false,
+            ..SyncOptions::default()
+        };
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+        assert!(dry_run.diffs.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_source_newer_different_content_same_size_is_modified_without_checksum_mode() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let relative = PathBuf::from("media/photo.jpg");
+        let source_file = source_dir.path().join(&relative);
+        let target_file = target_dir.path().join(&relative);
+        fs::create_dir_all(source_file.parent().unwrap()).await?;
+        fs::create_dir_all(target_file.parent().unwrap()).await?;
+
+        fs::write(&source_file, b"source-v2").await?;
+        fs::write(&target_file, b"target-v1").await?;
+
+        let target_time =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let source_time = target_time + std::time::Duration::from_secs(60);
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_system_time(source_time),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_system_time(target_time),
+        )?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions {
+            checksum_mode: false,
+            ..SyncOptions::default()
+        };
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 1);
+        assert_eq!(dry_run.files_modified, 1);
+        assert_eq!(dry_run.diffs[0].kind, FileDiffKind::Modified);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_subsecond_modified_time_drift_is_ignored_without_checksum_mode() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let relative = PathBuf::from("media/clip.mp4");
+        let source_file = source_dir.path().join(&relative);
+        let target_file = target_dir.path().join(&relative);
+        fs::create_dir_all(source_file.parent().unwrap()).await?;
+        fs::create_dir_all(target_file.parent().unwrap()).await?;
+
+        fs::write(&source_file, b"same-content").await?;
+        fs::write(&target_file, b"same-content").await?;
+
+        let base_secs = 1_700_000_000i64;
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_unix_time(base_secs, 900_000_000),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_unix_time(base_secs, 100_000_000),
+        )?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = SyncOptions {
+            checksum_mode: false,
+            ..SyncOptions::default()
+        };
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+        assert!(dry_run.diffs.is_empty());
+
         Ok(())
     }
 
@@ -1300,7 +1480,7 @@ mod tests {
         // Should only copy file1.txt and file2.txt
         assert_eq!(dry_run.files_to_copy, 2);
 
-        let result = engine.sync_files(&options, |_| {}).await?;
+        let result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(result.files_copied, 2);
 
         assert!(target_dir.path().join("file1.txt").exists());
@@ -1343,7 +1523,7 @@ mod tests {
         let dry_run = engine.dry_run(&options).await?;
         assert_eq!(dry_run.files_to_copy, 2);
 
-        let result = engine.sync_files(&options, |_| {}).await?;
+        let result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(result.files_copied, 2);
 
         for dir_name in HARD_IGNORED_ROOT_METADATA_DIRS {

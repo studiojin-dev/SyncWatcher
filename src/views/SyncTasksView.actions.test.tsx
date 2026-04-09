@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ask } from '@tauri-apps/plugin-dialog';
 import type { SyncTask } from '../hooks/useSyncTasks';
-import type { DryRunSessionState } from '../types/syncEngine';
+import type { DryRunSessionState, SyncSessionState } from '../types/syncEngine';
 import type { TaskStatus } from '../hooks/useSyncTaskStatus';
 import SyncTasksView from './SyncTasksView';
 
@@ -32,6 +32,7 @@ const {
     syncingTaskIds: new Set<string>(),
     dryRunningTaskIds: new Set<string>(),
     dryRunSessions: new Map<string, DryRunSessionState>(),
+    syncSessions: new Map<string, SyncSessionState>(),
     setLastLog: vi.fn(),
     setDryRunning: vi.fn(),
     setDryRunningTasks: vi.fn(),
@@ -42,6 +43,13 @@ const {
     failDryRunSession: vi.fn(),
     getDryRunSession: vi.fn(),
     clearDryRunSession: vi.fn(),
+    beginSyncSession: vi.fn(),
+    setSyncProgress: vi.fn(),
+    appendSyncFileBatch: vi.fn(),
+    completeSyncSession: vi.fn(),
+    failSyncSession: vi.fn(),
+    getSyncSession: vi.fn(),
+    clearSyncSession: vi.fn(),
   };
   const useSyncTaskStatusStoreMock = Object.assign(() => statusState, {
     getState: () => statusState,
@@ -106,6 +114,7 @@ vi.mock('../hooks/useSettings', () => ({
 vi.mock('../hooks/useSyncTaskStatus', () => ({
   useSyncTaskStatusStore: useSyncTaskStatusStoreMock,
   useDryRunSession: (taskId: string) => statusState.dryRunSessions.get(taskId),
+  useSyncSession: (taskId: string) => statusState.syncSessions.get(taskId),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -204,8 +213,54 @@ describe('SyncTasksView sync and watch confirmations', () => {
     statusState.syncingTaskIds = new Set();
     statusState.dryRunningTaskIds = new Set();
     statusState.dryRunSessions = new Map();
+    statusState.syncSessions = new Map();
     statusState.setLastLog.mockReset();
     statusState.clearDryRunSession.mockReset();
+    statusState.clearSyncSession.mockReset();
+    statusState.beginSyncSession.mockImplementation((taskId: string, taskName: string) => {
+      statusState.syncSessions.set(taskId, {
+        taskId,
+        taskName,
+        status: 'running',
+        result: {
+          entries: [],
+          files_copied: 0,
+          bytes_copied: 0,
+          errors: [],
+          conflictCount: 0,
+          hasPendingConflicts: false,
+          targetPreflight: null,
+        },
+        updatedAtUnixMs: Date.now(),
+      });
+    });
+    statusState.completeSyncSession.mockImplementation((taskId: string, result: any) => {
+      const current = statusState.syncSessions.get(taskId);
+      if (!current) return;
+      statusState.syncSessions.set(taskId, {
+        ...current,
+        status: result.status,
+        result: {
+          ...current.result,
+          files_copied: result.files_copied,
+          bytes_copied: result.bytes_copied,
+          errors: result.errors,
+          conflictCount: result.conflictCount,
+          hasPendingConflicts: result.hasPendingConflicts,
+          targetPreflight: result.targetPreflight,
+        },
+        error: result.reason,
+      });
+    });
+    statusState.failSyncSession.mockImplementation((taskId: string, error: string) => {
+      const current = statusState.syncSessions.get(taskId);
+      if (!current) return;
+      statusState.syncSessions.set(taskId, {
+        ...current,
+        status: error.toLowerCase().includes('cancel') ? 'cancelled' : 'failed',
+        error,
+      });
+    });
     listenMock.mockResolvedValue(() => {});
     askMock.mockResolvedValue(true);
     installDefaultInvokeMock();
@@ -234,14 +289,51 @@ describe('SyncTasksView sync and watch confirmations', () => {
     });
 
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
 
     await waitFor(() => {
       expect(onRequestSourceRecommendationReview).toHaveBeenCalledWith('task-1');
     });
   });
 
-  it('does not execute sync when confirmation is rejected', async () => {
-    askMock.mockResolvedValueOnce(false);
+  it('opens the sync result view after in-app confirmation', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'start_sync') {
+        return {
+          syncResult: {
+            files_copied: 1,
+            bytes_copied: 1024,
+            errors: [],
+          },
+          conflictSessionId: null,
+          conflictCount: 0,
+          hasPendingConflicts: false,
+          targetPreflight: null,
+        };
+      }
+      return undefined;
+    });
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.startSync')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('syncTasks.startSync · Task 1')).toBeInTheDocument();
+    });
+    expect(statusState.beginSyncSession).toHaveBeenCalledWith('task-1', 'Task 1');
+    expect(statusState.completeSyncSession).not.toHaveBeenCalled();
+  });
+
+  it('does not execute sync before in-app confirmation and when cancelled', async () => {
     renderWithMantine(<SyncTasksView />);
 
     await waitFor(() => {
@@ -250,9 +342,14 @@ describe('SyncTasksView sync and watch confirmations', () => {
 
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
 
-    await waitFor(() => {
-      expect(askMock).toHaveBeenCalled();
-    });
+    expect(askMock).not.toHaveBeenCalled();
+    expect(screen.getByText('syncTasks.confirmStartSync')).toBeInTheDocument();
+    expect(invokeMock.mock.calls.some((call) => call[0] === 'start_sync')).toBe(
+      false,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
     expect(invokeMock.mock.calls.some((call) => call[0] === 'start_sync')).toBe(
       false,
     );
@@ -267,6 +364,7 @@ describe('SyncTasksView sync and watch confirmations', () => {
     });
 
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
@@ -288,6 +386,7 @@ describe('SyncTasksView sync and watch confirmations', () => {
     });
 
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
@@ -347,6 +446,7 @@ describe('SyncTasksView sync and watch confirmations', () => {
     });
 
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(

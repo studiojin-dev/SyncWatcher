@@ -1,0 +1,36 @@
+<svg width="2880" height="1800" viewBox="0 0 2880 1800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="240" y1="120" x2="2640" y2="1680" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5F7F4"/>
+      <stop offset="0.55" stop-color="#EFF4F1"/>
+      <stop offset="1" stop-color="#E5ECE8"/>
+    </linearGradient>
+    <linearGradient id="frame" x1="560" y1="420" x2="2320" y2="1540" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#21362E"/>
+      <stop offset="1" stop-color="#111C18"/>
+    </linearGradient>
+    <filter id="shadow" x="460" y="350" width="1960" height="1260" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="28"/>
+      <feGaussianBlur stdDeviation="40"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0549 0 0 0 0 0.1098 0 0 0 0 0.0941 0 0 0 0.16 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+  <rect width="2880" height="1800" fill="url(#bg)"/>
+  <circle cx="2440" cy="280" r="220" fill="#D7E7DD"/>
+  <circle cx="420" cy="1520" r="320" fill="#D9E4F1"/>
+  <text x="240" y="258" fill="#12211C" font-size="112" font-family="SF Pro Display, Inter, Arial, sans-serif" font-weight="700" letter-spacing="-2.8">Simple one-way folder sync</text>
+  <text x="240" y="340" fill="#556661" font-size="42" font-family="SF Pro Text, Inter, Arial, sans-serif" font-weight="500">Show the main sync task list with a clean, readable desktop window.</text>
+  <g filter="url(#shadow)">
+    <rect x="560" y="420" width="1760" height="1130" rx="46" fill="url(#frame)"/>
+    <rect x="610" y="496" width="1660" height="1004" rx="26" fill="#0E1714"/>
+    <rect x="610" y="496" width="1660" height="76" rx="26" fill="#162420"/>
+    <circle cx="666" cy="534" r="10" fill="#ED6A5E"/><circle cx="702" cy="534" r="10" fill="#F4BF4F"/><circle cx="738" cy="534" r="10" fill="#61C554"/>
+    <rect x="790" y="516" width="540" height="36" rx="18" fill="#22342E"/>
+    <rect x="670" y="638" width="1540" height="768" rx="24" fill="#F7F8FA"/>
+    <text x="1440" y="1048" text-anchor="middle" fill="#71827C" font-size="52" font-family="SF Pro Display, Inter, Arial, sans-serif" font-weight="600">Replace this panel with your app screenshot</text>
+  </g>
+</svg>

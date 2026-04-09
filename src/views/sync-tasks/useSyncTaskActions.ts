@@ -18,6 +18,7 @@ import { getDistributionPolicy } from '../../utils/distributionPolicy';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
 import { capturePathAccess } from '../../utils/pathAccess';
 import { isUuidSourceResolutionError } from '../../utils/syncTaskSourceRecommendations';
+import { isTerminalSyncSessionStatus } from '../../types/syncEngine';
 import type {
   ConflictReviewQueueChangedEvent,
   ConflictSessionSummary,
@@ -93,6 +94,7 @@ export function useSyncTaskActions({
   onRequestSourceRecommendationReview,
 }: UseSyncTaskActionsOptions) {
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [pendingSyncTask, setPendingSyncTask] = useState<SyncTask | null>(null);
   const [watchTogglePendingIds, setWatchTogglePendingIds] = useState<
     Set<string>
   >(new Set());
@@ -122,6 +124,10 @@ export function useSyncTaskActions({
 
   const cancelPendingDryRun = useCallback(() => {
     setPendingDryRunTask(null);
+  }, []);
+
+  const cancelPendingSync = useCallback(() => {
+    setPendingSyncTask(null);
   }, []);
 
   const requestCancel = useCallback(
@@ -203,6 +209,17 @@ export function useSyncTaskActions({
     (task: SyncTask) => {
       setSubView({
         kind: 'dryRun',
+        taskId: task.id,
+        taskName: task.name,
+      });
+    },
+    [setSubView],
+  );
+
+  const openSyncSession = useCallback(
+    (task: SyncTask) => {
+      setSubView({
+        kind: 'sync',
         taskId: task.id,
         taskName: task.name,
       });
@@ -531,29 +548,11 @@ export function useSyncTaskActions({
     ],
   );
 
-  const handleSync = useCallback(
+  const runSync = useCallback(
     async (task: SyncTask) => {
-      if (syncing === task.id) {
-        requestCancel('sync', task.id);
-        return;
-      }
-
-      if (syncing) {
-        return;
-      }
-
-      const confirmed = await ask(
-        t('syncTasks.confirmStartSync', {
-          defaultValue: '지금 동기화를 시작할까요?',
-        }),
-        {
-          title: t('syncTasks.startSync'),
-          kind: 'warning',
-        },
-      );
-      if (!confirmed) {
-        return;
-      }
+      const store = useSyncTaskStatusStore.getState();
+      store.beginSyncSession(task.id, task.name);
+      openSyncSession(task);
 
       try {
         setSyncing(task.id);
@@ -671,6 +670,9 @@ export function useSyncTaskActions({
       } catch (error) {
         console.error('Sync failed:', error);
         const errorMessage = getErrorMessage(error);
+        if (!isTerminalSyncSessionStatus(store.getSyncSession(task.id)?.status)) {
+          store.failSyncSession(task.id, errorMessage);
+        }
         showToast(errorMessage, 'error');
         if (isUuidSourceResolutionError(errorMessage)) {
           onRequestSourceRecommendationReview?.(task.id);
@@ -683,11 +685,40 @@ export function useSyncTaskActions({
       getPatternsForSets,
       loadConflictSessions,
       onRequestSourceRecommendationReview,
-      requestCancel,
+      openSyncSession,
       showToast,
-      syncing,
       t,
     ],
+  );
+
+  const startSync = useCallback((task: SyncTask) => {
+    setPendingSyncTask(task);
+  }, []);
+
+  const confirmPendingSync = useCallback(async () => {
+    if (!pendingSyncTask) {
+      return;
+    }
+
+    const task = pendingSyncTask;
+    setPendingSyncTask(null);
+    await runSync(task);
+  }, [pendingSyncTask, runSync]);
+
+  const handleSync = useCallback(
+    async (task: SyncTask) => {
+      if (syncing === task.id) {
+        requestCancel('sync', task.id);
+        return;
+      }
+
+      if (syncing) {
+        return;
+      }
+
+      startSync(task);
+    },
+    [requestCancel, startSync, syncing],
   );
 
   const handleToggleWatchMode = useCallback(
@@ -852,6 +883,7 @@ export function useSyncTaskActions({
       try {
         await deleteTask(task.id);
         clearDryRunSession(task.id);
+        useSyncTaskStatusStore.getState().clearSyncSession(task.id);
         showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
       } catch (error) {
         showToast(getErrorMessage(error), 'error');
@@ -902,6 +934,7 @@ export function useSyncTaskActions({
 
   return {
     syncing,
+    pendingSyncTask,
     watchTogglePendingIds,
     cancelConfirm,
     pendingDryRunTask,
@@ -909,7 +942,9 @@ export function useSyncTaskActions({
     conflictSessions,
     conflictSessionsLoading,
     clearCancelConfirm,
+    cancelPendingSync,
     cancelPendingDryRun,
+    confirmPendingSync,
     confirmPendingDryRun,
     requestCancel,
     closeForm,
@@ -919,6 +954,7 @@ export function useSyncTaskActions({
     openOrphansView,
     loadConflictSessions,
     handleSubmit,
+    startSync,
     handleSync,
     handleToggleWatchMode,
     startDryRun,

@@ -18,21 +18,14 @@ import {
 import {
     DryRunDiffBatchEvent,
     DryRunProgressEvent,
+    SyncFileBatchEvent,
+    SyncProgressEvent,
+    SyncSessionFinishedEvent,
     isTerminalDryRunSessionStatus,
+    isTerminalSyncSessionStatus,
 } from '../../types/syncEngine';
 import { listenConfigStoreChanged } from '../../utils/configStore';
 import { isUuidSourceResolutionError } from '../../utils/syncTaskSourceRecommendations';
-
-interface SyncProgressEvent {
-    taskId?: string;
-    message?: string;
-    current?: number;
-    total?: number;
-    processedBytes?: number;
-    totalBytes?: number;
-    currentFileBytesCopied?: number;
-    currentFileTotalBytes?: number;
-}
 
 export type InitialRuntimeSyncState = 'idle' | 'pending' | 'success' | 'error';
 
@@ -204,6 +197,14 @@ function BackendRuntimeBridge({
                     level: 'info',
                 });
             }
+
+            if (
+                event.payload.origin === 'manual' &&
+                store.getSyncSession(taskId) &&
+                !isTerminalSyncSessionStatus(store.getSyncSession(taskId)?.status)
+            ) {
+                store.setSyncProgress(taskId, event.payload);
+            }
         });
 
         const unlistenDryRunState = listen<RuntimeDryRunStateEvent>('runtime-dry-run-state', (event) => {
@@ -270,6 +271,34 @@ function BackendRuntimeBridge({
             store.setDryRunning(event.payload.taskId, true);
             store.appendDryRunDiffBatch(event.payload.taskId, event.payload);
         });
+
+        const unlistenSyncFileBatch = listen<SyncFileBatchEvent>('sync-file-batch', (event) => {
+            const { taskId, origin } = event.payload;
+            if (!taskId || origin !== 'manual') {
+                return;
+            }
+
+            const store = useSyncTaskStatusStore.getState();
+            const currentSession = store.getSyncSession(taskId);
+            if (!currentSession || isTerminalSyncSessionStatus(currentSession.status)) {
+                return;
+            }
+
+            store.appendSyncFileBatch(taskId, event.payload);
+        });
+
+        const unlistenSyncSessionFinished = listen<SyncSessionFinishedEvent>(
+            'sync-session-finished',
+            (event) => {
+                const { taskId, origin } = event.payload;
+                if (!taskId || origin !== 'manual') {
+                    return;
+                }
+
+                const store = useSyncTaskStatusStore.getState();
+                store.completeSyncSession(taskId, event.payload);
+            },
+        );
 
         const unlistenWatchState = listen<RuntimeWatchStateEvent>('runtime-watch-state', (event) => {
             const { taskId, watching, reason } = event.payload;
@@ -405,6 +434,8 @@ function BackendRuntimeBridge({
             unlistenDryRunState.then((fn) => fn());
             unlistenDryRunProgress.then((fn) => fn());
             unlistenDryRunDiffBatch.then((fn) => fn());
+            unlistenSyncFileBatch.then((fn) => fn());
+            unlistenSyncSessionFinished.then((fn) => fn());
             unlistenWatchState.then((fn) => fn());
             unlistenQueueState.then((fn) => fn());
             unlistenSyncState.then((fn) => fn());

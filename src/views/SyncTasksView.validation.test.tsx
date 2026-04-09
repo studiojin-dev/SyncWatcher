@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ask } from '@tauri-apps/plugin-dialog';
 import type { SyncTask } from '../hooks/useSyncTasks';
-import type { DryRunSessionState } from '../types/syncEngine';
+import type { DryRunSessionState, SyncSessionState } from '../types/syncEngine';
 import type { TaskStatus } from '../hooks/useSyncTaskStatus';
 import SyncTasksView from './SyncTasksView';
 
@@ -32,6 +32,7 @@ const {
     syncingTaskIds: new Set<string>(),
     dryRunningTaskIds: new Set<string>(),
     dryRunSessions: new Map<string, DryRunSessionState>(),
+    syncSessions: new Map<string, SyncSessionState>(),
     setLastLog: vi.fn(),
     setDryRunning: vi.fn(),
     setDryRunningTasks: vi.fn(),
@@ -42,6 +43,13 @@ const {
     failDryRunSession: vi.fn(),
     getDryRunSession: vi.fn(),
     clearDryRunSession: vi.fn(),
+    beginSyncSession: vi.fn(),
+    setSyncProgress: vi.fn(),
+    appendSyncFileBatch: vi.fn(),
+    completeSyncSession: vi.fn(),
+    failSyncSession: vi.fn(),
+    getSyncSession: vi.fn(),
+    clearSyncSession: vi.fn(),
   };
   const useSyncTaskStatusStoreMock = Object.assign(() => statusState, {
     getState: () => statusState,
@@ -106,6 +114,7 @@ vi.mock('../hooks/useSettings', () => ({
 vi.mock('../hooks/useSyncTaskStatus', () => ({
   useSyncTaskStatusStore: useSyncTaskStatusStoreMock,
   useDryRunSession: (taskId: string) => statusState.dryRunSessions.get(taskId),
+  useSyncSession: (taskId: string) => statusState.syncSessions.get(taskId),
 }));
 
 vi.mock('../components/ui/Toast', () => ({
@@ -186,6 +195,7 @@ describe('SyncTasksView validation and orphan scan flows', () => {
     statusState.syncingTaskIds = new Set();
     statusState.dryRunningTaskIds = new Set();
     statusState.dryRunSessions = new Map();
+    statusState.syncSessions = new Map();
     statusState.setLastLog.mockReset();
     listenMock.mockResolvedValue(() => {});
     askMock.mockResolvedValue(true);

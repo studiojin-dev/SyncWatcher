@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260408-0023-SYN",
+    "title": "Manual sync session UI and structured live sync events",
+    "tags": [
+      "sync",
+      "runtime",
+      "ux",
+      "tauri",
+      "events",
+      "dry-run"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-08",
+    "tldr": "Add task-scoped manual sync sessions in the renderer, emit structured sync live events with origin metadata, and keep background/watch sync from hijacking the manual result view.",
+    "path": "docs/adr/ADR-20260408-0023-SYN-manual-sync-session-and-structured-live-events.md"
+  },
+  {
     "id": "ADR-20260404-0022-REL",
     "title": "Manual published-tag release recovery with explicit operator opt-in",
     "tags": [

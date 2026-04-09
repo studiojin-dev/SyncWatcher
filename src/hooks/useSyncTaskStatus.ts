@@ -4,9 +4,18 @@ import type {
     DryRunProgressEvent,
     DryRunResult,
     DryRunResultSummary,
+    SyncFileBatchEvent,
+    SyncProgressEvent,
+    SyncSessionFinishedEvent,
+    SyncSessionResult,
+    SyncSessionState,
     DryRunSessionState,
+    SyncFileEntry,
 } from '../types/syncEngine';
-import { isTerminalDryRunSessionStatus } from '../types/syncEngine';
+import {
+    isTerminalDryRunSessionStatus,
+    isTerminalSyncSessionStatus,
+} from '../types/syncEngine';
 
 export interface TaskStatus {
     taskId: string;
@@ -48,6 +57,28 @@ function createDryRunSession(taskId: string, taskName: string): DryRunSessionSta
     };
 }
 
+function createEmptySyncResult(): SyncSessionResult {
+    return {
+        entries: [],
+        files_copied: 0,
+        bytes_copied: 0,
+        errors: [],
+        conflictCount: 0,
+        hasPendingConflicts: false,
+        targetPreflight: null,
+    };
+}
+
+function createSyncSession(taskId: string, taskName: string): SyncSessionState {
+    return {
+        taskId,
+        taskName,
+        status: 'running',
+        result: createEmptySyncResult(),
+        updatedAtUnixMs: Date.now(),
+    };
+}
+
 function mergeDryRunSummary(
     result: DryRunResult,
     summary?: Partial<DryRunResultSummary>,
@@ -72,6 +103,50 @@ function getOrCreateDryRunSession(
     return sessions.get(taskId) || createDryRunSession(taskId, taskId);
 }
 
+function getOrCreateSyncSession(
+    sessions: Map<string, SyncSessionState>,
+    taskId: string,
+): SyncSessionState {
+    return sessions.get(taskId) || createSyncSession(taskId, taskId);
+}
+
+function mergeSyncEntries(
+    entries: SyncFileEntry[],
+    nextEntries: SyncFileEntry[],
+): SyncFileEntry[] {
+    if (nextEntries.length === 0) {
+        return entries;
+    }
+
+    const indexByPath = new Map(entries.map((entry, index) => [entry.path, index]));
+    const merged = [...entries];
+
+    for (const entry of nextEntries) {
+        const existingIndex = indexByPath.get(entry.path);
+        if (existingIndex === undefined) {
+            indexByPath.set(entry.path, merged.length);
+            merged.push(entry);
+            continue;
+        }
+        merged[existingIndex] = entry;
+    }
+
+    return merged;
+}
+
+function mergeSyncResult(
+    result: SyncSessionResult,
+    patch: Partial<SyncSessionResult>,
+): SyncSessionResult {
+    return {
+        ...result,
+        ...patch,
+        entries: patch.entries ?? result.entries,
+        errors: patch.errors ?? result.errors,
+        targetPreflight: patch.targetPreflight ?? result.targetPreflight,
+    };
+}
+
 interface SyncTaskStatusStore {
     /** 각 Task의 상태 맵 */
     statuses: Map<string, TaskStatus>;
@@ -85,6 +160,8 @@ interface SyncTaskStatusStore {
     dryRunningTaskIds: Set<string>;
     /** dry-run 라이브 세션 맵 */
     dryRunSessions: Map<string, DryRunSessionState>;
+    /** manual sync 라이브 세션 맵 */
+    syncSessions: Map<string, SyncSessionState>;
 
     /** 상태 업데이트 */
     setStatus: (taskId: string, status: TaskStatus['status']) => void;
@@ -124,6 +201,20 @@ interface SyncTaskStatusStore {
     getDryRunSession: (taskId: string) => DryRunSessionState | undefined;
     /** dry-run 세션 초기화 */
     clearDryRunSession: (taskId: string) => void;
+    /** sync 세션 초기화 */
+    beginSyncSession: (taskId: string, taskName: string) => void;
+    /** sync 진행 상태 업데이트 */
+    setSyncProgress: (taskId: string, progress: SyncProgressEvent) => void;
+    /** sync 파일 배치 반영 */
+    appendSyncFileBatch: (taskId: string, batch: SyncFileBatchEvent) => void;
+    /** sync 완료 상태 반영 */
+    completeSyncSession: (taskId: string, result: SyncSessionFinishedEvent) => void;
+    /** sync 실패 상태 반영 */
+    failSyncSession: (taskId: string, error: string) => void;
+    /** sync 세션 조회 */
+    getSyncSession: (taskId: string) => SyncSessionState | undefined;
+    /** sync 세션 제거 */
+    clearSyncSession: (taskId: string) => void;
     /** 상태 초기화 */
     clearStatus: (taskId: string) => void;
 }
@@ -139,6 +230,7 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
     syncingTaskIds: new Set<string>(),
     dryRunningTaskIds: new Set<string>(),
     dryRunSessions: new Map<string, DryRunSessionState>(),
+    syncSessions: new Map<string, SyncSessionState>(),
 
     setStatus: (taskId, status) => {
         set((state) => {
@@ -402,6 +494,115 @@ export const useSyncTaskStatusStore = create<SyncTaskStatusStore>((set, get) => 
         });
     },
 
+    beginSyncSession: (taskId, taskName) => {
+        set((state) => {
+            const nextSessions = new Map(state.syncSessions);
+            nextSessions.set(taskId, createSyncSession(taskId, taskName));
+            return { syncSessions: nextSessions };
+        });
+    },
+
+    setSyncProgress: (taskId, progress) => {
+        set((state) => {
+            const nextSessions = new Map(state.syncSessions);
+            const current = getOrCreateSyncSession(nextSessions, taskId);
+            if (isTerminalSyncSessionStatus(current.status)) {
+                return { syncSessions: nextSessions };
+            }
+            nextSessions.set(taskId, {
+                ...current,
+                status: 'running',
+                progress,
+                updatedAtUnixMs: Date.now(),
+            });
+            return { syncSessions: nextSessions };
+        });
+    },
+
+    appendSyncFileBatch: (taskId, batch) => {
+        set((state) => {
+            const nextSessions = new Map(state.syncSessions);
+            const current = getOrCreateSyncSession(nextSessions, taskId);
+            if (isTerminalSyncSessionStatus(current.status)) {
+                return { syncSessions: nextSessions };
+            }
+
+            const mergedEntries = mergeSyncEntries(current.result.entries, batch.entries);
+            const filesCopied = mergedEntries.filter((entry) => entry.status === 'copied').length;
+            const bytesCopied = mergedEntries
+                .filter((entry) => entry.status === 'copied')
+                .reduce((total, entry) => total + (entry.source_size ?? 0), 0);
+            const errors = mergedEntries
+                .filter((entry) => entry.status === 'failed' && entry.error)
+                .map((entry) => ({
+                    path: entry.path,
+                    message: entry.error ?? 'Sync failed',
+                    kind: 'CopyFailed' as const,
+                }));
+
+            nextSessions.set(taskId, {
+                ...current,
+                status: 'running',
+                result: mergeSyncResult(current.result, {
+                    entries: mergedEntries,
+                    files_copied: filesCopied,
+                    bytes_copied: bytesCopied,
+                    errors,
+                }),
+                updatedAtUnixMs: Date.now(),
+            });
+            return { syncSessions: nextSessions };
+        });
+    },
+
+    completeSyncSession: (taskId, result) => {
+        set((state) => {
+            const nextSessions = new Map(state.syncSessions);
+            const current = nextSessions.get(taskId) || createSyncSession(taskId, taskId);
+            nextSessions.set(taskId, {
+                ...current,
+                status: result.status,
+                result: mergeSyncResult(current.result, {
+                    files_copied: result.files_copied,
+                    bytes_copied: result.bytes_copied,
+                    errors: result.errors,
+                    conflictCount: result.conflictCount,
+                    hasPendingConflicts: result.hasPendingConflicts,
+                    targetPreflight: result.targetPreflight,
+                }),
+                progress: undefined,
+                error: result.reason,
+                updatedAtUnixMs: Date.now(),
+            });
+            return { syncSessions: nextSessions };
+        });
+    },
+
+    failSyncSession: (taskId, error) => {
+        set((state) => {
+            const nextSessions = new Map(state.syncSessions);
+            const current = nextSessions.get(taskId) || createSyncSession(taskId, taskId);
+            nextSessions.set(taskId, {
+                ...current,
+                status: error.toLowerCase().includes('cancel') ? 'cancelled' : 'failed',
+                progress: undefined,
+                error,
+                updatedAtUnixMs: Date.now(),
+            });
+            return { syncSessions: nextSessions };
+        });
+    },
+
+    getSyncSession: (taskId) => get().syncSessions.get(taskId),
+
+    clearSyncSession: (taskId) => {
+        set((state) => {
+            const nextSessions = new Map(state.syncSessions);
+            nextSessions.delete(taskId);
+            return { syncSessions: nextSessions };
+        });
+    },
+
     clearStatus: (taskId) => {
         set((state) => {
             const newStatuses = new Map(state.statuses);
@@ -434,4 +635,8 @@ export function useSyncTaskStatus(taskId: string) {
 
 export function useDryRunSession(taskId: string) {
     return useSyncTaskStatusStore((state) => state.dryRunSessions.get(taskId));
+}
+
+export function useSyncSession(taskId: string) {
+    return useSyncTaskStatusStore((state) => state.syncSessions.get(taskId));
 }

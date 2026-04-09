@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DryRunResult as DryRunResultModel } from '../../types/syncEngine';
+import type { ReactNode } from 'react';
 import DryRunResultView from './DryRunResultView';
 
 const sessionState = vi.hoisted(() => ({
@@ -29,6 +30,16 @@ vi.mock('../../hooks/useSettings', () => ({
 
 vi.mock('../../hooks/useSyncTaskStatus', () => ({
   useDryRunSession: () => sessionState.current,
+}));
+
+vi.mock('react-virtuoso', () => ({
+  Virtuoso: ({ data, itemContent }: { data: unknown[]; itemContent: (index: number, item: unknown) => ReactNode }) => (
+    <div>
+      {data.map((item, index) => (
+        <div key={index}>{itemContent(index, item)}</div>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -132,6 +143,9 @@ describe('DryRunResultView', () => {
     expect(screen.getByText('dryRun.modifiedFile')).toBeInTheDocument();
     expect(screen.getAllByText('1 KiB').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('2 KiB').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId('result-tree-row-dir')).toHaveTextContent('2');
+    expect(screen.getByTestId('result-tree-row-dir')).toHaveTextContent('3 KiB');
+    expect(screen.getByTestId('result-tree-row-dir')).toHaveTextContent('1 KiB');
   });
 
   it('collapses and expands directory rows', () => {
