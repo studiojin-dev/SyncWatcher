@@ -1,5 +1,20 @@
 [
   {
+    "id": "ADR-20260409-0025-RNS",
+    "title": "Stable release notes sync to the studiojin-home SyncWatcher page",
+    "tags": [
+      "release",
+      "homepage",
+      "github-actions",
+      "workflow-dispatch",
+      "docs"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-09",
+    "tldr": "After a stable GitHub Release is published, trigger a workflow in `kimjj81/studiojin-home` to import that release's notes into the `/syncwatcher/` product page, using a fine-grained PAT with only `Actions: write`.",
+    "path": "docs/adr/ADR-20260409-0025-RNS-stable-release-notes-sync-to-studiojin-home.md"
+  },
+  {
     "id": "ADR-20260409-0024-DRR",
     "title": "Dry-run artifact reuse and pre-copy sync visibility",
     "tags": [
