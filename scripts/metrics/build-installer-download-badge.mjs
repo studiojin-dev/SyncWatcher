@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { sumInstallerDownloads, writeBadgeFile } from './release-download-badge.mjs';
@@ -120,14 +121,14 @@ export async function main(argv = process.argv.slice(2)) {
   const totalDownloads = sumInstallerDownloads(releases);
   await writeBadgeFile(outputPath, totalDownloads);
 
-  console.log(`Installer download badge updated: ${totalDownloads} -> ${outputPath}`);
+  process.stdout.write(`Installer download badge updated: ${totalDownloads} -> ${outputPath}\n`);
 }
 
 const executedDirectly = process.argv[1] && path.resolve(process.argv[1]) === scriptPath;
 
 if (executedDirectly) {
   main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   });
 }
