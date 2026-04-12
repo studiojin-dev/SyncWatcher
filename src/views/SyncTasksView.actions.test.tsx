@@ -3,7 +3,6 @@ import { MantineProvider } from '@mantine/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ask } from '@tauri-apps/plugin-dialog';
 import type { SyncTask } from '../hooks/useSyncTasks';
 import type {
   DryRunSessionState,
@@ -84,11 +83,6 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(),
 }));
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  ask: vi.fn(),
-  open: vi.fn(),
-}));
-
 vi.mock('../context/SyncTasksContext', () => ({
   useSyncTasksContext: () => ({
     tasks: syncTasksState.tasks,
@@ -129,7 +123,6 @@ vi.mock('../components/ui/Toast', () => ({
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
-const askMock = ask as unknown as ReturnType<typeof vi.fn>;
 
 function createDefaultTask(): SyncTask {
   return {
@@ -269,7 +262,6 @@ describe('SyncTasksView sync and watch confirmations', () => {
       });
     });
     listenMock.mockResolvedValue(() => {});
-    askMock.mockResolvedValue(true);
     installDefaultInvokeMock();
   });
 
@@ -349,7 +341,6 @@ describe('SyncTasksView sync and watch confirmations', () => {
 
     fireEvent.click(screen.getByTitle('syncTasks.startSync'));
 
-    expect(askMock).not.toHaveBeenCalled();
     expect(screen.getByText('syncTasks.confirmStartSync')).toBeInTheDocument();
     expect(invokeMock.mock.calls.some((call) => call[0] === 'start_sync')).toBe(
       false,
@@ -407,7 +398,6 @@ describe('SyncTasksView sync and watch confirmations', () => {
   });
 
   it('does not toggle watch off when confirmation is rejected', async () => {
-    askMock.mockResolvedValueOnce(false);
     renderWithMantine(<SyncTasksView />);
 
     await waitFor(() => {
@@ -416,9 +406,9 @@ describe('SyncTasksView sync and watch confirmations', () => {
 
     fireEvent.click(screen.getByTitle('syncTasks.watchToggleOff'));
 
-    await waitFor(() => {
-      expect(askMock).toHaveBeenCalled();
-    });
+    expect(await screen.findByText('syncTasks.confirmWatchDisable')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
     expect(updateTaskMock).not.toHaveBeenCalled();
   });
 

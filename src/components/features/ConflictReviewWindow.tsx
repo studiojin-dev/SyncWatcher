@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ask } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import {
@@ -13,6 +12,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
+import { CardAnimation } from '../ui/Animations';
 import { useToast } from '../ui/Toast';
 import { useSettings } from '../../hooks/useSettings';
 import { formatBytes } from '../../utils/formatBytes';
@@ -38,6 +38,28 @@ interface LinePair {
   target: string;
   changed: boolean;
 }
+
+type ConfirmTone = 'danger' | 'warning' | 'info';
+
+interface ResolveConfirmRequest {
+  type: 'resolve';
+  sessionId: string;
+  action: 'forceCopy' | 'renameThenCopy' | 'skip';
+  itemIds: string[];
+  title: string;
+  message: string;
+  tone: ConfirmTone;
+}
+
+interface CloseConfirmRequest {
+  type: 'close';
+  sessionId: string;
+  title: string;
+  message: string;
+  tone: ConfirmTone;
+}
+
+type ConfirmRequest = ResolveConfirmRequest | CloseConfirmRequest;
 
 function getInitialSessionId(): string | null {
   const params = new URLSearchParams(window.location.search);
@@ -89,12 +111,14 @@ export default function ConflictReviewWindow() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [sourceMediaPreviewFailed, setSourceMediaPreviewFailed] = useState(false);
   const [targetMediaPreviewFailed, setTargetMediaPreviewFailed] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
   const clearSessionState = useCallback(() => {
     setSession(null);
     setSelectedIds(new Set());
     setFocusedItemId(null);
     setSessionId(null);
+    setConfirmRequest(null);
 
     const params = new URLSearchParams(window.location.search);
     params.set('view', 'conflict-review');
@@ -241,31 +265,35 @@ export default function ConflictReviewWindow() {
     });
   };
 
-  const runAction = useCallback(async (
+  const openResolveConfirm = useCallback((
     action: 'forceCopy' | 'renameThenCopy' | 'skip',
-    confirmMessage: string,
-    confirmTitle: string,
-    kind: 'warning' | 'info'
+    title: string,
+    message: string,
+    tone: ConfirmTone
   ) => {
-    if (!sessionId || selectedPendingItems.length === 0 || processing) {
+    if (!sessionId || selectedPendingItems.length === 0 || processing || confirmRequest) {
       return;
     }
 
-    const confirmed = await ask(confirmMessage, {
-      title: confirmTitle,
-      kind,
+    setConfirmRequest({
+      type: 'resolve',
+      sessionId,
+      action,
+      itemIds: selectedPendingItems.map((item) => item.id),
+      title,
+      message,
+      tone,
     });
-    if (!confirmed) {
-      return;
-    }
+  }, [confirmRequest, processing, selectedPendingItems, sessionId]);
 
+  const runResolution = useCallback(async (request: ResolveConfirmRequest) => {
     setProcessing(true);
     try {
       const result = await invoke<ConflictResolutionResult>('resolve_conflict_items', {
-        sessionId,
-        resolutions: selectedPendingItems.map((item) => ({
-          itemId: item.id,
-          action,
+        sessionId: request.sessionId,
+        resolutions: request.itemIds.map((itemId) => ({
+          itemId,
+          action: request.action,
         })),
       });
       if (result.failures.length > 0) {
@@ -285,42 +313,80 @@ export default function ConflictReviewWindow() {
           'success'
         );
       }
-      await loadSession(sessionId);
+      await loadSession(request.sessionId);
     } catch (error) {
       showToast(String(error), 'error');
     } finally {
       setProcessing(false);
     }
-  }, [loadSession, processing, selectedPendingItems, sessionId, showToast, t]);
+  }, [loadSession, showToast, t]);
+
+  const forceCloseSession = useCallback(async (request: CloseConfirmRequest) => {
+    setProcessing(true);
+    try {
+      const result = await invoke<CloseConflictReviewSessionResult>('close_conflict_review_session', {
+        sessionId: request.sessionId,
+        forceSkipPending: true,
+      });
+
+      if (result.closed) {
+        await getCurrentWebviewWindow().close();
+      }
+    } catch (error) {
+      if (isSessionNotFoundError(error)) {
+        clearSessionState();
+        await getCurrentWebviewWindow().close();
+      } else {
+        showToast(String(error), 'error');
+      }
+    } finally {
+      setProcessing(false);
+    }
+  }, [clearSessionState, showToast]);
+
+  const handleConfirmRequest = useCallback(async () => {
+    if (!confirmRequest || processing) {
+      return;
+    }
+
+    const request = confirmRequest;
+    setConfirmRequest(null);
+
+    if (request.type === 'resolve') {
+      await runResolution(request);
+      return;
+    }
+
+    await forceCloseSession(request);
+  }, [confirmRequest, forceCloseSession, processing, runResolution]);
 
   const handleCloseWindow = useCallback(async () => {
+    if (processing || confirmRequest) {
+      return;
+    }
+
     if (!sessionId) {
       await getCurrentWebviewWindow().close();
       return;
     }
 
+    setProcessing(true);
     try {
-      let result = await invoke<CloseConflictReviewSessionResult>('close_conflict_review_session', {
+      const result = await invoke<CloseConflictReviewSessionResult>('close_conflict_review_session', {
         sessionId,
         forceSkipPending: false,
       });
       if (!result.closed && result.hadPending) {
-        const confirmed = await ask(
-          t('conflict.closeWithPendingConfirm', {
+        setConfirmRequest({
+          type: 'close',
+          sessionId,
+          title: t('common.warning', { defaultValue: 'Warning' }),
+          message: t('conflict.closeWithPendingConfirm', {
             defaultValue: '미처리 항목이 있습니다. 남은 항목을 이번 실행에서 건너뛰고 닫을까요?',
           }),
-          {
-            title: t('common.warning', { defaultValue: 'Warning' }),
-            kind: 'warning',
-          }
-        );
-        if (!confirmed) {
-          return;
-        }
-        result = await invoke<CloseConflictReviewSessionResult>('close_conflict_review_session', {
-          sessionId,
-          forceSkipPending: true,
+          tone: 'warning',
         });
+        return;
       }
 
       if (result.closed) {
@@ -333,8 +399,26 @@ export default function ConflictReviewWindow() {
       } else {
         showToast(String(error), 'error');
       }
+    } finally {
+      setProcessing(false);
     }
-  }, [clearSessionState, sessionId, showToast, t]);
+  }, [clearSessionState, confirmRequest, processing, sessionId, showToast, t]);
+
+  const confirmButtonClassName = useMemo(() => {
+    if (!confirmRequest) {
+      return '';
+    }
+
+    switch (confirmRequest.tone) {
+      case 'danger':
+        return 'bg-[var(--color-accent-error)] text-white';
+      case 'warning':
+        return 'bg-[var(--color-accent-warning)] text-black';
+      case 'info':
+      default:
+        return 'bg-[var(--accent-main)] text-white';
+    }
+  }, [confirmRequest]);
 
   const renderOpenPreviewButtons = (sourcePath: string, targetPath: string) => (
     <div className="flex flex-wrap gap-2">
@@ -374,6 +458,7 @@ export default function ConflictReviewWindow() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={processing || !!confirmRequest}
               onClick={() => void loadSession(sessionId)}
               className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--bg-tertiary)]"
             >
@@ -382,8 +467,9 @@ export default function ConflictReviewWindow() {
             </button>
             <button
               type="button"
+              disabled={processing || !!confirmRequest}
               onClick={handleCloseWindow}
-              className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--color-accent-warning)]"
+              className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--color-accent-warning)] disabled:opacity-50"
             >
               <IconX size={14} />
               {t('common.close', { defaultValue: 'Close' })}
@@ -549,14 +635,14 @@ export default function ConflictReviewWindow() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={selectedPendingItems.length === 0 || processing}
-              onClick={() => void runAction(
+              disabled={selectedPendingItems.length === 0 || processing || !!confirmRequest}
+              onClick={() => openResolveConfirm(
                 'forceCopy',
+                t('conflict.forceCopy', { defaultValue: '강제 복사' }),
                 t('conflict.confirmForceCopy', {
                   defaultValue: '강제 복사는 되돌릴 수 없습니다. 계속할까요?',
                 }),
-                t('conflict.forceCopy', { defaultValue: '강제 복사' }),
-                'warning'
+                'danger'
               )}
               className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 bg-[var(--color-accent-error)] text-white disabled:opacity-50"
             >
@@ -565,13 +651,13 @@ export default function ConflictReviewWindow() {
             </button>
             <button
               type="button"
-              disabled={selectedPendingItems.length === 0 || processing}
-              onClick={() => void runAction(
+              disabled={selectedPendingItems.length === 0 || processing || !!confirmRequest}
+              onClick={() => openResolveConfirm(
                 'renameThenCopy',
+                t('conflict.safeCopy', { defaultValue: '안전 복사' }),
                 t('conflict.confirmSafeCopy', {
                   defaultValue: '타겟 파일을 안전 이름으로 변경 후 복사합니다. 계속할까요?',
                 }),
-                t('conflict.safeCopy', { defaultValue: '안전 복사' }),
                 'info'
               )}
               className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 bg-[var(--accent-success)] text-white disabled:opacity-50"
@@ -581,13 +667,13 @@ export default function ConflictReviewWindow() {
             </button>
             <button
               type="button"
-              disabled={selectedPendingItems.length === 0 || processing}
-              onClick={() => void runAction(
+              disabled={selectedPendingItems.length === 0 || processing || !!confirmRequest}
+              onClick={() => openResolveConfirm(
                 'skip',
+                t('conflict.skip', { defaultValue: '아무것도 안함' }),
                 t('conflict.confirmSkip', {
                   defaultValue: '이번 실행에서 건너뜁니다. 다음 동기화 시 다시 충돌할 수 있습니다. 계속할까요?',
                 }),
-                t('conflict.skip', { defaultValue: '아무것도 안함' }),
                 'warning'
               )}
               className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--bg-tertiary)] disabled:opacity-50"
@@ -658,6 +744,37 @@ export default function ConflictReviewWindow() {
           })}
         </div>
       </section>
+
+      {confirmRequest ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <CardAnimation>
+            <div className="neo-box p-6 w-full max-w-md bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)]">
+              <h3 className="text-xl font-heading font-bold mb-4 uppercase text-[var(--color-accent-warning)]">
+                {confirmRequest.title}
+              </h3>
+              <p className="mb-6 text-[var(--text-primary)] font-mono text-sm whitespace-pre-wrap break-all">
+                {confirmRequest.message}
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRequest(null)}
+                  className="px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                >
+                  {t('common.no', { defaultValue: '아니요' })}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmRequest()}
+                  className={`px-4 py-2 font-bold uppercase border-2 border-[var(--border-main)] shadow-[4px_4px_0_0_var(--shadow-color)] hover:shadow-[2px_2px_0_0_var(--shadow-color)] active:shadow-none transition-all ${confirmButtonClassName}`}
+                >
+                  {t('common.yes', { defaultValue: '예' })}
+                </button>
+              </div>
+            </div>
+          </CardAnimation>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,9 +1,9 @@
 import { type ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { ask } from '@tauri-apps/plugin-dialog';
 import { IconFolder, IconFile, IconRefresh, IconSearch, IconTrash, IconArrowLeft } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';
+import InlineDialogModal from '../ui/InlineDialogModal';
 import { useToast } from '../ui/Toast';
 
 interface OrphanFile {
@@ -202,6 +202,7 @@ export default function OrphanFilesModal({
     const [query, setQuery] = useState('');
     const [orphans, setOrphans] = useState<OrphanFile[]>([]);
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const excludePatternsKey = useMemo(() => JSON.stringify(excludePatterns), [excludePatterns]);
     const stableExcludePatterns = useMemo(() => {
         try {
@@ -274,19 +275,10 @@ export default function OrphanFilesModal({
         if (selectedPaths.size === 0) {
             return;
         }
+        setConfirmDeleteOpen(true);
+    };
 
-        const confirmed = await ask(
-            t('orphan.confirmDelete', { count: selectedPaths.size, defaultValue: `Delete ${selectedPaths.size} selected items?` }),
-            {
-                title: t('syncTasks.deleteTask', { defaultValue: 'Delete' }),
-                kind: 'warning',
-            }
-        );
-
-        if (!confirmed) {
-            return;
-        }
-
+    const confirmDeleteSelected = async () => {
         try {
             setDeleting(true);
             const result = await invoke<DeleteOrphanResult>('delete_orphan_files', {
@@ -395,6 +387,24 @@ export default function OrphanFilesModal({
                     </div>
                 </div>
             </CardAnimation>
+            <InlineDialogModal
+                opened={confirmDeleteOpen}
+                title={t('syncTasks.deleteTask', { defaultValue: 'Delete' })}
+                message={t('orphan.confirmDelete', { count: selectedPaths.size, defaultValue: `Delete ${selectedPaths.size} selected items?` })}
+                actions={[
+                    { key: 'cancel', label: t('common.cancel', { defaultValue: 'Cancel' }), tone: 'neutral' },
+                    { key: 'confirm', label: t('common.confirm', { defaultValue: 'Confirm' }), tone: 'warning' },
+                ]}
+                onAction={(actionKey) => {
+                    if (actionKey === 'confirm') {
+                        setConfirmDeleteOpen(false);
+                        void confirmDeleteSelected();
+                        return;
+                    }
+
+                    setConfirmDeleteOpen(false);
+                }}
+            />
         </div>
     );
 }

@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ask } from '@tauri-apps/plugin-dialog';
 import {
   useCallback,
   useEffect,
@@ -79,6 +78,14 @@ type PendingSyncRequest = {
   mode: 'fresh' | 'dryRunArtifact';
 };
 
+interface InlineConfirmState {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm: () => Promise<void> | void;
+}
+
 export function useSyncTaskActions({
   tasks,
   statuses,
@@ -108,6 +115,9 @@ export function useSyncTaskActions({
   const [cancelConfirm, setCancelConfirm] =
     useState<CancelConfirmState | null>(null);
   const [pendingDryRunTask, setPendingDryRunTask] = useState<SyncTask | null>(
+    null,
+  );
+  const [inlineConfirm, setInlineConfirm] = useState<InlineConfirmState | null>(
     null,
   );
   const [savingTask, setSavingTask] = useState(false);
@@ -602,22 +612,21 @@ export function useSyncTaskActions({
           await loadConflictSessions();
 
           if (execution.conflictSessionId) {
-            const openNow = await ask(
-              t('conflict.openNowPrompt', {
+            setInlineConfirm({
+              title: t('conflict.queueTitle', {
+                defaultValue: '확인이 필요한 목록',
+              }),
+              message: t('conflict.openNowPrompt', {
                 defaultValue: '지금 검토 창을 열어 처리하시겠습니까?',
               }),
-              {
-                title: t('conflict.queueTitle', {
-                  defaultValue: '확인이 필요한 목록',
-                }),
-                kind: 'warning',
+              confirmLabel: t('common.open', { defaultValue: 'Open' }),
+              cancelLabel: t('common.cancel', { defaultValue: 'Cancel' }),
+              onConfirm: async () => {
+                await invoke('open_conflict_review_window', {
+                  sessionId: execution.conflictSessionId,
+                });
               },
-            );
-            if (openNow) {
-              await invoke('open_conflict_review_window', {
-                sessionId: execution.conflictSessionId,
-              });
-            }
+            });
           }
         } else {
           showToast(t('sync.syncComplete'), 'success');
@@ -776,18 +785,53 @@ export function useSyncTaskActions({
       const nextWatchMode = !previousWatchMode;
 
       if (previousWatchMode && !nextWatchMode) {
-        const confirmed = await ask(
-          t('syncTasks.confirmWatchDisable', {
+        setInlineConfirm({
+          title: t('syncTasks.watchToggleOff'),
+          message: t('syncTasks.confirmWatchDisable', {
             defaultValue: 'Watch Mode를 끄시겠습니까?',
           }),
-          {
-            title: t('syncTasks.watchToggleOff'),
-            kind: 'warning',
+          onConfirm: async () => {
+            setWatchTogglePendingIds((previous) => {
+              const next = new Set(previous);
+              next.add(task.id);
+              return next;
+            });
+
+            try {
+              await updateTask(task.id, { watchMode: nextWatchMode });
+              const reflected = await waitForWatchState(task.id, nextWatchMode);
+
+              if (!reflected) {
+                await updateTask(task.id, { watchMode: previousWatchMode });
+                showToast(t('syncTasks.watchToggleFailed'), 'error');
+                return;
+              }
+
+              showToast(
+                nextWatchMode
+                  ? t('syncTasks.watchStarting')
+                  : t('syncTasks.watchStopping'),
+                'success',
+              );
+            } catch (error) {
+              try {
+                await updateTask(task.id, { watchMode: previousWatchMode });
+              } catch (rollbackError) {
+                console.error('Watch toggle rollback failed:', rollbackError);
+              }
+
+              console.error('Watch toggle failed:', error);
+              showToast(getErrorMessage(error), 'error');
+            } finally {
+              setWatchTogglePendingIds((previous) => {
+                const next = new Set(previous);
+                next.delete(task.id);
+                return next;
+              });
+            }
           },
-        );
-        if (!confirmed) {
-          return;
-        }
+        });
+        return;
       }
 
       setWatchTogglePendingIds((previous) => {
@@ -911,28 +955,22 @@ export function useSyncTaskActions({
 
   const handleDelete = useCallback(
     async (task: SyncTask) => {
-      const confirmed = await ask(
-        t('syncTasks.confirmDelete', {
+      setInlineConfirm({
+        title: t('syncTasks.deleteTask', { defaultValue: 'Delete Task' }),
+        message: t('syncTasks.confirmDelete', {
           defaultValue: 'Are you sure you want to delete this task?',
         }),
-        {
-          title: t('syncTasks.deleteTask', { defaultValue: 'Delete Task' }),
-          kind: 'warning',
+        onConfirm: async () => {
+          try {
+            await deleteTask(task.id);
+            clearDryRunSession(task.id);
+            useSyncTaskStatusStore.getState().clearSyncSession(task.id);
+            showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
+          } catch (error) {
+            showToast(getErrorMessage(error), 'error');
+          }
         },
-      );
-
-      if (!confirmed) {
-        return;
-      }
-
-      try {
-        await deleteTask(task.id);
-        clearDryRunSession(task.id);
-        useSyncTaskStatusStore.getState().clearSyncSession(task.id);
-        showToast(t('syncTasks.deleteTask') + ': ' + task.name, 'warning');
-      } catch (error) {
-        showToast(getErrorMessage(error), 'error');
-      }
+      });
     },
     [clearDryRunSession, deleteTask, showToast, t],
   );
@@ -977,16 +1015,32 @@ export function useSyncTaskActions({
     [showToast],
   );
 
+  const clearInlineConfirm = useCallback(() => {
+    setInlineConfirm(null);
+  }, []);
+
+  const handleInlineConfirm = useCallback(async () => {
+    if (!inlineConfirm) {
+      return;
+    }
+
+    const request = inlineConfirm;
+    setInlineConfirm(null);
+    await request.onConfirm();
+  }, [inlineConfirm]);
+
   return {
     syncing,
     pendingSyncRequest,
     watchTogglePendingIds,
     cancelConfirm,
     pendingDryRunTask,
+    inlineConfirm,
     savingTask,
     conflictSessions,
     conflictSessionsLoading,
     clearCancelConfirm,
+    clearInlineConfirm,
     cancelPendingSync,
     cancelPendingDryRun,
     confirmPendingSync,
@@ -1008,6 +1062,7 @@ export function useSyncTaskActions({
     handleDelete,
     handleEditorClose,
     handleCancelConfirm,
+    handleInlineConfirm,
     handleOpenConflictSession,
   };
 }

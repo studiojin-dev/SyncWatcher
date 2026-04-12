@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260412-0026-ACL",
+    "title": "Inline dialogs and native OS surfaces",
+    "tags": [
+      "tauri",
+      "acl",
+      "ux",
+      "dialogs",
+      "native-integration",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-12",
+    "tldr": "Keep OS-integrated selection and handoff surfaces native, but move confirmation and informational dialogs into renderer-owned inline UI to reduce ACL fragility and secondary-window permission issues.",
+    "path": "docs/adr/ADR-20260412-0026-ACL-inline-dialogs-and-native-os-surfaces.md"
+  },
+  {
     "id": "ADR-20260409-0025-RNS",
     "title": "Stable release notes sync to the studiojin-home SyncWatcher page",
     "tags": [

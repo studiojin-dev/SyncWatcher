@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { ask, message } from '@tauri-apps/plugin-dialog';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AppShell from './components/layout/AppShell';
@@ -18,6 +17,9 @@ import ErrorBoundary from './components/ui/ErrorBoundary';
 import UpdateChecker from './components/features/UpdateChecker';
 import AutoUnmountConfirmModal from './components/ui/AutoUnmountConfirmModal';
 import FirstRunIntroModal from './components/ui/FirstRunIntroModal';
+import InlineDialogModal, {
+  type InlineDialogAction,
+} from './components/ui/InlineDialogModal';
 import BackendRuntimeBridge, { type InitialRuntimeSyncState } from './components/runtime/BackendRuntimeBridge';
 import SyncTaskSourceRecommendationBridge from './components/runtime/SyncTaskSourceRecommendationBridge';
 import ConflictReviewWindow from './components/features/ConflictReviewWindow';
@@ -43,6 +45,20 @@ const LEGACY_BACKGROUND_INTRO_STORAGE_KEY = 'syncwatcher_bg_intro_shown';
 const FIRST_RUN_INTRO_STORAGE_KEY = 'syncwatcher_first_run_intro_seen';
 const APP_STORE_IMPORT_PROMPT_STORAGE_KEY = 'syncwatcher_app_store_legacy_import_prompted';
 type CloseIntent = 'window-close' | 'cmd-quit' | 'tray-quit';
+type InlineDialogTone = 'primary' | 'warning' | 'danger' | 'neutral';
+
+interface InlineDialogRequest {
+  title: string;
+  message: string;
+  actions: InlineDialogAction[];
+}
+
+interface QueuedInlineDialogRequest extends InlineDialogRequest {
+  id: number;
+  timeoutMs?: number;
+  timeoutValue?: string;
+  resolve: (value: string) => void;
+}
 
 interface OwnerLicenseRefreshSnapshot {
   ok: boolean;
@@ -112,6 +128,7 @@ function AppContent() {
     taskId: string | null;
     nonce: number;
   } | null>(null);
+  const [inlineDialog, setInlineDialog] = useState<InlineDialogRequest | null>(null);
   const [pendingAutoUnmountRequests, setPendingAutoUnmountRequests] = useState<RuntimeAutoUnmountRequestEvent[]>([]);
   const [activeAutoUnmountRequest, setActiveAutoUnmountRequest] = useState<RuntimeAutoUnmountRequestEvent | null>(null);
   const isHandlingCloseRef = useRef(false);
@@ -120,6 +137,10 @@ function AppContent() {
   const recentCmdQAtRef = useRef(0);
   const didRunStartupSupporterRefreshRef = useRef(false);
   const didPromptLegacyImportRef = useRef(false);
+  const inlineDialogQueueRef = useRef<QueuedInlineDialogRequest[]>([]);
+  const activeInlineDialogRef = useRef<QueuedInlineDialogRequest | null>(null);
+  const inlineDialogSeqRef = useRef(0);
+  const inlineDialogTimeoutRef = useRef<number | null>(null);
   const isLifecycleReady = settingsLoaded && tasksLoaded;
   const setTaskLastLog = useCallback((
     taskId: string,
@@ -144,6 +165,131 @@ function AppContent() {
     setRequestedTaskEditId(taskId);
     setActiveTab('sync-tasks');
   }, []);
+
+  const clearInlineDialogTimeout = useCallback(() => {
+    if (inlineDialogTimeoutRef.current !== null) {
+      window.clearTimeout(inlineDialogTimeoutRef.current);
+      inlineDialogTimeoutRef.current = null;
+    }
+  }, []);
+
+  const promoteInlineDialog = useCallback(() => {
+    if (activeInlineDialogRef.current || inlineDialogQueueRef.current.length === 0) {
+      return;
+    }
+
+    const nextRequest = inlineDialogQueueRef.current.shift() ?? null;
+    if (!nextRequest) {
+      setInlineDialog(null);
+      return;
+    }
+
+    activeInlineDialogRef.current = nextRequest;
+    setInlineDialog({
+      title: nextRequest.title,
+      message: nextRequest.message,
+      actions: nextRequest.actions,
+    });
+
+    if (nextRequest.timeoutMs !== undefined && nextRequest.timeoutValue !== undefined) {
+      inlineDialogTimeoutRef.current = window.setTimeout(() => {
+        if (activeInlineDialogRef.current?.id !== nextRequest.id) {
+          return;
+        }
+
+        clearInlineDialogTimeout();
+        activeInlineDialogRef.current = null;
+        setInlineDialog(null);
+        nextRequest.resolve(nextRequest.timeoutValue ?? 'cancel');
+        promoteInlineDialog();
+      }, nextRequest.timeoutMs);
+    }
+  }, [clearInlineDialogTimeout]);
+
+  const resolveInlineDialog = useCallback((value: string) => {
+    const activeRequest = activeInlineDialogRef.current;
+    if (!activeRequest) {
+      return;
+    }
+
+    clearInlineDialogTimeout();
+    activeInlineDialogRef.current = null;
+    setInlineDialog(null);
+    activeRequest.resolve(value);
+    promoteInlineDialog();
+  }, [clearInlineDialogTimeout, promoteInlineDialog]);
+
+  const showInlineDialog = useCallback((options: {
+    title: string;
+    message: string;
+    actions: InlineDialogAction[];
+    timeoutMs?: number;
+    timeoutValue?: string;
+  }) => (
+    new Promise<string>((resolve) => {
+      inlineDialogQueueRef.current.push({
+        id: inlineDialogSeqRef.current + 1,
+        title: options.title,
+        message: options.message,
+        actions: options.actions,
+        timeoutMs: options.timeoutMs,
+        timeoutValue: options.timeoutValue,
+        resolve,
+      });
+      inlineDialogSeqRef.current += 1;
+      promoteInlineDialog();
+    })
+  ), [promoteInlineDialog]);
+
+  const showInlineConfirm = useCallback(async (options: {
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    confirmTone?: InlineDialogTone;
+    timeoutMs?: number;
+    confirmOnTimeout?: boolean;
+  }) => {
+    const result = await showInlineDialog({
+      title: options.title,
+      message: options.message,
+      actions: [
+        {
+          key: 'cancel',
+          label: options.cancelLabel ?? t('common.cancel'),
+          tone: 'neutral',
+        },
+        {
+          key: 'confirm',
+          label: options.confirmLabel ?? t('common.confirm'),
+          tone: options.confirmTone ?? 'warning',
+        },
+      ],
+      timeoutMs: options.timeoutMs,
+      timeoutValue: options.confirmOnTimeout ? 'confirm' : 'cancel',
+    });
+
+    return result === 'confirm';
+  }, [showInlineDialog, t]);
+
+  const showInlineNotice = useCallback(async (options: {
+    title: string;
+    message: string;
+    closeLabel?: string;
+    closeTone?: InlineDialogTone;
+  }) => {
+    await showInlineDialog({
+      title: options.title,
+      message: options.message,
+      actions: [
+        {
+          key: 'close',
+          label: options.closeLabel ?? t('common.close', { defaultValue: 'Close' }),
+          tone: options.closeTone ?? 'primary',
+        },
+      ],
+    });
+  }, [showInlineDialog, t]);
 
   // 앱 시작 시 supporter 상태 갱신
   useEffect(() => {
@@ -268,9 +414,10 @@ function AppContent() {
 
     const promptImport = async () => {
       try {
-        const confirmed = await ask(t('app.importLegacyPromptMessage'), {
+        const confirmed = await showInlineConfirm({
           title: t('app.importLegacyPromptTitle'),
-          kind: 'info',
+          message: t('app.importLegacyPromptMessage'),
+          confirmTone: 'primary',
         });
         if (!confirmed) {
           didPromptLegacyImportRef.current = false;
@@ -289,9 +436,10 @@ function AppContent() {
           didPromptLegacyImportRef.current = false;
         }
         if (result?.message) {
-          await message(result.message, {
+          await showInlineNotice({
             title: t('app.importLegacyPromptTitle'),
-            kind: result.imported ? 'info' : 'warning',
+            message: result.message,
+            closeTone: result.imported ? 'primary' : 'warning',
           });
         }
       } catch (error) {
@@ -301,7 +449,7 @@ function AppContent() {
     };
 
     void promptImport();
-  }, [distribution, distributionLoaded, reloadDistribution, startupComplete, t]);
+  }, [distribution, distributionLoaded, reloadDistribution, showInlineConfirm, showInlineNotice, startupComplete, t]);
 
   const markFirstRunIntroSeen = useCallback(() => {
     try {
@@ -375,40 +523,15 @@ function AppContent() {
 
   const askWithTimeout = useCallback(
     async (messageKey: string, timeoutMs: number): Promise<boolean> => (
-      new Promise<boolean>((resolve) => {
-        let settled = false;
-        const timeoutId = setTimeout(() => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          resolve(true);
-        }, timeoutMs);
-
-        ask(t(messageKey), {
-          title: t('app.quitConfirmTitle'),
-          kind: 'warning',
-        })
-          .then((confirmed) => {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve(confirmed);
-          })
-          .catch((error) => {
-            console.error('Failed to show timeout confirmation:', error);
-            if (settled) {
-              return;
-            }
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve(false);
-          });
+      showInlineConfirm({
+        title: t('app.quitConfirmTitle'),
+        message: t(messageKey),
+        confirmTone: 'warning',
+        timeoutMs,
+        confirmOnTimeout: true,
       })
     ),
-    [t]
+    [showInlineConfirm, t],
   );
 
   const handleQuitWithConfirmation = useCallback(async () => {
@@ -428,9 +551,10 @@ function AppContent() {
       const messageKey = runtimeStateUnknown
         ? 'app.quitConfirmMessageStateUnknown'
         : 'app.quitConfirmMessage';
-      const confirmed = await ask(t(messageKey), {
+      const confirmed = await showInlineConfirm({
         title: t('app.quitConfirmTitle'),
-        kind: 'warning',
+        message: t(messageKey),
+        confirmTone: 'warning',
       });
       if (!confirmed) {
         return;
@@ -438,29 +562,29 @@ function AppContent() {
     }
 
     await invoke('quit_app');
-  }, [tasks, t]);
+  }, [showInlineConfirm, tasks, t]);
 
   const handleCmdQuitWithPolicy = useCallback(async () => {
     if (settings.closeAction === 'background') {
       const backgroundLabel = t('app.cmdQuitBackgroundOption');
       const quitLabel = t('app.cmdQuitFullQuitOption');
       const cancelLabel = t('app.cmdQuitCancelOption', { defaultValue: t('common.cancel') });
-      const result = await message(t('app.cmdQuitBackgroundPrompt'), {
+      const result = await showInlineDialog({
         title: t('app.quitConfirmTitle'),
-        kind: 'warning',
-        buttons: {
-          yes: backgroundLabel,
-          no: quitLabel,
-          cancel: cancelLabel,
-        },
+        message: t('app.cmdQuitBackgroundPrompt'),
+        actions: [
+          { key: 'cancel', label: cancelLabel, tone: 'neutral' },
+          { key: 'quit', label: quitLabel, tone: 'danger' },
+          { key: 'background', label: backgroundLabel, tone: 'warning' },
+        ],
       });
 
-      if (result === backgroundLabel || result === 'Yes') {
+      if (result === 'background') {
         await hideToBackground();
         return;
       }
 
-      if (result === quitLabel || result === 'No') {
+      if (result === 'quit') {
         await invoke('quit_app');
       }
       return;
@@ -470,7 +594,7 @@ function AppContent() {
     if (confirmed) {
       await invoke('quit_app');
     }
-  }, [askWithTimeout, hideToBackground, settings.closeAction, t]);
+  }, [askWithTimeout, hideToBackground, settings.closeAction, showInlineDialog, t]);
 
   const executeCloseIntent = useCallback(async (intent: CloseIntent) => {
     try {
@@ -778,6 +902,21 @@ function AppContent() {
     void drainCloseIntents();
   }, [drainCloseIntents, isLifecycleReady]);
 
+  useEffect(() => {
+    return () => {
+      clearInlineDialogTimeout();
+      const activeRequest = activeInlineDialogRef.current;
+      activeInlineDialogRef.current = null;
+      setInlineDialog(null);
+      activeRequest?.resolve('cancel');
+
+      while (inlineDialogQueueRef.current.length > 0) {
+        const pendingRequest = inlineDialogQueueRef.current.shift();
+        pendingRequest?.resolve('cancel');
+      }
+    };
+  }, [clearInlineDialogTimeout]);
+
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -854,6 +993,13 @@ function AppContent() {
         onEnable={() => {
           void enableLaunchAtLoginFromIntro();
         }}
+      />
+      <InlineDialogModal
+        opened={inlineDialog !== null}
+        title={inlineDialog?.title ?? ''}
+        message={inlineDialog?.message ?? ''}
+        actions={inlineDialog?.actions ?? []}
+        onAction={resolveInlineDialog}
       />
       {ownerLicenseDebugSnapshot ? (
         <div

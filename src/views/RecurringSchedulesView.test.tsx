@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { ask } from '@tauri-apps/plugin-dialog';
 import RecurringSchedulesView from './RecurringSchedulesView';
 import type { SyncTask } from '../hooks/useSyncTasks';
 import type { RecurringScheduleHistoryEntry } from '../utils/recurringSchedules';
@@ -15,10 +14,6 @@ const mockState = vi.hoisted(() => ({
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
-}));
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  ask: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -146,7 +141,6 @@ describe('RecurringSchedulesView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.historyByScheduleId = {};
-    vi.mocked(ask).mockResolvedValue(true);
     vi.mocked(invoke).mockImplementation(async (...args: Parameters<typeof invoke>) => {
       const [command, payload] = args;
       const scheduleId =
@@ -390,6 +384,7 @@ describe('RecurringSchedulesView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'View logs' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Clear recurring schedule history' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'common.confirm' }));
 
     await waitFor(() => {
       expect(vi.mocked(invoke)).toHaveBeenCalledWith('clear_recurring_schedule_history', {

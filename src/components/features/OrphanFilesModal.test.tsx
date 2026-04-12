@@ -2,17 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ask } from '@tauri-apps/plugin-dialog';
 import OrphanFilesModal from './OrphanFilesModal';
 
 const showToastMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
-}));
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  ask: vi.fn(),
 }));
 
 vi.mock('../ui/Animations', () => ({
@@ -30,8 +25,6 @@ vi.mock('react-i18next', () => ({
 }));
 
 const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>;
-const mockAsk = ask as unknown as ReturnType<typeof vi.fn>;
-
 function findOrphanCalls() {
   return mockInvoke.mock.calls.filter(([command]) => command === 'find_orphan_files');
 }
@@ -56,7 +49,6 @@ describe('OrphanFilesModal', () => {
       return null;
     });
 
-    mockAsk.mockResolvedValue(false);
   });
 
   it('does not rescan for same logical inputs with new array references', async () => {
@@ -167,8 +159,6 @@ describe('OrphanFilesModal', () => {
       }
       return null;
     });
-    mockAsk.mockResolvedValue(true);
-
     render(
       <OrphanFilesModal
         taskId="task-1"
@@ -185,6 +175,7 @@ describe('OrphanFilesModal', () => {
 
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: /Delete selected/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => {
       expect(showToastMock).toHaveBeenCalled();

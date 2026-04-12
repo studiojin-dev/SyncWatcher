@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ask, message } from '@tauri-apps/plugin-dialog';
 import type { ReactNode } from 'react';
 import type { SyncTask } from './hooks/useSyncTasks';
 import App from './App';
@@ -74,11 +73,6 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
     isVisible: vi.fn().mockResolvedValue(true),
     onCloseRequested: vi.fn().mockResolvedValue(() => {}),
   }),
-}));
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  ask: vi.fn(),
-  message: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -240,17 +234,53 @@ function createDeferred<T>() {
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
-const askMock = ask as unknown as ReturnType<typeof vi.fn>;
-const messageMock = message as unknown as ReturnType<typeof vi.fn>;
 
-async function emitEvent(eventName: string, payload?: unknown) {
-  const handler = eventHandlers.get(eventName);
+function getRegisteredHandlerIfPresent(eventName: string) {
+  const handlerFromMap = eventHandlers.get(eventName);
+  if (handlerFromMap) {
+    return handlerFromMap;
+  }
+
+  const matchingCall = [...listenMock.mock.calls]
+    .reverse()
+    .find(([registeredEventName]) => registeredEventName === eventName);
+
+  return matchingCall?.[1] as
+    | ((event?: { payload?: unknown }) => unknown)
+    | undefined;
+}
+
+async function waitForRegisteredHandler(eventName: string) {
+  await waitFor(() => {
+    expect(getRegisteredHandlerIfPresent(eventName)).toBeDefined();
+  });
+
+  const handler = getRegisteredHandlerIfPresent(eventName);
   if (!handler) {
     throw new Error(`Event handler not registered: ${eventName}`);
   }
 
+  return handler;
+}
+
+async function emitEvent(eventName: string, payload?: unknown) {
+  const handler = await waitForRegisteredHandler(eventName);
+
   await act(async () => {
     await handler({ payload });
+  });
+}
+
+async function startEvent(eventName: string, payload?: unknown) {
+  const handler = await waitForRegisteredHandler(eventName);
+  return handler({ payload });
+}
+
+async function flushAppEffects() {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      setTimeout(() => resolve(), 0);
+    });
   });
 }
 
@@ -311,6 +341,12 @@ describe('App close lifecycle', () => {
           provider: 'lemon_squeezy',
         };
       }
+      if (command === 'get_supporter_status') {
+        return {
+          isRegistered: runtimeState.isRegistered,
+          provider: 'lemon_squeezy',
+        };
+      }
       if (command === 'runtime_get_state') {
         return {
           watchingTasks: [],
@@ -327,8 +363,6 @@ describe('App close lifecycle', () => {
       return undefined;
     });
 
-    askMock.mockResolvedValue(true);
-    messageMock.mockResolvedValue('Cancel');
     updateSettingsMock.mockReset();
   });
 
@@ -734,28 +768,37 @@ describe('App close lifecycle', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
+      expect(
+        listenMock.mock.calls.some(([eventName]) => eventName === 'close-requested'),
+      ).toBe(true);
     });
 
     await emitEvent('close-requested', { source: 'window-close' });
 
     expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
-    expect(messageMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('app.quitConfirmTitle')).not.toBeInTheDocument();
   });
 
   it('runs background path when cmd+q chooses background under background mode', async () => {
     runtimeState.closeAction = 'background';
-    messageMock.mockResolvedValue('app.cmdQuitBackgroundOption');
 
     render(<App />);
 
     await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
+      expect(
+        listenMock.mock.calls.some(([eventName]) => eventName === 'close-requested'),
+      ).toBe(true);
     });
 
-    await emitEvent('close-requested', { source: 'cmd-quit' });
+    const eventPromise = startEvent('close-requested', { source: 'cmd-quit' });
 
-    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('app.cmdQuitBackgroundPrompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'app.cmdQuitBackgroundOption' }));
+    await eventPromise;
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
+    });
     expect(invokeMock).toHaveBeenCalledWith('hide_to_background');
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
@@ -764,26 +807,31 @@ describe('App close lifecycle', () => {
 
   it('prioritizes cmd+q over concurrent window-close in background mode (background option)', async () => {
     runtimeState.closeAction = 'background';
-    messageMock.mockResolvedValue('app.cmdQuitBackgroundOption');
 
     render(<App />);
 
     await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
+      expect(
+        listenMock.mock.calls.some(([eventName]) => eventName === 'close-requested'),
+      ).toBe(true);
     });
 
-    const closeHandler = eventHandlers.get('close-requested');
-    if (!closeHandler) {
-      throw new Error('close-requested handler not found');
-    }
+    const closeHandler = await waitForRegisteredHandler('close-requested');
 
     await act(async () => {
-      const windowClose = closeHandler({ payload: { source: 'window-close' } });
-      const cmdQuit = closeHandler({ payload: { source: 'cmd-quit' } });
-      await Promise.all([windowClose, cmdQuit]);
+      void closeHandler({ payload: { source: 'window-close' } });
+      void closeHandler({ payload: { source: 'cmd-quit' } });
+      await Promise.resolve();
     });
 
-    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('app.cmdQuitBackgroundPrompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'app.cmdQuitBackgroundOption' }));
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.filter((call) => call[0] === 'hide_to_background'),
+      ).toHaveLength(1);
+    });
     expect(
       invokeMock.mock.calls.filter((call) => call[0] === 'hide_to_background'),
     ).toHaveLength(1);
@@ -794,26 +842,31 @@ describe('App close lifecycle', () => {
 
   it('prioritizes cmd+q over concurrent window-close in background mode (full quit option)', async () => {
     runtimeState.closeAction = 'background';
-    messageMock.mockResolvedValue('app.cmdQuitFullQuitOption');
 
     render(<App />);
 
     await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
+      expect(
+        listenMock.mock.calls.some(([eventName]) => eventName === 'close-requested'),
+      ).toBe(true);
     });
 
-    const closeHandler = eventHandlers.get('close-requested');
-    if (!closeHandler) {
-      throw new Error('close-requested handler not found');
-    }
+    const closeHandler = await waitForRegisteredHandler('close-requested');
 
     await act(async () => {
-      const windowClose = closeHandler({ payload: { source: 'window-close' } });
-      const cmdQuit = closeHandler({ payload: { source: 'cmd-quit' } });
-      await Promise.all([windowClose, cmdQuit]);
+      void closeHandler({ payload: { source: 'window-close' } });
+      void closeHandler({ payload: { source: 'cmd-quit' } });
+      await Promise.resolve();
     });
 
-    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('app.cmdQuitBackgroundPrompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'app.cmdQuitFullQuitOption' }));
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.filter((call) => call[0] === 'quit_app'),
+      ).toHaveLength(1);
+    });
     expect(
       invokeMock.mock.calls.filter((call) => call[0] === 'quit_app'),
     ).toHaveLength(1);
@@ -824,17 +877,24 @@ describe('App close lifecycle', () => {
 
   it('runs full quit path when cmd+q chooses quit under background mode', async () => {
     runtimeState.closeAction = 'background';
-    messageMock.mockResolvedValue('app.cmdQuitFullQuitOption');
 
     render(<App />);
 
     await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
+      expect(
+        listenMock.mock.calls.some(([eventName]) => eventName === 'close-requested'),
+      ).toBe(true);
     });
 
-    await emitEvent('close-requested', { source: 'cmd-quit' });
+    const eventPromise = startEvent('close-requested', { source: 'cmd-quit' });
 
-    expect(invokeMock).toHaveBeenCalledWith('quit_app');
+    expect(await screen.findByText('app.cmdQuitBackgroundPrompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'app.cmdQuitFullQuitOption' }));
+    await eventPromise;
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('quit_app');
+    });
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'hide_to_background'),
     ).toBe(false);
@@ -842,17 +902,21 @@ describe('App close lifecycle', () => {
 
   it('cancels when cmd+q dialog chooses cancel under background mode', async () => {
     runtimeState.closeAction = 'background';
-    messageMock.mockResolvedValue('Cancel');
 
     render(<App />);
 
     await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
+      expect(
+        listenMock.mock.calls.some(([eventName]) => eventName === 'close-requested'),
+      ).toBe(true);
     });
 
-    await emitEvent('close-requested', { source: 'cmd-quit' });
+    const eventPromise = startEvent('close-requested', { source: 'cmd-quit' });
 
-    expect(messageMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('app.cmdQuitBackgroundPrompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'app.cmdQuitCancelOption' }));
+    await eventPromise;
+
     expect(
       invokeMock.mock.calls.some((call) => call[0] === 'quit_app'),
     ).toBe(false);
@@ -863,17 +927,19 @@ describe('App close lifecycle', () => {
 
   it('auto-quits after 10 seconds when cmd+q in quit mode has no response', async () => {
     runtimeState.closeAction = 'quit';
-    const askDeferred = createDeferred<boolean>();
-    askMock.mockReturnValueOnce(askDeferred.promise);
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
-    });
+    const closeHandler = await waitForRegisteredHandler('close-requested');
 
     vi.useFakeTimers();
-    const emitPromise = emitEvent('close-requested', { source: 'cmd-quit' });
+    let emitPromise: unknown;
+    await act(async () => {
+      emitPromise = closeHandler({ payload: { source: 'cmd-quit' } });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('app.cmdQuitPrompt')).toBeInTheDocument();
 
     await act(async () => {
       vi.advanceTimersByTime(10_000);
@@ -886,16 +952,21 @@ describe('App close lifecycle', () => {
 
   it('does not quit when cmd+q in quit mode is cancelled before timeout', async () => {
     runtimeState.closeAction = 'quit';
-    askMock.mockResolvedValue(false);
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
-    });
+    const closeHandler = await waitForRegisteredHandler('close-requested');
 
     vi.useFakeTimers();
-    await emitEvent('close-requested', { source: 'cmd-quit' });
+    let eventPromise: unknown;
+    await act(async () => {
+      eventPromise = closeHandler({ payload: { source: 'cmd-quit' } });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('app.cmdQuitPrompt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+    await eventPromise;
 
     await act(async () => {
       vi.advanceTimersByTime(10_000);
@@ -914,9 +985,7 @@ describe('App close lifecycle', () => {
 
     const view = render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('tray-quit-requested')).toBe(true);
-    });
+    await flushAppEffects();
 
     await emitEvent('tray-quit-requested');
 
@@ -936,11 +1005,9 @@ describe('App close lifecycle', () => {
   it('forwards app update menu events to UpdateChecker as manual check requests', async () => {
     render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('app-check-for-updates-requested')).toBe(true);
-    });
+    await flushAppEffects();
 
-    expect(screen.getByTestId('update-checker')).toHaveTextContent('0');
+    expect(await screen.findByTestId('update-checker')).toHaveTextContent('0');
 
     await emitEvent('app-check-for-updates-requested');
 
@@ -959,30 +1026,18 @@ describe('App close lifecycle', () => {
   it('prevents duplicate dialogs on repeated cmd+q close events', async () => {
     runtimeState.closeAction = 'quit';
     runtimeState.tasks = [createTask({ watchMode: true })];
-    const askDeferred = createDeferred<boolean>();
-    askMock.mockReturnValueOnce(askDeferred.promise);
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('close-requested')).toBe(true);
-    });
+    await flushAppEffects();
 
-    const closeHandler = eventHandlers.get('close-requested');
-    if (!closeHandler) {
-      throw new Error('close-requested handler not found');
-    }
+    const firstEvent = startEvent('close-requested', { source: 'cmd-quit' });
+    const secondEvent = startEvent('close-requested', { source: 'cmd-quit' });
 
-    await act(async () => {
-      const firstCall = closeHandler({ payload: { source: 'cmd-quit' } });
-      const secondCall = closeHandler({ payload: { source: 'cmd-quit' } });
-
-      await Promise.resolve();
-      expect(askMock).toHaveBeenCalledTimes(1);
-
-      askDeferred.resolve(true);
-      await Promise.all([firstCall, secondCall]);
-    });
+    expect(await screen.findByText('app.cmdQuitPrompt')).toBeInTheDocument();
+    expect(screen.getAllByText('app.cmdQuitPrompt')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+    await Promise.all([firstEvent, secondEvent]);
 
     expect(
       invokeMock.mock.calls.filter((call) => call[0] === 'quit_app'),
@@ -992,9 +1047,7 @@ describe('App close lifecycle', () => {
   it('updates pending status when runtime auto-unmount confirmation is requested', async () => {
     render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('runtime-auto-unmount-request')).toBe(true);
-    });
+    await flushAppEffects();
 
     await emitEvent('runtime-auto-unmount-request', {
       taskId: 'task-1',
@@ -1014,9 +1067,7 @@ describe('App close lifecycle', () => {
   it('disables auto-unmount for this session when user cancels confirmation', async () => {
     render(<App />);
 
-    await waitFor(() => {
-      expect(eventHandlers.has('runtime-auto-unmount-request')).toBe(true);
-    });
+    await flushAppEffects();
 
     await emitEvent('runtime-auto-unmount-request', {
       taskId: 'task-1',

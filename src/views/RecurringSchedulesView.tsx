@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core';
-import { ask } from '@tauri-apps/plugin-dialog';
 import {
   IconArrowLeft,
   IconCalendarRepeat,
@@ -16,6 +15,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';
+import InlineDialogModal from '../components/ui/InlineDialogModal';
 import { Tooltip } from '../components/ui/Tooltip';
 import { useToast } from '../components/ui/Toast';
 import { useSyncTasksContext } from '../context/SyncTasksContext';
@@ -206,6 +206,7 @@ function RecurringScheduleLogsScreen({
   const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
   const [retentionCount, setRetentionCount] = useState(String(schedule.retentionCount));
   const [savingRetention, setSavingRetention] = useState(false);
+  const [confirmClearHistoryOpen, setConfirmClearHistoryOpen] = useState(false);
 
   useEffect(() => {
     setRetentionCount(String(schedule.retentionCount));
@@ -255,17 +256,10 @@ function RecurringScheduleLogsScreen({
   }, [historyReloadNonce, schedule.id, task.id]);
 
   const clearHistory = async () => {
-    const confirmed = await ask(
-      t('recurringSchedules.clearHistoryConfirmMessage'),
-      {
-        title: t('recurringSchedules.clearHistoryConfirmTitle'),
-        kind: 'warning',
-      },
-    );
-    if (!confirmed) {
-      return;
-    }
+    setConfirmClearHistoryOpen(true);
+  };
 
+  const confirmClearHistory = async () => {
     try {
       await invoke('clear_recurring_schedule_history', {
         taskId: task.id,
@@ -524,6 +518,24 @@ function RecurringScheduleLogsScreen({
           </div>
         </section>
       </div>
+      <InlineDialogModal
+        opened={confirmClearHistoryOpen}
+        title={t('recurringSchedules.clearHistoryConfirmTitle')}
+        message={t('recurringSchedules.clearHistoryConfirmMessage')}
+        actions={[
+          { key: 'cancel', label: t('common.cancel', { defaultValue: 'Cancel' }), tone: 'neutral' },
+          { key: 'confirm', label: t('common.confirm', { defaultValue: 'Confirm' }), tone: 'warning' },
+        ]}
+        onAction={(actionKey) => {
+          if (actionKey === 'confirm') {
+            setConfirmClearHistoryOpen(false);
+            void confirmClearHistory();
+            return;
+          }
+
+          setConfirmClearHistoryOpen(false);
+        }}
+      />
     </div>
   );
 }
@@ -535,6 +547,11 @@ function RecurringSchedulesView() {
   const [timezones, setTimezones] = useState<string[]>([getSystemTimezone()]);
   const [modalState, setModalState] = useState<ScheduleModalState | null>(null);
   const [logsState, setLogsState] = useState<ScheduleLogsState | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -613,27 +630,22 @@ function RecurringSchedulesView() {
       return;
     }
 
-    const confirmed = await ask(
-      t('recurringSchedules.confirmDeleteAllMessage', { taskName: task.name }),
-      {
-        title: t('recurringSchedules.confirmDeleteAllTitle'),
-        kind: 'warning',
+    setConfirmState({
+      title: t('recurringSchedules.confirmDeleteAllTitle'),
+      message: t('recurringSchedules.confirmDeleteAllMessage', { taskName: task.name }),
+      onConfirm: async () => {
+        try {
+          await persistSchedules(task, []);
+          if (logsState?.taskId === task.id) {
+            setLogsState(null);
+          }
+          showToast(t('recurringSchedules.toasts.deletedAll'), 'success');
+        } catch (error) {
+          console.error('Failed to delete recurring schedules:', error);
+          showToast(t('recurringSchedules.toasts.deleteFailed'), 'error');
+        }
       },
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      await persistSchedules(task, []);
-      if (logsState?.taskId === task.id) {
-        setLogsState(null);
-      }
-      showToast(t('recurringSchedules.toasts.deletedAll'), 'success');
-    } catch (error) {
-      console.error('Failed to delete recurring schedules:', error);
-      showToast(t('recurringSchedules.toasts.deleteFailed'), 'error');
-    }
+    });
   };
 
   const handleToggleSchedule = async (task: SyncTask, scheduleId: string) => {
@@ -661,37 +673,32 @@ function RecurringSchedulesView() {
       return;
     }
 
-    const confirmed = await ask(
-      t('recurringSchedules.confirmDeleteMessage', {
+    setConfirmState({
+      title: t('recurringSchedules.confirmDeleteTitle'),
+      message: t('recurringSchedules.confirmDeleteMessage', {
         summary: describeRecurringSchedule(schedule, t),
       }),
-      {
-        title: t('recurringSchedules.confirmDeleteTitle'),
-        kind: 'warning',
+      onConfirm: async () => {
+        try {
+          await persistSchedules(
+            task,
+            normalizeRecurringSchedules(task.recurringSchedules).filter(
+              (candidate) => candidate.id !== scheduleId,
+            ),
+          );
+          if (modalState?.schedule.id === scheduleId) {
+            setModalState(null);
+          }
+          if (logsState?.taskId === task.id && logsState.scheduleId === scheduleId) {
+            setLogsState(null);
+          }
+          showToast(t('recurringSchedules.toasts.deleted'), 'success');
+        } catch (error) {
+          console.error('Failed to delete recurring schedule:', error);
+          showToast(t('recurringSchedules.toasts.deleteFailed'), 'error');
+        }
       },
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      await persistSchedules(
-        task,
-        normalizeRecurringSchedules(task.recurringSchedules).filter(
-          (candidate) => candidate.id !== scheduleId,
-        ),
-      );
-      if (modalState?.schedule.id === scheduleId) {
-        setModalState(null);
-      }
-      if (logsState?.taskId === task.id && logsState.scheduleId === scheduleId) {
-        setLogsState(null);
-      }
-      showToast(t('recurringSchedules.toasts.deleted'), 'success');
-    } catch (error) {
-      console.error('Failed to delete recurring schedule:', error);
-      showToast(t('recurringSchedules.toasts.deleteFailed'), 'error');
-    }
+    });
   };
 
   const handleSaveSchedule = async (task: SyncTask, nextSchedule: RecurringSchedule) => {
@@ -977,6 +984,25 @@ function RecurringSchedulesView() {
         timezones={timezones}
         onClose={() => setModalState(null)}
         onSave={handleSaveSchedule}
+      />
+      <InlineDialogModal
+        opened={confirmState !== null}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        actions={[
+          { key: 'cancel', label: t('common.cancel', { defaultValue: 'Cancel' }), tone: 'neutral' },
+          { key: 'confirm', label: t('common.confirm', { defaultValue: 'Confirm' }), tone: 'warning' },
+        ]}
+        onAction={(actionKey) => {
+          if (actionKey === 'confirm' && confirmState) {
+            const request = confirmState;
+            setConfirmState(null);
+            void request.onConfirm();
+            return;
+          }
+
+          setConfirmState(null);
+        }}
       />
     </div>
   );

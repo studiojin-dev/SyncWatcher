@@ -1,6 +1,6 @@
 {
-  "last_turn_at": "2026-04-09T08:46:29.029Z",
-  "turn_count": 81,
-  "last_agent_output": "COMPLETE\n\n아니요. Mac App Store 배포라면 `local-mac-app-store-build.sh` 다음에 `local-macos-release.sh`를 이어서 실",
-  "last_progress_at": "2026-04-09T08:46:29.029Z"
+  "last_turn_at": "2026-04-12T11:30:12.678Z",
+  "turn_count": 106,
+  "last_agent_output": "{\"title\":\"모든 변경사항 커밋'} }]}]}\"}",
+  "last_progress_at": "2026-04-12T11:30:12.678Z"
 }

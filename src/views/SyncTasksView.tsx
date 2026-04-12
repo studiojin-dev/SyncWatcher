@@ -14,6 +14,7 @@ import OrphanFilesModal from '../components/features/OrphanFilesModal';
 import DryRunResultView from '../components/features/DryRunResultView';
 import SyncResultView from '../components/features/SyncResultView';
 import CancelConfirmModal from '../components/ui/CancelConfirmModal';
+import InlineDialogModal from '../components/ui/InlineDialogModal';
 import SyncTaskValidationErrorModal from '../components/features/SyncTaskValidationErrorModal';
 import type { RuntimeTaskValidationIssue } from '../types/runtime';
 import SyncTaskFormModal from './sync-tasks/SyncTaskFormModal';
@@ -97,7 +98,9 @@ function SyncTasksView({
     confirmPendingDryRun,
     conflictSessions,
     conflictSessionsLoading,
+    inlineConfirm,
     handleCancelConfirm,
+    clearInlineConfirm,
     handleDelete,
     handleDryRun,
     handleEditorClose,
@@ -113,6 +116,7 @@ function SyncTasksView({
     pendingSyncRequest,
     pendingDryRunTask,
     requestCancel,
+    handleInlineConfirm,
     savingTask,
     startSync,
     startSyncFromDryRun,
@@ -249,6 +253,31 @@ function SyncTasksView({
         }
         confirmLabel={t('common.confirm', { defaultValue: '확인' })}
         cancelLabel={t('common.cancel', { defaultValue: '취소' })}
+      />
+
+      <InlineDialogModal
+        opened={!!inlineConfirm}
+        title={inlineConfirm?.title ?? ''}
+        message={inlineConfirm?.message ?? ''}
+        actions={[
+          {
+            key: 'cancel',
+            label: inlineConfirm?.cancelLabel ?? t('common.cancel', { defaultValue: '취소' }),
+            tone: 'neutral',
+          },
+          {
+            key: 'confirm',
+            label: inlineConfirm?.confirmLabel ?? t('common.confirm', { defaultValue: '확인' }),
+            tone: 'warning',
+          },
+        ]}
+        onAction={(actionKey) => {
+          if (actionKey === 'confirm') {
+            void handleInlineConfirm();
+            return;
+          }
+          clearInlineConfirm();
+        }}
       />
 
       <SyncTaskValidationErrorModal
