@@ -27,7 +27,7 @@
     ],
     "status": "Accepted",
     "date": "2026-04-09",
-    "tldr": "After a stable GitHub Release is published, trigger a workflow in `kimjj81/studiojin-home` to import that release's notes into the `/syncwatcher/` product page, using a fine-grained PAT with only `Actions: write`.",
+    "tldr": "After a stable GitHub Release is published, explicitly dispatch a follow-up workflow in SyncWatcher that forwards the release notes to `kimjj81/studiojin-home`, so homepage sync does not depend on `release.published` events emitted by `GITHUB_TOKEN`.",
     "path": "docs/adr/ADR-20260409-0025-RNS-stable-release-notes-sync-to-studiojin-home.md"
   },
   {
