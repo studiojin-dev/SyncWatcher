@@ -1065,6 +1065,41 @@ describe('App close lifecycle', () => {
   });
 
   it('disables auto-unmount for this session when user cancels confirmation', async () => {
+    const suppressionDeferred = createDeferred<null>();
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'set_auto_unmount_session_disabled') {
+        return suppressionDeferred.promise;
+      }
+
+      if (command === 'refresh_supporter_status') {
+        return {
+          isRegistered: runtimeState.isRegistered,
+          provider: 'lemon_squeezy',
+        };
+      }
+      if (command === 'get_supporter_status') {
+        return {
+          isRegistered: runtimeState.isRegistered,
+          provider: 'lemon_squeezy',
+        };
+      }
+      if (command === 'runtime_get_state') {
+        return {
+          watchingTasks: [],
+          syncingTasks: [],
+          queuedTasks: [],
+        };
+      }
+      if (command === 'find_sync_task_source_recommendations') {
+        return {
+          recommendations: [],
+        };
+      }
+
+      return null;
+    });
+
     render(<App />);
 
     await flushAppEffects();
@@ -1085,16 +1120,24 @@ describe('App close lifecycle', () => {
     fireEvent.click(screen.getByText('cancel-auto-unmount'));
 
     await waitFor(() => {
+      expect(screen.queryByText('cancel-auto-unmount')).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('set_auto_unmount_session_disabled', {
         taskId: 'task-1',
         disabled: true,
       });
     });
 
-    expect(setLastLogMock).toHaveBeenCalledWith('task-1', expect.objectContaining({
-      message: 'syncTasks.autoUnmountCancelledStatus',
-      level: 'warning',
-    }));
-    expect(setQueuedMock).toHaveBeenCalledWith('task-1', false);
+    suppressionDeferred.resolve(null);
+
+    await waitFor(() => {
+      expect(setLastLogMock).toHaveBeenCalledWith('task-1', expect.objectContaining({
+        message: 'syncTasks.autoUnmountCancelledStatus',
+        level: 'warning',
+      }));
+      expect(setQueuedMock).toHaveBeenCalledWith('task-1', false);
+    });
   });
 });

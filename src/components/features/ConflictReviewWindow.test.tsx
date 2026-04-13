@@ -228,6 +228,23 @@ describe('ConflictReviewWindow', () => {
     });
   });
 
+  it('keeps close button styling when confirmation dialog is open', async () => {
+    render(<ConflictReviewWindow />);
+
+    await screen.findByText('타겟 최신 파일 검토');
+
+    const closeButton = screen.getByRole('button', { name: /close/i });
+    expect(closeButton.className).not.toContain('disabled:opacity-50');
+
+    fireEvent.click(screen.getByRole('button', { name: /강제 복사/i }));
+
+    expect(
+      await screen.findByText('강제 복사는 되돌릴 수 없습니다. 계속할까요?')
+    ).toBeInTheDocument();
+    expect(closeButton).toBeDisabled();
+    expect(closeButton.className).not.toContain('disabled:opacity-50');
+  });
+
   it('invokes rename-then-copy only after confirming in-app dialog', async () => {
     render(<ConflictReviewWindow />);
 

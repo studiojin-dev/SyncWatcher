@@ -134,6 +134,19 @@ impl WatcherManager {
         self.watchers.keys().cloned().collect()
     }
 
+    /// 감시 중인 Task별 source path 스냅샷을 반환합니다.
+    pub fn get_watching_task_sources(&self) -> HashMap<String, String> {
+        self.watchers
+            .iter()
+            .map(|(task_id, watcher)| {
+                (
+                    task_id.clone(),
+                    watcher.source_path.to_string_lossy().to_string(),
+                )
+            })
+            .collect()
+    }
+
     /// 특정 Task가 감시 중인지 확인합니다.
     pub fn is_watching(&self, task_id: &str) -> bool {
         self.watchers.contains_key(task_id)
@@ -295,6 +308,23 @@ mod tests {
         let result = manager.stop_watching("test-task");
         assert!(result.is_ok());
         assert!(!manager.is_watching("test-task"));
+    }
+
+    #[test]
+    fn test_get_watching_task_sources_returns_registered_paths() {
+        let mut manager = WatcherManager::new();
+        let temp = tempfile::tempdir().unwrap();
+        let source_path = temp.path().to_path_buf();
+
+        manager
+            .start_watching("test-task".to_string(), source_path.clone(), |_| {})
+            .unwrap();
+
+        let sources = manager.get_watching_task_sources();
+        assert_eq!(
+            sources.get("test-task"),
+            Some(&source_path.to_string_lossy().to_string())
+        );
     }
 }
 

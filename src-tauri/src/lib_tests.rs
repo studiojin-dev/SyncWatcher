@@ -40,13 +40,15 @@ mod integration_tests {
         resolve_conflict_items_internal, resolve_runtime_exclude_patterns,
         runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
         runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
-        runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
-        set_auto_unmount_session_disabled_internal, snapshot_recurring_schedule_detail_entries,
-        sync_dry_run_internal, take_runtime_pending_sync_task, unix_now_ms,
-        validate_dry_run_artifact, validate_runtime_tasks, volume_watch_next_tick_delay, AppState,
-        CancelOperationType, ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction,
-        ConflictResolutionRequest, ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem,
-        DryRunLiveState, RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
+        runtime_watch_restart_task_ids, runtime_watch_task_needs_restart,
+        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
+        should_reconcile_runtime_watchers_for_volume_change,
+        snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
+        take_runtime_pending_sync_task, unix_now_ms, validate_dry_run_artifact,
+        validate_runtime_tasks, volume_watch_next_tick_delay, AppState, CancelOperationType,
+        ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
+        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
+        RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
         RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
         RuntimeTaskValidationIssue, SyncLiveState, TargetNewerConflictItem,
         VolumeEmitDebounceState,
@@ -1146,30 +1148,113 @@ mod integration_tests {
         let managed_sources =
             HashMap::from([("task-1".to_string(), "/Volumes/old/source".to_string())]);
         let watching_now = HashSet::from(["task-1".to_string()]);
+        let watching_source_paths = HashMap::new();
 
         assert!(!runtime_watch_task_needs_restart(
             "task-1",
             "/Volumes/old/source",
             &managed_sources,
             &watching_now,
+            &watching_source_paths,
         ));
         assert!(runtime_watch_task_needs_restart(
             "task-2",
             "/Volumes/new/source",
             &managed_sources,
             &watching_now,
+            &watching_source_paths,
         ));
         assert!(runtime_watch_task_needs_restart(
             "task-1",
             "/Volumes/new/source",
             &managed_sources,
             &watching_now,
+            &watching_source_paths,
         ));
         assert!(runtime_watch_task_needs_restart(
             "task-1",
             "/Volumes/old/source",
             &managed_sources,
             &HashSet::new(),
+            &watching_source_paths,
+        ));
+    }
+
+    #[test]
+    fn test_runtime_watch_restart_plan_restarts_uuid_task_when_registered_watcher_root_is_stale() {
+        let stale_mount = tempdir().unwrap();
+        let stale_watch_root = stale_mount.path().join("DCIM");
+        std::fs::create_dir_all(&stale_watch_root).unwrap();
+        let stale_watch_root = stale_watch_root.to_string_lossy().to_string();
+
+        let desired_sources = HashMap::from([(
+            "uuid-watch".to_string(),
+            "[DISK_UUID:disk-a]/DCIM".to_string(),
+        )]);
+        let managed_sources = desired_sources.clone();
+        let watching_now = HashSet::from(["uuid-watch".to_string()]);
+        let watching_source_paths =
+            HashMap::from([("uuid-watch".to_string(), stale_watch_root.clone())]);
+
+        assert!(runtime_watch_restart_task_ids(
+            &desired_sources,
+            &managed_sources,
+            &watching_now,
+            &watching_source_paths,
+        )
+        .is_empty());
+
+        drop(stale_mount);
+
+        assert_eq!(
+            runtime_watch_restart_task_ids(
+                &desired_sources,
+                &managed_sources,
+                &watching_now,
+                &watching_source_paths,
+            ),
+            vec!["uuid-watch".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_runtime_watch_restart_plan_does_not_restart_when_uuid_task_is_already_tracking_current_root(
+    ) {
+        let current_mount = tempdir().unwrap();
+        let current_watch_root = current_mount.path().join("DCIM");
+        std::fs::create_dir_all(&current_watch_root).unwrap();
+        let current_watch_root = current_watch_root.to_string_lossy().to_string();
+
+        let desired_sources = HashMap::from([(
+            "uuid-watch".to_string(),
+            "[DISK_UUID:disk-a]/DCIM".to_string(),
+        )]);
+        let managed_sources = desired_sources.clone();
+        let watching_now = HashSet::from(["uuid-watch".to_string()]);
+        let watching_source_paths = HashMap::from([("uuid-watch".to_string(), current_watch_root)]);
+
+        assert!(runtime_watch_restart_task_ids(
+            &desired_sources,
+            &managed_sources,
+            &watching_now,
+            &watching_source_paths,
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn test_should_reconcile_runtime_watchers_for_volume_change_requires_mount_diff() {
+        assert!(!should_reconcile_runtime_watchers_for_volume_change(
+            &Vec::new(),
+            &Vec::new()
+        ));
+        assert!(should_reconcile_runtime_watchers_for_volume_change(
+            &vec!["/Volumes/CARD".to_string()],
+            &Vec::new()
+        ));
+        assert!(should_reconcile_runtime_watchers_for_volume_change(
+            &Vec::new(),
+            &vec!["/Volumes/CARD".to_string()]
         ));
     }
 
@@ -1235,6 +1320,104 @@ mod integration_tests {
         assert!(queued.contains("queued"));
         assert!(!queued.contains("syncing"));
         assert!(!queued.contains("pending"));
+    }
+
+    #[tokio::test]
+    async fn test_runtime_watch_bootstrap_tasks_skip_syncing_queued_pending_even_after_remount_restart(
+    ) {
+        let state = build_app_state();
+        let stale_mount = tempdir().unwrap();
+        let eligible_root = stale_mount.path().join("eligible");
+        let syncing_root = stale_mount.path().join("syncing");
+        let queued_root = stale_mount.path().join("queued");
+        let pending_root = stale_mount.path().join("pending");
+        std::fs::create_dir_all(&eligible_root).unwrap();
+        std::fs::create_dir_all(&syncing_root).unwrap();
+        std::fs::create_dir_all(&queued_root).unwrap();
+        std::fs::create_dir_all(&pending_root).unwrap();
+
+        let desired_sources = HashMap::from([
+            (
+                "eligible".to_string(),
+                "[DISK_UUID:eligible-disk]/DCIM".to_string(),
+            ),
+            (
+                "syncing".to_string(),
+                "[DISK_UUID:syncing-disk]/DCIM".to_string(),
+            ),
+            (
+                "queued".to_string(),
+                "[DISK_UUID:queued-disk]/DCIM".to_string(),
+            ),
+            (
+                "pending".to_string(),
+                "[DISK_UUID:pending-disk]/DCIM".to_string(),
+            ),
+        ]);
+        let managed_sources = desired_sources.clone();
+        let watching_now = HashSet::from([
+            "eligible".to_string(),
+            "syncing".to_string(),
+            "queued".to_string(),
+            "pending".to_string(),
+        ]);
+        let watching_source_paths = HashMap::from([
+            (
+                "eligible".to_string(),
+                eligible_root.to_string_lossy().to_string(),
+            ),
+            (
+                "syncing".to_string(),
+                syncing_root.to_string_lossy().to_string(),
+            ),
+            (
+                "queued".to_string(),
+                queued_root.to_string_lossy().to_string(),
+            ),
+            (
+                "pending".to_string(),
+                pending_root.to_string_lossy().to_string(),
+            ),
+        ]);
+
+        drop(stale_mount);
+
+        {
+            let mut syncing = state.syncing_tasks.write().await;
+            syncing.insert("syncing".to_string());
+        }
+        {
+            let mut queued = state.queued_sync_tasks.write().await;
+            queued.insert("queued".to_string());
+        }
+        {
+            let mut queue = state.runtime_sync_queue.write().await;
+            queue.push_back("queued".to_string());
+        }
+        {
+            let mut pending = state.runtime_pending_sync_tasks.write().await;
+            pending.insert("pending".to_string());
+        }
+
+        let restart_task_ids = runtime_watch_restart_task_ids(
+            &desired_sources,
+            &managed_sources,
+            &watching_now,
+            &watching_source_paths,
+        );
+
+        assert_eq!(
+            restart_task_ids,
+            vec![
+                "eligible".to_string(),
+                "pending".to_string(),
+                "queued".to_string(),
+                "syncing".to_string(),
+            ]
+        );
+
+        let enqueued = enqueue_runtime_watch_bootstrap_tasks(&restart_task_ids, &state).await;
+        assert_eq!(enqueued, vec!["eligible".to_string()]);
     }
 
     #[test]

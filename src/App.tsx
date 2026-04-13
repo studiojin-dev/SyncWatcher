@@ -874,6 +874,11 @@ function AppContent() {
       return;
     }
 
+    setPendingAutoUnmountRequests((prev) =>
+      prev.filter((item) => item.taskId !== request.taskId)
+    );
+    setActiveAutoUnmountRequest(null);
+
     try {
       await invoke('set_auto_unmount_session_disabled', {
         taskId: request.taskId,
@@ -891,10 +896,6 @@ function AppContent() {
       setTaskLastLog(request.taskId, String(error), 'error');
     } finally {
       useSyncTaskStatusStore.getState().setQueued(request.taskId, false);
-      setPendingAutoUnmountRequests((prev) =>
-        prev.filter((item) => item.taskId !== request.taskId)
-      );
-      setActiveAutoUnmountRequest(null);
     }
   }, [activeAutoUnmountRequest, setTaskLastLog, t]);
 

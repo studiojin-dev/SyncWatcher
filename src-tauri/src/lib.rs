@@ -3687,6 +3687,7 @@ fn runtime_watch_task_needs_restart(
     source: &str,
     managed_sources: &HashMap<String, String>,
     watching_now: &HashSet<String>,
+    watching_source_paths: &HashMap<String, String>,
 ) -> bool {
     let source_changed = managed_sources
         .get(task_id)
@@ -3694,8 +3695,35 @@ fn runtime_watch_task_needs_restart(
         .unwrap_or(false);
     let is_managed = managed_sources.contains_key(task_id);
     let is_watching = watching_now.contains(task_id);
+    let stale_uuid_watch_registration = has_uuid_source_prefix(source)
+        && watching_source_paths
+            .get(task_id)
+            .is_some_and(|path| !Path::new(path).exists());
 
-    !is_managed || !is_watching || source_changed
+    !is_managed || !is_watching || source_changed || stale_uuid_watch_registration
+}
+
+fn runtime_watch_restart_task_ids(
+    desired_sources: &HashMap<String, String>,
+    managed_sources: &HashMap<String, String>,
+    watching_now: &HashSet<String>,
+    watching_source_paths: &HashMap<String, String>,
+) -> Vec<String> {
+    let mut task_ids = desired_sources
+        .iter()
+        .filter_map(|(task_id, source)| {
+            runtime_watch_task_needs_restart(
+                task_id,
+                source,
+                managed_sources,
+                watching_now,
+                watching_source_paths,
+            )
+            .then_some(task_id.clone())
+        })
+        .collect::<Vec<_>>();
+    task_ids.sort();
+    task_ids
 }
 
 fn runtime_find_watch_task<'a>(
@@ -4069,6 +4097,35 @@ fn emit_runtime_watch_bootstrap_queue_state(
     for task_id in task_ids {
         emit_runtime_sync_queue_state(app, task_id, true, Some(reason.to_string()));
     }
+}
+
+fn should_reconcile_runtime_watchers_for_volume_change(
+    mounted: &[String],
+    unmounted: &[String],
+) -> bool {
+    !mounted.is_empty() || !unmounted.is_empty()
+}
+
+async fn reconcile_runtime_watchers_for_volume_change(
+    app: tauri::AppHandle,
+    state: AppState,
+) -> Result<(), String> {
+    let _apply_guard = state.runtime_config_apply_lock.clone().lock_owned().await;
+    reconcile_runtime_watchers(app, state).await
+}
+
+fn schedule_runtime_watch_reconcile_for_volume_change(app: tauri::AppHandle, state: AppState) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) =
+            reconcile_runtime_watchers_for_volume_change(app.clone(), state.clone()).await
+        {
+            state.log_manager.log(
+                "warning",
+                &format!("Runtime watch reconcile after volume change failed: {error}"),
+                None,
+            );
+        }
+    });
 }
 
 fn select_runtime_dispatch_candidate(
@@ -5393,6 +5450,10 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
         let manager = state.watcher_manager.read().await;
         manager.get_watching_tasks().into_iter().collect()
     };
+    let watching_source_paths = {
+        let manager = state.watcher_manager.read().await;
+        manager.get_watching_task_sources()
+    };
 
     let managed_sources = {
         let sources = state.runtime_watch_sources.read().await;
@@ -5401,37 +5462,44 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
     let allow_restarted_watch_bootstrap = state
         .runtime_initial_watch_bootstrapped
         .load(Ordering::SeqCst);
+    let restart_task_ids = runtime_watch_restart_task_ids(
+        &desired,
+        &managed_sources,
+        &watching_now,
+        &watching_source_paths,
+    );
     let mut restarted_watch_task_ids = Vec::new();
 
     // Start or restart desired watchers.
-    for (task_id, source) in &desired {
-        if runtime_watch_task_needs_restart(task_id, source, &managed_sources, &watching_now) {
-            match start_watch_internal(
-                task_id.clone(),
-                PathBuf::from(source),
-                app.clone(),
-                state.clone(),
-                true,
-            )
-            .await
-            {
-                Ok(_) => {
-                    {
-                        let mut sources = state.runtime_watch_sources.write().await;
-                        sources.insert(task_id.clone(), source.clone());
-                    }
-                    if allow_restarted_watch_bootstrap {
-                        restarted_watch_task_ids.push(task_id.clone());
-                    }
-                    emit_runtime_watch_state(&app, task_id, true, None);
+    for task_id in restart_task_ids {
+        let Some(source) = desired.get(&task_id) else {
+            continue;
+        };
+        match start_watch_internal(
+            task_id.clone(),
+            PathBuf::from(source),
+            app.clone(),
+            state.clone(),
+            true,
+        )
+        .await
+        {
+            Ok(_) => {
+                {
+                    let mut sources = state.runtime_watch_sources.write().await;
+                    sources.insert(task_id.clone(), source.clone());
                 }
-                Err(err) => {
-                    {
-                        let mut sources = state.runtime_watch_sources.write().await;
-                        sources.remove(task_id);
-                    }
-                    emit_runtime_watch_state(&app, task_id, false, Some(err));
+                if allow_restarted_watch_bootstrap {
+                    restarted_watch_task_ids.push(task_id.clone());
                 }
+                emit_runtime_watch_state(&app, &task_id, true, None);
+            }
+            Err(err) => {
+                {
+                    let mut sources = state.runtime_watch_sources.write().await;
+                    sources.remove(&task_id);
+                }
+                emit_runtime_watch_state(&app, &task_id, false, Some(err));
             }
         }
     }
@@ -8802,6 +8870,7 @@ pub fn run() {
 
                     let debounce_duration = StdDuration::from_millis(500);
                     let mut emit_state = VolumeEmitDebounceState::new();
+                    let volume_watch_state = app_handle.state::<AppState>().inner().clone();
 
                     let mut refresh_and_emit = || {
                         let current_removable_mounts = removable_mounts();
@@ -8809,8 +8878,11 @@ pub fn run() {
                             &previous_removable_mounts,
                             &current_removable_mounts,
                         );
+                        let should_reconcile = should_reconcile_runtime_watchers_for_volume_change(
+                            &mounted, &unmounted,
+                        );
 
-                        for mount_path in mounted {
+                        for mount_path in &mounted {
                             volume_log_manager.log_with_category(
                                 "info",
                                 &format!("Volume mounted: {}", mount_path),
@@ -8819,7 +8891,7 @@ pub fn run() {
                             );
                         }
 
-                        for mount_path in unmounted {
+                        for mount_path in &unmounted {
                             volume_log_manager.log_with_category(
                                 "info",
                                 &format!("Volume unmounted: {}", mount_path),
@@ -8829,6 +8901,12 @@ pub fn run() {
                         }
 
                         previous_removable_mounts = current_removable_mounts;
+                        if should_reconcile {
+                            schedule_runtime_watch_reconcile_for_volume_change(
+                                app_handle.clone(),
+                                volume_watch_state.clone(),
+                            );
+                        }
                         let _ = app_handle.emit("volumes-changed", ());
                     };
 

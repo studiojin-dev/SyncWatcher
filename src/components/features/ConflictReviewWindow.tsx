@@ -469,7 +469,7 @@ export default function ConflictReviewWindow() {
               type="button"
               disabled={processing || !!confirmRequest}
               onClick={handleCloseWindow}
-              className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--color-accent-warning)] disabled:opacity-50"
+              className="px-3 py-2 border-2 border-[var(--border-main)] font-mono text-xs inline-flex items-center gap-1 hover:bg-[var(--color-accent-warning)]"
             >
               <IconX size={14} />
               {t('common.close', { defaultValue: 'Close' })}
