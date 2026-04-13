@@ -1,6 +1,0 @@
-{
-  "last_turn_at": "2026-04-12T11:33:11.046Z",
-  "turn_count": 108,
-  "last_agent_output": "COMPLETE\n\n린트 오류는 `scripts/metrics/build-installer-download-badge.mjs`에서 정리했습니다. `process`를 명시적으로 imp",
-  "last_progress_at": "2026-04-12T11:33:11.046Z"
-}

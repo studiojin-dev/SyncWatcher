@@ -61,6 +61,7 @@ coverage/
 *.tgz
 *.tar.gz
 .omx/
+.omx/*
 
 # Temporary files
 tmp/
