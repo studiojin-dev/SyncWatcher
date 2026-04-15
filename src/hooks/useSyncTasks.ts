@@ -13,8 +13,10 @@ export interface SyncTask {
     name: string;
     source: string;
     sourceBookmark?: string | null;
+    sourceNetworkMount?: SyncTaskNetworkMount | null;
     target: string;
     targetBookmark?: string | null;
+    targetNetworkMount?: SyncTaskNetworkMount | null;
     checksumMode: boolean;
     verifyAfterCopy?: boolean;
     exclusionSets?: string[];
@@ -46,12 +48,35 @@ export interface SyncTask {
     recurringSchedules?: RecurringSchedule[];
 }
 
+export interface SyncTaskNetworkMount {
+    scheme: 'smb';
+    remountUrl: string;
+    username?: string | null;
+    mountRootPath: string;
+    relativePathFromMountRoot: string;
+    enabled: boolean;
+}
+
 interface PersistedSyncTask extends SyncTask {
     // Legacy fields that can still exist in old YAML files.
     enabled?: boolean;
     watching?: boolean;
     deleteMissing?: boolean;
 }
+
+type NetworkCredentialInput = {
+    password?: string;
+};
+
+type SyncTaskMutationInput = Omit<SyncTask, 'id'> & {
+    sourceCredential?: NetworkCredentialInput;
+    targetCredential?: NetworkCredentialInput;
+};
+
+type SyncTaskUpdateInput = Partial<SyncTask> & {
+    sourceCredential?: NetworkCredentialInput;
+    targetCredential?: NetworkCredentialInput;
+};
 
 const DEFAULT_TASKS: PersistedSyncTask[] = [];
 
@@ -68,8 +93,10 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         name: task.name,
         source: task.source,
         sourceBookmark: task.sourceBookmark ?? null,
+        sourceNetworkMount: task.sourceNetworkMount ?? null,
         target: task.target,
         targetBookmark: task.targetBookmark ?? null,
+        targetNetworkMount: task.targetNetworkMount ?? null,
         checksumMode: task.checksumMode ?? false,
         verifyAfterCopy: task.verifyAfterCopy ?? true,
         exclusionSets: task.exclusionSets ?? [],
@@ -225,11 +252,12 @@ export function useSyncTasks() {
         };
     }, [loadTasks]);
 
-    const addTask = useCallback(async (task: Omit<SyncTask, 'id'>) => {
+    const addTask = useCallback(async (task: SyncTaskMutationInput) => {
+        const { sourceCredential, targetCredential, ...persistedTaskInput } = task;
         const newTask: SyncTask = {
-            ...task,
+            ...persistedTaskInput,
             id: crypto.randomUUID(),
-            recurringSchedules: normalizeRecurringSchedules(task.recurringSchedules),
+            recurringSchedules: normalizeRecurringSchedules(persistedTaskInput.recurringSchedules),
         };
         newTask.autoUnmount = shouldEnableAutoUnmount(newTask);
         const mutationSeq = beginTaskMutation(newTask.id);
@@ -238,7 +266,11 @@ export function useSyncTasks() {
         commitTasks(nextTasks);
 
         try {
-            const response = await invoke<unknown>('create_sync_task', { task: newTask });
+            const response = await invoke<unknown>('create_sync_task', {
+                task: newTask,
+                sourceCredential,
+                targetCredential,
+            });
             const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
             if (persistedTask && taskMutationSeqRef.current.get(newTask.id) === mutationSeq) {
                 const normalizedTask = normalizeTask(persistedTask as PersistedSyncTask);
@@ -261,22 +293,23 @@ export function useSyncTasks() {
         return newTask;
     }, [beginTaskMutation, commitTasks, endTaskMutation, flushDeferredLoadIfIdle]);
 
-    const updateTask = useCallback(async (id: string, updates: Partial<SyncTask>) => {
+    const updateTask = useCallback(async (id: string, updates: SyncTaskUpdateInput) => {
         const mutationSeq = beginTaskMutation(id);
         const previousTasks = tasksRef.current;
-        const normalizedUpdates = Object.prototype.hasOwnProperty.call(updates, 'recurringSchedules')
-            ? updates.recurringSchedules == null
+        const { sourceCredential, targetCredential, ...persistedUpdates } = updates;
+        const normalizedUpdates = Object.prototype.hasOwnProperty.call(persistedUpdates, 'recurringSchedules')
+            ? persistedUpdates.recurringSchedules == null
                 ? (() => {
-                    const { recurringSchedules: _ignored, ...rest } = updates;
+                    const { recurringSchedules: _ignored, ...rest } = persistedUpdates;
                     return rest;
                 })()
-                : Array.isArray(updates.recurringSchedules)
+                : Array.isArray(persistedUpdates.recurringSchedules)
                     ? {
-                        ...updates,
-                        recurringSchedules: normalizeRecurringSchedules(updates.recurringSchedules),
+                        ...persistedUpdates,
+                        recurringSchedules: normalizeRecurringSchedules(persistedUpdates.recurringSchedules),
                     }
-                    : updates
-            : updates;
+                    : persistedUpdates
+            : persistedUpdates;
         const newTasks = previousTasks.map((t) =>
             t.id === id
                 ? {
@@ -295,6 +328,8 @@ export function useSyncTasks() {
             const response = await invoke<unknown>('update_sync_task', {
                 id,
                 updates: normalizedUpdates,
+                sourceCredential,
+                targetCredential,
             });
             const persistedTask = readConfigRecord<SyncTask>(response, ['task', 'syncTask']);
             if (persistedTask && taskMutationSeqRef.current.get(id) === mutationSeq) {

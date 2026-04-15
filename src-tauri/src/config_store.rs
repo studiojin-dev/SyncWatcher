@@ -195,9 +195,13 @@ pub struct SyncTaskRecord {
     pub source: String,
     #[serde(default)]
     pub source_bookmark: Option<String>,
+    #[serde(default)]
+    pub source_network_mount: Option<NetworkMountRecord>,
     pub target: String,
     #[serde(default)]
     pub target_bookmark: Option<String>,
+    #[serde(default)]
+    pub target_network_mount: Option<NetworkMountRecord>,
     #[serde(default)]
     pub checksum_mode: bool,
     #[serde(default = "default_verify_after_copy")]
@@ -254,9 +258,13 @@ pub struct CreateSyncTaskRequest {
     pub source: String,
     #[serde(default)]
     pub source_bookmark: Option<String>,
+    #[serde(default)]
+    pub source_network_mount: Option<NetworkMountRecord>,
     pub target: String,
     #[serde(default)]
     pub target_bookmark: Option<String>,
+    #[serde(default)]
+    pub target_network_mount: Option<NetworkMountRecord>,
     #[serde(default)]
     pub checksum_mode: bool,
     #[serde(default = "default_verify_after_copy")]
@@ -288,8 +296,10 @@ pub struct UpdateSyncTaskRequest {
     pub name: Option<String>,
     pub source: Option<String>,
     pub source_bookmark: Option<String>,
+    pub source_network_mount: Option<NetworkMountRecord>,
     pub target: Option<String>,
     pub target_bookmark: Option<String>,
+    pub target_network_mount: Option<NetworkMountRecord>,
     pub checksum_mode: Option<bool>,
     pub verify_after_copy: Option<bool>,
     pub exclusion_sets: Option<Vec<String>>,
@@ -301,6 +311,25 @@ pub struct UpdateSyncTaskRequest {
     pub source_sub_path: Option<String>,
     pub source_identity: Option<SourceIdentitySnapshot>,
     pub recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkMountRecord {
+    pub scheme: NetworkMountScheme,
+    pub remount_url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    pub mount_root_path: String,
+    pub relative_path_from_mount_root: String,
+    #[serde(default = "default_network_mount_enabled")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkMountScheme {
+    Smb,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -748,6 +777,8 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
         });
     }
     normalized.source = normalized_source;
+    normalized.source_network_mount = normalize_network_mount(normalized.source_network_mount)?;
+    normalized.target_network_mount = normalize_network_mount(normalized.target_network_mount)?;
 
     if normalized.source_type != Some(SourceType::Uuid) {
         normalized.source_type = Some(SourceType::Path);
@@ -783,8 +814,10 @@ pub fn build_sync_task_record(
         name: request.name,
         source: request.source,
         source_bookmark: normalize_optional_string(request.source_bookmark),
+        source_network_mount: normalize_network_mount(request.source_network_mount)?,
         target: request.target,
         target_bookmark: normalize_optional_string(request.target_bookmark),
+        target_network_mount: normalize_network_mount(request.target_network_mount)?,
         checksum_mode: request.checksum_mode,
         verify_after_copy: request.verify_after_copy,
         exclusion_sets: request.exclusion_sets,
@@ -833,6 +866,13 @@ pub fn apply_sync_task_update(
             .source_sub_path
             .as_ref()
             .is_some_and(|value| Some(value.clone()) != task.source_sub_path);
+    let target_changed = update
+        .target
+        .as_ref()
+        .is_some_and(|value| value != &task.target)
+        || update.target_bookmark.as_ref().is_some_and(|value| {
+            normalize_optional_string(Some(value.clone())) != task.target_bookmark
+        });
     let next_source_bookmark = if update.source_bookmark.is_some() {
         normalize_optional_string(update.source_bookmark.clone())
     } else {
@@ -843,13 +883,25 @@ pub fn apply_sync_task_update(
     } else {
         task.target_bookmark.clone()
     };
+    let next_source_network_mount = if update.source_network_mount.is_some() || source_changed {
+        normalize_network_mount(update.source_network_mount.clone())?
+    } else {
+        task.source_network_mount.clone()
+    };
+    let next_target_network_mount = if update.target_network_mount.is_some() || target_changed {
+        normalize_network_mount(update.target_network_mount.clone())?
+    } else {
+        task.target_network_mount.clone()
+    };
     let mut next = SyncTaskRecord {
         id: task.id,
         name: update.name.clone().unwrap_or(task.name),
         source: update.source.clone().unwrap_or(task.source),
         source_bookmark: next_source_bookmark,
+        source_network_mount: next_source_network_mount,
         target: update.target.clone().unwrap_or(task.target),
         target_bookmark: next_target_bookmark,
+        target_network_mount: next_target_network_mount,
         checksum_mode: update.checksum_mode.unwrap_or(task.checksum_mode),
         verify_after_copy: update.verify_after_copy.unwrap_or(task.verify_after_copy),
         exclusion_sets: update.exclusion_sets.clone().unwrap_or(task.exclusion_sets),
@@ -925,11 +977,46 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_network_mount(
+    value: Option<NetworkMountRecord>,
+) -> Result<Option<NetworkMountRecord>, ConfigStoreError> {
+    let Some(mut mount) = value else {
+        return Ok(None);
+    };
+
+    mount.remount_url = mount.remount_url.trim().to_string();
+    mount.mount_root_path = mount.mount_root_path.trim().to_string();
+    mount.relative_path_from_mount_root = mount.relative_path_from_mount_root.trim().to_string();
+    mount.username = normalize_optional_string(mount.username);
+
+    if mount.remount_url.is_empty() {
+        return Err(ConfigStoreError::ValidationError {
+            message: "Network mount remount URL cannot be empty".to_string(),
+        });
+    }
+
+    if mount.mount_root_path.is_empty() {
+        return Err(ConfigStoreError::ValidationError {
+            message: "Network mount root path cannot be empty".to_string(),
+        });
+    }
+
+    if mount.relative_path_from_mount_root.is_empty() {
+        mount.relative_path_from_mount_root = ".".to_string();
+    }
+
+    Ok(Some(mount))
+}
+
 fn default_notifications() -> bool {
     true
 }
 
 fn default_verify_after_copy() -> bool {
+    true
+}
+
+fn default_network_mount_enabled() -> bool {
     true
 }
 
@@ -1407,7 +1494,9 @@ mod tests {
             source: String::new(),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1583,7 +1672,9 @@ mod tests {
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: vec![
@@ -1635,7 +1726,9 @@ mod tests {
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1677,7 +1770,9 @@ mod tests {
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
             source_bookmark: Some(String::new()),
+            source_network_mount: None,
             target_bookmark: Some("   ".to_string()),
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1713,7 +1808,9 @@ mod tests {
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
                 source_bookmark: None,
+                source_network_mount: None,
                 target_bookmark: None,
+                target_network_mount: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -1747,7 +1844,9 @@ mod tests {
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1790,7 +1889,9 @@ mod tests {
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -1833,7 +1934,9 @@ mod tests {
             source: "/tmp/source".to_string(),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),

@@ -463,6 +463,10 @@ export function useSyncTaskActions({
           normalizeBookmarkForSubmission(sourceBookmark);
         const normalizedTargetBookmark =
           normalizeBookmarkForSubmission(targetBookmark);
+        const normalizedSourceNetworkMount =
+          form.sourceType === 'path' ? form.sourceNetworkMount ?? undefined : undefined;
+        const normalizedTargetNetworkMount =
+          form.targetNetworkMount ?? undefined;
 
         const taskData = {
           name: formData.get('name') as string,
@@ -470,9 +474,15 @@ export function useSyncTaskActions({
           ...(normalizedSourceBookmark
             ? { sourceBookmark: normalizedSourceBookmark }
             : {}),
+          ...(normalizedSourceNetworkMount
+            ? { sourceNetworkMount: normalizedSourceNetworkMount }
+            : {}),
           target: targetPath,
           ...(normalizedTargetBookmark
             ? { targetBookmark: normalizedTargetBookmark }
+            : {}),
+          ...(normalizedTargetNetworkMount
+            ? { targetNetworkMount: normalizedTargetNetworkMount }
             : {}),
           checksumMode: formData.get('checksumMode') === 'on',
           exclusionSets: form.selectedSets,
@@ -505,6 +515,15 @@ export function useSyncTaskActions({
                 : normalizedSourceSubPath
               : undefined,
         };
+        const taskCommandPayload = {
+          ...taskData,
+          ...(form.sourceNetworkPassword
+            ? { sourceCredential: { password: form.sourceNetworkPassword } }
+            : {}),
+          ...(form.targetNetworkPassword
+            ? { targetCredential: { password: form.targetNetworkPassword } }
+            : {}),
+        };
 
         const provisionalTask: SyncTask = editingTask
           ? { ...editingTask, ...taskData }
@@ -535,10 +554,10 @@ export function useSyncTaskActions({
         }
 
         if (editingTask) {
-          await updateTask(editingTask.id, taskData);
+          await updateTask(editingTask.id, taskCommandPayload);
           showToast(t('syncTasks.editTask') + ': ' + taskData.name, 'success');
         } else {
-          await addTask(taskData);
+          await addTask(taskCommandPayload);
           showToast(t('syncTasks.addTask') + ': ' + taskData.name, 'success');
         }
 

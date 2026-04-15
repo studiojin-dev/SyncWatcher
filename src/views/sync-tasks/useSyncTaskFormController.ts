@@ -10,9 +10,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { formatBytes, type DataUnitSystem } from '../../utils/formatBytes';
-import { capturePathAccess } from '../../utils/pathAccess';
+import { captureNetworkMount, capturePathAccess } from '../../utils/pathAccess';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
-import type { SyncTask } from '../../hooks/useSyncTasks';
+import type { SyncTask, SyncTaskNetworkMount } from '../../hooks/useSyncTasks';
 import {
   buildUuidOptionValue,
   buildUuidSourceOptions,
@@ -42,10 +42,18 @@ export interface SyncTaskFormController {
   setSourcePath: Dispatch<SetStateAction<string>>;
   sourceBookmark: string | null;
   setSourceBookmark: Dispatch<SetStateAction<string | null>>;
+  sourceNetworkMount: SyncTaskNetworkMount | null;
+  setSourceNetworkMount: Dispatch<SetStateAction<SyncTaskNetworkMount | null>>;
+  sourceNetworkPassword: string;
+  setSourceNetworkPassword: Dispatch<SetStateAction<string>>;
   targetPath: string;
   setTargetPath: Dispatch<SetStateAction<string>>;
   targetBookmark: string | null;
   setTargetBookmark: Dispatch<SetStateAction<string | null>>;
+  targetNetworkMount: SyncTaskNetworkMount | null;
+  setTargetNetworkMount: Dispatch<SetStateAction<SyncTaskNetworkMount | null>>;
+  targetNetworkPassword: string;
+  setTargetNetworkPassword: Dispatch<SetStateAction<string>>;
   watchMode: boolean;
   handleWatchModeChange: (checked: boolean) => void;
   autoUnmount: boolean;
@@ -77,8 +85,12 @@ export function useSyncTaskFormController({
   const [selectedSets, setSelectedSets] = useState<string[]>([]);
   const [sourcePath, setSourcePath] = useState('');
   const [sourceBookmark, setSourceBookmark] = useState<string | null>(null);
+  const [sourceNetworkMount, setSourceNetworkMount] = useState<SyncTaskNetworkMount | null>(null);
+  const [sourceNetworkPassword, setSourceNetworkPassword] = useState('');
   const [targetPath, setTargetPath] = useState('');
   const [targetBookmark, setTargetBookmark] = useState<string | null>(null);
+  const [targetNetworkMount, setTargetNetworkMount] = useState<SyncTaskNetworkMount | null>(null);
+  const [targetNetworkPassword, setTargetNetworkPassword] = useState('');
   const [watchMode, setWatchMode] = useState(false);
   const [autoUnmount, setAutoUnmount] = useState(false);
   const [sourceType, setSourceType] = useState<'path' | 'uuid'>('path');
@@ -193,8 +205,12 @@ export function useSyncTaskFormController({
       setSelectedSets(editingTask.exclusionSets || []);
       setSourcePath(editingTask.source || '');
       setSourceBookmark(editingTask.sourceBookmark ?? null);
+      setSourceNetworkMount(editingTask.sourceNetworkMount ?? null);
+      setSourceNetworkPassword('');
       setTargetPath(editingTask.target || '');
       setTargetBookmark(editingTask.targetBookmark ?? null);
+      setTargetNetworkMount(editingTask.targetNetworkMount ?? null);
+      setTargetNetworkPassword('');
       setWatchMode(editingTask.watchMode || false);
       setAutoUnmount(shouldEnableAutoUnmount(editingTask));
       setSourceType(resolvedSourceType);
@@ -218,8 +234,12 @@ export function useSyncTaskFormController({
     setSelectedSets([]);
     setSourcePath('');
     setSourceBookmark(null);
+    setSourceNetworkMount(null);
+    setSourceNetworkPassword('');
     setTargetPath('');
     setTargetBookmark(null);
+    setTargetNetworkMount(null);
+    setTargetNetworkPassword('');
     setWatchMode(false);
     setAutoUnmount(false);
     setSourceType('path');
@@ -342,12 +362,17 @@ export function useSyncTaskFormController({
 
         if (selected && typeof selected === 'string') {
           const captured = await capturePathAccess(selected);
+          const networkMount = await captureNetworkMount(captured.path);
           if (type === 'source') {
             setSourcePath(captured.path);
             setSourceBookmark(captured.bookmark ?? null);
+            setSourceNetworkMount(networkMount);
+            setSourceNetworkPassword('');
           } else {
             setTargetPath(captured.path);
             setTargetBookmark(captured.bookmark ?? null);
+            setTargetNetworkMount(networkMount);
+            setTargetNetworkPassword('');
           }
         }
       } catch (error) {
@@ -422,10 +447,18 @@ export function useSyncTaskFormController({
     setSourcePath,
     sourceBookmark,
     setSourceBookmark,
+    sourceNetworkMount,
+    setSourceNetworkMount,
+    sourceNetworkPassword,
+    setSourceNetworkPassword,
     targetPath,
     setTargetPath,
     targetBookmark,
     setTargetBookmark,
+    targetNetworkMount,
+    setTargetNetworkMount,
+    targetNetworkPassword,
+    setTargetNetworkPassword,
     watchMode,
     handleWatchModeChange,
     autoUnmount,

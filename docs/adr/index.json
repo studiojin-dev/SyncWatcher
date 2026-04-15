@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260414-0027-NMT",
+    "title": "SyncTask SMB auto-mount and Keychain credentials",
+    "tags": [
+      "sync-task",
+      "smb",
+      "network-mount",
+      "keychain",
+      "macos",
+      "tauri",
+      "sandbox"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-14",
+    "tldr": "Persist SMB remount metadata on SyncTasks, store passwords only in macOS Keychain, and attempt SMB auto-mount before sync and dry-run when a configured network path is not currently mounted.",
+    "path": "docs/adr/ADR-20260414-0027-NMT-sync-task-smb-auto-mount-and-keychain-credentials.md"
+  },
+  {
     "id": "ADR-20260412-0026-ACL",
     "title": "Inline dialogs and native OS surfaces",
     "tags": [

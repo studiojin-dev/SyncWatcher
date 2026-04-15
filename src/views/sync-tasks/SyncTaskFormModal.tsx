@@ -105,6 +105,8 @@ function SyncTaskFormModal({
                   onChange={(event) => {
                     form.setSourcePath(event.target.value);
                     form.setSourceBookmark(null);
+                    form.setSourceNetworkMount(null);
+                    form.setSourceNetworkPassword('');
                   }}
                   required={form.sourceType === 'path'}
                   disabled={savingTask}
@@ -122,6 +124,42 @@ function SyncTaskFormModal({
                 >
                   <IconFolder size={18} />
                 </button>
+              </div>
+            ) : null}
+
+            {form.sourceType === 'path' && form.sourceNetworkMount?.enabled ? (
+              <div className="mt-2 space-y-2 border-l-2 border-[var(--accent-main)] pl-3">
+                <div className="text-xs font-mono text-[var(--text-secondary)]">
+                  {t('syncTasks.smbAutoMountEnabled', {
+                    defaultValue: 'SMB auto-mount enabled',
+                  })}
+                </div>
+                <input
+                  value={form.sourceNetworkMount.username ?? ''}
+                  onChange={(event) =>
+                    form.setSourceNetworkMount({
+                      ...form.sourceNetworkMount!,
+                      username: event.target.value || null,
+                    })
+                  }
+                  disabled={savingTask}
+                  className="neo-input font-mono text-sm"
+                  placeholder={t('syncTasks.smbUsernamePlaceholder', {
+                    defaultValue: 'SMB username',
+                  })}
+                />
+                <input
+                  type="password"
+                  value={form.sourceNetworkPassword}
+                  onChange={(event) =>
+                    form.setSourceNetworkPassword(event.target.value)
+                  }
+                  disabled={savingTask}
+                  className="neo-input font-mono text-sm"
+                  placeholder={t('syncTasks.smbPasswordPlaceholder', {
+                    defaultValue: 'Password (optional, stored in Keychain)',
+                  })}
+                />
               </div>
             ) : null}
 
@@ -226,6 +264,8 @@ function SyncTaskFormModal({
                 onChange={(event) => {
                   form.setTargetPath(event.target.value);
                   form.setTargetBookmark(null);
+                  form.setTargetNetworkMount(null);
+                  form.setTargetNetworkPassword('');
                 }}
                 required
                 disabled={savingTask}
@@ -244,6 +284,41 @@ function SyncTaskFormModal({
                 <IconFolder size={18} />
               </button>
             </div>
+            {form.targetNetworkMount?.enabled ? (
+              <div className="mt-2 space-y-2 border-l-2 border-[var(--accent-main)] pl-3">
+                <div className="text-xs font-mono text-[var(--text-secondary)]">
+                  {t('syncTasks.smbAutoMountEnabled', {
+                    defaultValue: 'SMB auto-mount enabled',
+                  })}
+                </div>
+                <input
+                  value={form.targetNetworkMount.username ?? ''}
+                  onChange={(event) =>
+                    form.setTargetNetworkMount({
+                      ...form.targetNetworkMount!,
+                      username: event.target.value || null,
+                    })
+                  }
+                  disabled={savingTask}
+                  className="neo-input font-mono text-sm"
+                  placeholder={t('syncTasks.smbUsernamePlaceholder', {
+                    defaultValue: 'SMB username',
+                  })}
+                />
+                <input
+                  type="password"
+                  value={form.targetNetworkPassword}
+                  onChange={(event) =>
+                    form.setTargetNetworkPassword(event.target.value)
+                  }
+                  disabled={savingTask}
+                  className="neo-input font-mono text-sm"
+                  placeholder={t('syncTasks.smbPasswordPlaceholder', {
+                    defaultValue: 'Password (optional, stored in Keychain)',
+                  })}
+                />
+              </div>
+            ) : null}
           </div>
           <div className="space-y-3 py-2">
             <label className="flex items-center gap-2 cursor-pointer select-none">

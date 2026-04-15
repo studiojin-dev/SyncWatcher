@@ -48,6 +48,29 @@ pub struct BookmarkResolveResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkMountCaptureResult {
+    pub scheme: String,
+    pub remount_url: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    pub mount_root_path: String,
+    pub relative_path_from_mount_root: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkMountExecutionResult {
+    pub mount_path: String,
+    #[serde(default)]
+    pub error_kind: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn syncwatcher_storekit_get_supporter_status(product_id: *const c_char) -> *mut c_char;
@@ -55,6 +78,11 @@ unsafe extern "C" {
     fn syncwatcher_storekit_restore_supporter(product_id: *const c_char) -> *mut c_char;
     fn syncwatcher_create_security_scoped_bookmark(path: *const c_char) -> *mut c_char;
     fn syncwatcher_resolve_security_scoped_bookmark(bookmark: *const c_char) -> *mut c_char;
+    fn syncwatcher_capture_network_mount(path: *const c_char) -> *mut c_char;
+    fn syncwatcher_mount_network_share(payload: *const c_char) -> *mut c_char;
+    fn syncwatcher_store_keychain_secret(payload: *const c_char) -> *mut c_char;
+    fn syncwatcher_read_keychain_secret(payload: *const c_char) -> *mut c_char;
+    fn syncwatcher_delete_keychain_secret(payload: *const c_char) -> *mut c_char;
     fn syncwatcher_free_bridge_string(value: *mut c_char);
 }
 
@@ -152,6 +180,99 @@ pub fn resolve_security_scoped_bookmark(bookmark: &str) -> Result<BookmarkResolv
     })?;
     serde_json::from_str(&response)
         .map_err(|error| format!("Failed to decode bookmark resolve result: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+pub fn capture_network_mount(path: &str) -> Result<NetworkMountCaptureResult, String> {
+    let response = call_string_bridge(path, |value| unsafe {
+        syncwatcher_capture_network_mount(value)
+    })?;
+    let payload: NetworkMountCaptureResult = serde_json::from_str(&response)
+        .map_err(|error| format!("Failed to decode network mount capture result: {error}"))?;
+    if let Some(error) = payload.error.clone() {
+        return Err(error);
+    }
+    Ok(payload)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn capture_network_mount(_path: &str) -> Result<NetworkMountCaptureResult, String> {
+    Err("Network mount capture is only available on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+pub fn mount_network_share(payload_json: &str) -> Result<NetworkMountExecutionResult, String> {
+    let response = call_string_bridge(payload_json, |value| unsafe {
+        syncwatcher_mount_network_share(value)
+    })?;
+    let payload: NetworkMountExecutionResult = serde_json::from_str(&response)
+        .map_err(|error| format!("Failed to decode network mount execution result: {error}"))?;
+    if let Some(error) = payload.error.clone() {
+        return Err(error);
+    }
+    Ok(payload)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn mount_network_share(_payload_json: &str) -> Result<NetworkMountExecutionResult, String> {
+    Err("Network share mounting is only available on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+pub fn store_keychain_secret(payload_json: &str) -> Result<(), String> {
+    let response = call_string_bridge(payload_json, |value| unsafe {
+        syncwatcher_store_keychain_secret(value)
+    })?;
+    let payload: serde_json::Value = serde_json::from_str(&response)
+        .map_err(|error| format!("Failed to decode keychain store result: {error}"))?;
+    if let Some(error) = payload.get("error").and_then(|value| value.as_str()) {
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn store_keychain_secret(_payload_json: &str) -> Result<(), String> {
+    Err("Keychain secret storage is only available on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+pub fn read_keychain_secret(payload_json: &str) -> Result<Option<String>, String> {
+    let response = call_string_bridge(payload_json, |value| unsafe {
+        syncwatcher_read_keychain_secret(value)
+    })?;
+    let payload: serde_json::Value = serde_json::from_str(&response)
+        .map_err(|error| format!("Failed to decode keychain read result: {error}"))?;
+    if let Some(error) = payload.get("error").and_then(|value| value.as_str()) {
+        return Err(error.to_string());
+    }
+    Ok(payload
+        .get("secret")
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn read_keychain_secret(_payload_json: &str) -> Result<Option<String>, String> {
+    Err("Keychain secret storage is only available on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+pub fn delete_keychain_secret(payload_json: &str) -> Result<(), String> {
+    let response = call_string_bridge(payload_json, |value| unsafe {
+        syncwatcher_delete_keychain_secret(value)
+    })?;
+    let payload: serde_json::Value = serde_json::from_str(&response)
+        .map_err(|error| format!("Failed to decode keychain delete result: {error}"))?;
+    if let Some(error) = payload.get("error").and_then(|value| value.as_str()) {
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn delete_keychain_secret(_payload_json: &str) -> Result<(), String> {
+    Err("Keychain secret storage is only available on macOS".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]

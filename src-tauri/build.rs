@@ -67,6 +67,8 @@ fn build_macos_bridge() {
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=syncwatcher_macos_bridge");
     println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=NetFS");
+    println!("cargo:rustc-link-lib=framework=Security");
     println!("cargo:rustc-link-lib=framework=StoreKit");
     for runtime_path in swift_runtime_library_paths {
         println!("cargo:rustc-link-search=native={runtime_path}");

@@ -9,6 +9,7 @@ pub mod license_validation;
 pub mod logging;
 pub mod mcp_jobs;
 pub mod mcp_stdio;
+pub mod network_mount;
 pub mod path_validation;
 pub mod recurring;
 pub mod security_scoped;
@@ -50,8 +51,9 @@ use config_store::{
     default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
     AppSettings, ConfigStore, ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope,
     ExclusionSetEnvelope, ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch,
-    NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord,
-    SyncTasksEnvelope, UpdateSettingsPayload, UpdateSyncTaskRequest,
+    NetworkMountRecord, NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot,
+    SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope, UpdateSettingsPayload,
+    UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
@@ -59,6 +61,7 @@ use license::generate_licenses_report;
 use logging::LogManager;
 use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
 use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
+use network_mount::{NetworkMountCapturePayload, NetworkMountRole};
 use recurring::{
     next_scheduled_fire_at, supported_timezone_names, validate_guided_preset_compatible_schedules,
     validate_strict_recurring_schedule_ids, RecurringScheduleHistoryDetailEntry,
@@ -1067,6 +1070,19 @@ fn normalize_sync_task_record(mut task: SyncTaskRecord) -> SyncTaskRecord {
         && task.watch_mode
         && is_uuid_source(&task.source, task.source_type.clone());
     task
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkCredentialPayload {
+    password: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeychainCredentialAction {
+    KeepExisting,
+    DeleteExisting,
+    StoreNew,
 }
 
 fn to_runtime_task_record(task: &SyncTaskRecord) -> RuntimeSyncTask {
@@ -2259,6 +2275,77 @@ fn resolve_path_with_uuid(path_str: &str) -> Result<PathBuf, String> {
             uuid
         )),
     }
+}
+
+fn ensure_task_requested_path_available(
+    task_id: &str,
+    requested_path: &Path,
+    network_mount: Option<&NetworkMountRecord>,
+    role: NetworkMountRole,
+    allow_missing_without_mount: bool,
+) -> Result<PathBuf, String> {
+    let requested_str = requested_path.to_string_lossy();
+    if has_uuid_source_prefix(&requested_str) {
+        return resolve_path_with_uuid(&requested_str);
+    }
+
+    if requested_path.exists() {
+        return Ok(requested_path.to_path_buf());
+    }
+
+    if let Some(network_mount) = network_mount {
+        return network_mount::ensure_mount_available(task_id, role, network_mount, true);
+    }
+
+    if allow_missing_without_mount {
+        return Ok(requested_path.to_path_buf());
+    }
+
+    Err(format!("Path does not exist: {}", requested_path.display()))
+}
+
+async fn ensure_task_paths_available(
+    task_id: &str,
+    requested_source: &Path,
+    requested_target: &Path,
+    state: &AppState,
+) -> Result<(PathBuf, PathBuf), String> {
+    let task = match load_sync_task_by_id(task_id, state).await {
+        Ok(task) => task,
+        Err(error) if error.contains("Sync task not found:") => {
+            let source = ensure_task_requested_path_available(
+                task_id,
+                requested_source,
+                None,
+                NetworkMountRole::Source,
+                false,
+            )?;
+            let target = ensure_task_requested_path_available(
+                task_id,
+                requested_target,
+                None,
+                NetworkMountRole::Target,
+                true,
+            )?;
+            return Ok((source, target));
+        }
+        Err(error) => return Err(error),
+    };
+    let source = ensure_task_requested_path_available(
+        task_id,
+        requested_source,
+        task.source_network_mount.as_ref(),
+        NetworkMountRole::Source,
+        false,
+    )?;
+    let target = ensure_task_requested_path_available(
+        task_id,
+        requested_target,
+        task.target_network_mount.as_ref(),
+        NetworkMountRole::Target,
+        true,
+    )?;
+    Ok((source, target))
 }
 
 #[derive(
@@ -4458,6 +4545,14 @@ async fn activate_task_path_access(task_id: &str, state: &AppState) -> Result<()
     )
 }
 
+async fn maybe_activate_task_path_access(task_id: &str, state: &AppState) -> Result<(), String> {
+    match activate_task_path_access(task_id, state).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.contains("Sync task not found:") => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 async fn load_canonical_config(
     state: &AppState,
 ) -> Result<(AppSettings, Vec<SyncTaskRecord>, Vec<ExclusionSetRecord>), String> {
@@ -4757,14 +4852,11 @@ async fn execute_sync_internal(
     let sync_result = async {
         let requested_source = source.to_string_lossy().to_string();
         let requested_target = target.to_string_lossy().to_string();
-        activate_task_path_access(&task_id, &state)
+        maybe_activate_task_path_access(&task_id, &state)
             .await
             .map_err(SyncExecutionFailure::new)?;
-        let source = resolve_path_with_uuid(source.to_str().unwrap_or(""))
-            .map_err(|e| e.to_string())
-            .map_err(SyncExecutionFailure::new)?;
-        let target = resolve_path_with_uuid(target.to_str().unwrap_or(""))
-            .map_err(|e| e.to_string())
+        let (source, target) = ensure_task_paths_available(&task_id, &source, &target, &state)
+            .await
             .map_err(SyncExecutionFailure::new)?;
         ensure_non_overlapping_paths(&source, &target).map_err(SyncExecutionFailure::new)?;
 
@@ -5728,6 +5820,11 @@ async fn capture_path_access(
 }
 
 #[tauri::command]
+async fn capture_network_mount(path: String) -> Result<Option<NetworkMountCapturePayload>, String> {
+    network_mount::capture_from_path(&path)
+}
+
+#[tauri::command]
 async fn import_legacy_channel_data(app: tauri::AppHandle) -> Result<LegacyImportStatus, String> {
     let result = security_scoped::import_legacy_channel_data(&app)?;
     if result.imported {
@@ -6013,10 +6110,9 @@ async fn sync_dry_run_internal(
     let requested_target = target.to_string_lossy().to_string();
 
     let result: Result<DryRunResult, String> = async {
-        let source =
-            resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-        let target =
-            resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        maybe_activate_task_path_access(&task_id, state).await?;
+        let (source, target) =
+            ensure_task_paths_available(&task_id, &source, &target, state).await?;
         ensure_non_overlapping_paths(&source, &target)?;
 
         input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -7320,10 +7416,19 @@ async fn get_sync_task(
 #[tauri::command]
 async fn create_sync_task(
     task: SyncTaskRecord,
+    source_credential: Option<NetworkCredentialPayload>,
+    target_credential: Option<NetworkCredentialPayload>,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncTaskEnvelope, String> {
-    let task = create_sync_task_internal(task, Some(&app), state.inner()).await?;
+    let task = create_sync_task_internal(
+        task,
+        source_credential,
+        target_credential,
+        Some(&app),
+        state.inner(),
+    )
+    .await?;
     Ok(SyncTaskEnvelope { task })
 }
 
@@ -7333,8 +7438,12 @@ struct SyncTaskUpdatePayload {
     name: Option<String>,
     source: Option<String>,
     source_bookmark: Option<String>,
+    source_network_mount: Option<NetworkMountRecord>,
+    source_credential: Option<NetworkCredentialPayload>,
     target: Option<String>,
     target_bookmark: Option<String>,
+    target_network_mount: Option<NetworkMountRecord>,
+    target_credential: Option<NetworkCredentialPayload>,
     checksum_mode: Option<bool>,
     verify_after_copy: Option<bool>,
     exclusion_sets: Option<Vec<String>>,
@@ -7361,8 +7470,10 @@ async fn update_sync_task(
             name: updates.name,
             source: updates.source,
             source_bookmark: updates.source_bookmark,
+            source_network_mount: updates.source_network_mount,
             target: updates.target,
             target_bookmark: updates.target_bookmark,
+            target_network_mount: updates.target_network_mount,
             checksum_mode: updates.checksum_mode,
             verify_after_copy: updates.verify_after_copy,
             exclusion_sets: updates.exclusion_sets,
@@ -7375,6 +7486,8 @@ async fn update_sync_task(
             source_identity: updates.source_identity,
             recurring_schedules: updates.recurring_schedules,
         },
+        updates.source_credential,
+        updates.target_credential,
         app,
         state.inner(),
     )
@@ -8004,7 +8117,9 @@ async fn handle_control_plane_request(
                         .map_err(config_store_error_to_string);
                     match task {
                         Ok(task) => {
-                            match create_sync_task_internal(task, Some(&app), &state).await {
+                            match create_sync_task_internal(task, None, None, Some(&app), &state)
+                                .await
+                            {
                                 Ok(task) => Ok(serde_json::json!({ "task": task })),
                                 Err(error) => Err(error),
                             }
@@ -8019,7 +8134,9 @@ async fn handle_control_plane_request(
             let update = serde_json::from_value::<UpdateSyncTaskRequest>(request.params.clone())
                 .map_err(|error| format!("Invalid sync task payload: {error}"));
             match update {
-                Ok(update) => match patch_sync_task_internal(update, app.clone(), &state).await {
+                Ok(update) => match patch_sync_task_internal(update, None, None, app.clone(), &state)
+                    .await
+                {
                     Ok(task) => Ok(serde_json::json!({ "task": task })),
                     Err(error) => Err(error),
                 },
@@ -8149,6 +8266,8 @@ async fn get_sync_task_internal_json(
 
 async fn create_sync_task_internal(
     task: SyncTaskRecord,
+    source_credential: Option<NetworkCredentialPayload>,
+    target_credential: Option<NetworkCredentialPayload>,
     app: Option<&tauri::AppHandle>,
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
@@ -8173,10 +8292,29 @@ async fn create_sync_task_internal(
     }
     tasks.push(task.clone());
     validate_sync_task_records(&tasks)?;
+    let previous_tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
     state
         .config_store
         .save_tasks(&tasks)
         .map_err(config_store_error_to_string)?;
+    if let Err(error) = sync_network_mount_credentials(
+        &task.id,
+        None,
+        &task,
+        source_credential,
+        target_credential,
+    ) {
+        if let Err(rollback_error) = state.config_store.save_tasks(&previous_tasks) {
+            return Err(format!(
+                "{error}; task persistence rolled back failed: {}",
+                config_store_error_to_string(rollback_error)
+            ));
+        }
+        return Err(error);
+    }
     if let Some(app) = app {
         emit_config_store_changed(app, &["syncTasks"]);
         let _ = apply_canonical_config_to_runtime(app.clone(), state.clone()).await?;
@@ -8272,12 +8410,97 @@ fn persist_patched_sync_task_and_collect_history_warnings(
     ))
 }
 
+fn sync_network_mount_credentials(
+    task_id: &str,
+    previous_task: Option<&SyncTaskRecord>,
+    next_task: &SyncTaskRecord,
+    source_credential: Option<NetworkCredentialPayload>,
+    target_credential: Option<NetworkCredentialPayload>,
+) -> Result<(), String> {
+    sync_network_mount_credential(
+        task_id,
+        NetworkMountRole::Source,
+        previous_task.and_then(|task| task.source_network_mount.as_ref()),
+        next_task.source_network_mount.as_ref(),
+        source_credential,
+    )?;
+    sync_network_mount_credential(
+        task_id,
+        NetworkMountRole::Target,
+        previous_task.and_then(|task| task.target_network_mount.as_ref()),
+        next_task.target_network_mount.as_ref(),
+        target_credential,
+    )?;
+    Ok(())
+}
+
+fn plan_keychain_credential_action<'a>(
+    previous_mount: Option<&NetworkMountRecord>,
+    next_mount: Option<&NetworkMountRecord>,
+    credential: Option<&'a NetworkCredentialPayload>,
+) -> (KeychainCredentialAction, Option<&'a str>) {
+    if next_mount.is_none() {
+        return if previous_mount.is_some() {
+            (KeychainCredentialAction::DeleteExisting, None)
+        } else {
+            (KeychainCredentialAction::KeepExisting, None)
+        };
+    }
+
+    let password = credential.and_then(|payload| payload.password.as_deref());
+    if let Some(password) = password {
+        if !password.is_empty() {
+            return (KeychainCredentialAction::StoreNew, Some(password));
+        }
+    }
+
+    (KeychainCredentialAction::KeepExisting, None)
+}
+
+fn sync_network_mount_credential(
+    task_id: &str,
+    role: NetworkMountRole,
+    previous_mount: Option<&NetworkMountRecord>,
+    next_mount: Option<&NetworkMountRecord>,
+    credential: Option<NetworkCredentialPayload>,
+) -> Result<(), String> {
+    let (action, password) =
+        plan_keychain_credential_action(previous_mount, next_mount, credential.as_ref());
+    match action {
+        KeychainCredentialAction::KeepExisting => Ok(()),
+        KeychainCredentialAction::DeleteExisting => network_mount::delete_password(task_id, role),
+        KeychainCredentialAction::StoreNew => network_mount::store_password(task_id, role, password),
+    }
+}
+
 async fn patch_sync_task_internal(
     update: UpdateSyncTaskRequest,
+    source_credential: Option<NetworkCredentialPayload>,
+    target_credential: Option<NetworkCredentialPayload>,
     app: tauri::AppHandle,
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
+    let previous_task = load_sync_task_by_id(&update.task_id, state).await?;
+    let previous_tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
     let (task, warnings) = persist_patched_sync_task_and_collect_history_warnings(update, state)?;
+    if let Err(error) = sync_network_mount_credentials(
+        &task.id,
+        Some(&previous_task),
+        &task,
+        source_credential,
+        target_credential,
+    ) {
+        if let Err(rollback_error) = state.config_store.save_tasks(&previous_tasks) {
+            return Err(format!(
+                "{error}; task persistence rolled back failed: {}",
+                config_store_error_to_string(rollback_error)
+            ));
+        }
+        return Err(error);
+    }
     clear_dry_run_artifact(&task.id, state).await;
     for message in warnings {
         state.log_manager.log_with_category_and_event(
@@ -8307,6 +8530,8 @@ async fn delete_sync_task_internal(
     tasks.retain(|task| task.id != task_id);
     let deleted = tasks.len() != before_len;
     if deleted {
+        let _ = network_mount::delete_password(&task_id, NetworkMountRole::Source);
+        let _ = network_mount::delete_password(&task_id, NetworkMountRole::Target);
         state
             .config_store
             .save_tasks(&tasks)
@@ -9064,6 +9289,7 @@ pub fn run() {
             purchase_lifetime_supporter,
             restore_lifetime_supporter,
             capture_path_access,
+            capture_network_mount,
             import_legacy_channel_data,
             check_app_store_update,
             set_launch_at_login,

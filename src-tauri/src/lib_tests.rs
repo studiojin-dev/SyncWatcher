@@ -2,7 +2,8 @@
 mod integration_tests {
     use crate::config_store::{
         apply_sync_task_update, launch_at_login_status_or_default, ConfigStore,
-        SourceIdentitySnapshot, SourceType, SourceUuidType, SyncTaskRecord, UpdateSyncTaskRequest,
+        NetworkMountRecord, NetworkMountScheme, SourceIdentitySnapshot, SourceType,
+        SourceUuidType, SyncTaskRecord, UpdateSyncTaskRequest,
     };
     use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
@@ -46,6 +47,7 @@ mod integration_tests {
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_dry_run_artifact,
         validate_runtime_tasks, volume_watch_next_tick_delay, AppState, CancelOperationType,
+        KeychainCredentialAction,
         ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
         ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
         RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
@@ -85,6 +87,17 @@ mod integration_tests {
             auto_unmount: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
+        }
+    }
+
+    fn build_network_mount() -> NetworkMountRecord {
+        NetworkMountRecord {
+            scheme: NetworkMountScheme::Smb,
+            remount_url: "smb://nas.local/share".to_string(),
+            username: Some("backup-user".to_string()),
+            mount_root_path: "/Volumes/share".to_string(),
+            relative_path_from_mount_root: ".".to_string(),
+            enabled: true,
         }
     }
 
@@ -153,7 +166,9 @@ mod integration_tests {
             ),
             target: "/tmp/target".to_string(),
             source_bookmark: None,
+            source_network_mount: None,
             target_bookmark: None,
+            target_network_mount: None,
             checksum_mode: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
@@ -536,7 +551,9 @@ mod integration_tests {
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
                 source_bookmark: None,
+                source_network_mount: None,
                 target_bookmark: None,
+                target_network_mount: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -556,6 +573,8 @@ mod integration_tests {
                     retention_count: 20,
                 }],
             },
+            None,
+            None,
             None,
             &state,
         )
@@ -582,7 +601,9 @@ mod integration_tests {
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
                 source_bookmark: None,
+                source_network_mount: None,
                 target_bookmark: None,
+                target_network_mount: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -602,6 +623,8 @@ mod integration_tests {
                     retention_count: 20,
                 }],
             },
+            None,
+            None,
             None,
             &state,
         )
@@ -628,7 +651,9 @@ mod integration_tests {
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
                 source_bookmark: Some(String::new()),
+                source_network_mount: None,
                 target_bookmark: Some("   ".to_string()),
+                target_network_mount: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -641,6 +666,8 @@ mod integration_tests {
                 source_identity: None,
                 recurring_schedules: Vec::new(),
             },
+            None,
+            None,
             None,
             &state,
         )
@@ -660,6 +687,48 @@ mod integration_tests {
     }
 
     #[test]
+    fn test_plan_keychain_credential_action_keeps_existing_for_blank_password() {
+        let mount = build_network_mount();
+        let credential = crate::NetworkCredentialPayload {
+            password: Some(String::new()),
+        };
+        let (action, password) = crate::plan_keychain_credential_action(
+            Some(&mount),
+            Some(&mount),
+            Some(&credential),
+        );
+
+        assert_eq!(action, KeychainCredentialAction::KeepExisting);
+        assert_eq!(password, None);
+    }
+
+    #[test]
+    fn test_plan_keychain_credential_action_deletes_only_when_mount_removed() {
+        let mount = build_network_mount();
+        let (action, password) =
+            crate::plan_keychain_credential_action(Some(&mount), None, None);
+
+        assert_eq!(action, KeychainCredentialAction::DeleteExisting);
+        assert_eq!(password, None);
+    }
+
+    #[test]
+    fn test_plan_keychain_credential_action_stores_new_password_when_provided() {
+        let mount = build_network_mount();
+        let credential = crate::NetworkCredentialPayload {
+            password: Some("secret".to_string()),
+        };
+        let (action, password) = crate::plan_keychain_credential_action(
+            Some(&mount),
+            Some(&mount),
+            Some(&credential),
+        );
+
+        assert_eq!(action, KeychainCredentialAction::StoreNew);
+        assert_eq!(password, Some("secret"));
+    }
+
+    #[test]
     fn test_persist_patched_sync_task_keeps_save_when_history_maintenance_fails() {
         let state = build_app_state();
 
@@ -671,7 +740,9 @@ mod integration_tests {
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
                 source_bookmark: None,
+                source_network_mount: None,
                 target_bookmark: None,
+                target_network_mount: None,
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -1739,7 +1810,9 @@ mod integration_tests {
                     source: "/src/a".to_string(),
                     target: "/dst/shared".to_string(),
                     source_bookmark: None,
+                    source_network_mount: None,
                     target_bookmark: None,
+                    target_network_mount: None,
                     checksum_mode: false,
                     verify_after_copy: true,
                     exclusion_sets: Vec::new(),
@@ -1758,7 +1831,9 @@ mod integration_tests {
                     source: "/src/b".to_string(),
                     target: "/dst/shared".to_string(),
                     source_bookmark: None,
+                    source_network_mount: None,
                     target_bookmark: None,
+                    target_network_mount: None,
                     checksum_mode: false,
                     verify_after_copy: true,
                     exclusion_sets: Vec::new(),

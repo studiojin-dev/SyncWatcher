@@ -165,12 +165,15 @@ describe('useSyncTasks', () => {
             });
         });
 
-        expect(mockInvoke).toHaveBeenCalledWith('update_sync_task', {
-            id: createdTaskId,
-            updates: {
-                watchMode: true,
-            },
-        });
+        expect(mockInvoke).toHaveBeenCalledWith(
+            'update_sync_task',
+            expect.objectContaining({
+                id: createdTaskId,
+                updates: {
+                    watchMode: true,
+                },
+            })
+        );
         expect(result.current.tasks[0]?.watchMode).toBe(true);
 
         await act(async () => {
@@ -181,6 +184,51 @@ describe('useSyncTasks', () => {
             id: createdTaskId,
         });
         expect(result.current.tasks).toHaveLength(0);
+    });
+
+    it('forwards network mount credentials without keeping them in local task state', async () => {
+        mockInvoke.mockImplementation(async (command: string) => {
+            if (command === 'list_sync_tasks') {
+                return { syncTasks: [] };
+            }
+            return undefined;
+        });
+
+        const { result } = renderHook(() => useSyncTasks());
+
+        await waitFor(() => {
+            expect(result.current.loaded).toBe(true);
+        });
+
+        await act(async () => {
+            await result.current.addTask({
+                name: 'NAS Backup',
+                source: '/Volumes/NAS/source',
+                sourceNetworkMount: {
+                    scheme: 'smb',
+                    remountUrl: 'smb://nas.local/source',
+                    username: 'backup-user',
+                    mountRootPath: '/Volumes/source',
+                    relativePathFromMountRoot: '.',
+                    enabled: true,
+                },
+                sourceCredential: {
+                    password: 'secret',
+                },
+                target: '/tmp/backup',
+                checksumMode: false,
+            });
+        });
+
+        expect(mockInvoke).toHaveBeenCalledWith(
+            'create_sync_task',
+            expect.objectContaining({
+                sourceCredential: {
+                    password: 'secret',
+                },
+            })
+        );
+        expect(result.current.tasks[0]).not.toHaveProperty('sourceCredential');
     });
 
     it('keeps the newest overlapping update result when responses resolve out of order', async () => {
@@ -685,12 +733,15 @@ describe('useSyncTasks', () => {
             });
         });
 
-        expect(mockInvoke).toHaveBeenCalledWith('update_sync_task', {
-            id: 'task-1',
-            updates: {
-                name: 'Photos renamed',
-            },
-        });
+        expect(mockInvoke).toHaveBeenCalledWith(
+            'update_sync_task',
+            expect.objectContaining({
+                id: 'task-1',
+                updates: {
+                    name: 'Photos renamed',
+                },
+            })
+        );
         expect(result.current.tasks[0]?.recurringSchedules).toEqual([
             expect.objectContaining({
                 id: 'schedule-1',
