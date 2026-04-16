@@ -7,6 +7,10 @@ mod integration_tests {
     };
     use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
+    use crate::network_mount::{
+        test_fail_next_delete, test_fail_next_store, test_get_secret, test_put_secret,
+        test_reset_keychain,
+    };
     use crate::recurring::{
         RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus,
         RecurringScheduleHistoryStore, RecurringScheduleRecord,
@@ -47,7 +51,8 @@ mod integration_tests {
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_dry_run_artifact,
         validate_runtime_tasks, volume_watch_next_tick_delay, AppState, CancelOperationType,
-        KeychainCredentialAction,
+        KeychainCredentialAction, delete_sync_task_internal_core,
+        patch_sync_task_internal_core,
         ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
         ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
         RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
@@ -59,7 +64,7 @@ mod integration_tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc::{sync_channel, Receiver};
-    use std::sync::{Arc, Mutex as StdMutex};
+    use std::sync::{Arc, Mutex as StdMutex, OnceLock};
     use std::time::{Duration, Instant};
     use tauri::Listener;
     use tempfile::tempdir;
@@ -67,6 +72,14 @@ mod integration_tests {
     use tokio_util::sync::CancellationToken;
 
     static TEMP_CONFIG_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn keychain_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<StdMutex<()>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| StdMutex::new(()))
+            .lock()
+            .expect("keychain test guard should lock")
+    }
 
     fn temp_config_dir() -> PathBuf {
         let seq = TEMP_CONFIG_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -726,6 +739,155 @@ mod integration_tests {
 
         assert_eq!(action, KeychainCredentialAction::StoreNew);
         assert_eq!(password, Some("secret"));
+    }
+
+    #[test]
+    fn test_plan_keychain_credential_action_keeps_existing_for_metadata_only_change() {
+        let previous_mount = build_network_mount();
+        let mut next_mount = build_network_mount();
+        next_mount.relative_path_from_mount_root = "photos/raw".to_string();
+        next_mount.username = Some("different-user".to_string());
+
+        let (action, password) =
+            crate::plan_keychain_credential_action(Some(&previous_mount), Some(&next_mount), None);
+
+        assert_eq!(action, KeychainCredentialAction::KeepExisting);
+        assert_eq!(password, None);
+    }
+
+    #[tokio::test]
+    async fn test_patch_sync_task_internal_rolls_back_keychain_when_second_secret_store_fails() {
+        let _guard = keychain_test_guard();
+        test_reset_keychain();
+        let state = build_app_state();
+        let existing_mount = build_network_mount();
+        let existing_task = SyncTaskRecord {
+            id: "task-network-update".to_string(),
+            name: "Task".to_string(),
+            source: "/Volumes/share/source".to_string(),
+            source_bookmark: None,
+            source_network_mount: Some(existing_mount.clone()),
+            target: "/Volumes/share/target".to_string(),
+            target_bookmark: None,
+            target_network_mount: Some(existing_mount.clone()),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        };
+        state
+            .config_store
+            .save_tasks(&[existing_task.clone()])
+            .expect("task should save");
+        test_put_secret(
+            "task-network-update",
+            crate::network_mount::NetworkMountRole::Source,
+            "old-source",
+        );
+        test_put_secret(
+            "task-network-update",
+            crate::network_mount::NetworkMountRole::Target,
+            "old-target",
+        );
+        test_fail_next_store("task-network-update", crate::network_mount::NetworkMountRole::Target);
+
+        let error = patch_sync_task_internal_core(
+            UpdateSyncTaskRequest {
+                task_id: "task-network-update".to_string(),
+                source_network_mount: Some(existing_mount.clone()),
+                target_network_mount: Some(existing_mount.clone()),
+                ..Default::default()
+            },
+            Some(crate::NetworkCredentialPayload {
+                password: Some("new-source".to_string()),
+            }),
+            Some(crate::NetworkCredentialPayload {
+                password: Some("new-target".to_string()),
+            }),
+            &state,
+        )
+        .await
+        .expect_err("update should fail");
+
+        assert!(error.contains("Injected keychain store failure"));
+        assert_eq!(
+            test_get_secret("task-network-update", crate::network_mount::NetworkMountRole::Source),
+            Some("old-source".to_string())
+        );
+        assert_eq!(
+            test_get_secret("task-network-update", crate::network_mount::NetworkMountRole::Target),
+            Some("old-target".to_string())
+        );
+        let tasks = state.config_store.load_tasks().expect("tasks should remain readable");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].source_network_mount, existing_task.source_network_mount);
+        assert_eq!(tasks[0].target_network_mount, existing_task.target_network_mount);
+    }
+
+    #[tokio::test]
+    async fn test_delete_sync_task_internal_rolls_back_config_and_keychain_when_secret_delete_fails() {
+        let _guard = keychain_test_guard();
+        test_reset_keychain();
+        let state = build_app_state();
+        let existing_task = SyncTaskRecord {
+            id: "task-network-delete".to_string(),
+            name: "Task".to_string(),
+            source: "/Volumes/share/source".to_string(),
+            source_bookmark: None,
+            source_network_mount: Some(build_network_mount()),
+            target: "/Volumes/share/target".to_string(),
+            target_bookmark: None,
+            target_network_mount: Some(build_network_mount()),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        };
+        state
+            .config_store
+            .save_tasks(&[existing_task.clone()])
+            .expect("task should save");
+        test_put_secret(
+            "task-network-delete",
+            crate::network_mount::NetworkMountRole::Source,
+            "source-secret",
+        );
+        test_put_secret(
+            "task-network-delete",
+            crate::network_mount::NetworkMountRole::Target,
+            "target-secret",
+        );
+        test_fail_next_delete("task-network-delete", crate::network_mount::NetworkMountRole::Target);
+
+        let error =
+            delete_sync_task_internal_core("task-network-delete", &state).expect_err("delete should fail");
+
+        assert!(error.contains("Injected keychain delete failure"));
+        let tasks = state.config_store.load_tasks().expect("tasks should remain readable");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "task-network-delete");
+        assert_eq!(
+            test_get_secret("task-network-delete", crate::network_mount::NetworkMountRole::Source),
+            Some("source-secret".to_string())
+        );
+        assert_eq!(
+            test_get_secret("task-network-delete", crate::network_mount::NetworkMountRole::Target),
+            Some("target-secret".to_string())
+        );
     }
 
     #[test]

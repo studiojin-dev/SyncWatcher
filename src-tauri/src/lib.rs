@@ -1085,6 +1085,14 @@ enum KeychainCredentialAction {
     StoreNew,
 }
 
+#[derive(Debug, Clone)]
+struct KeychainCredentialOperation {
+    role: NetworkMountRole,
+    action: KeychainCredentialAction,
+    new_password: Option<String>,
+    previous_secret: Option<String>,
+}
+
 fn to_runtime_task_record(task: &SyncTaskRecord) -> RuntimeSyncTask {
     RuntimeSyncTask {
         id: task.id.clone(),
@@ -8292,21 +8300,23 @@ async fn create_sync_task_internal(
     }
     tasks.push(task.clone());
     validate_sync_task_records(&tasks)?;
-    let previous_tasks = state
-        .config_store
-        .load_tasks()
-        .map_err(config_store_error_to_string)?;
+    let previous_tasks = tasks
+        .iter()
+        .filter(|existing| existing.id != task.id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let keychain_operations = build_keychain_credential_operations(
+        &task.id,
+        None,
+        Some(&task),
+        source_credential,
+        target_credential,
+    )?;
     state
         .config_store
         .save_tasks(&tasks)
         .map_err(config_store_error_to_string)?;
-    if let Err(error) = sync_network_mount_credentials(
-        &task.id,
-        None,
-        &task,
-        source_credential,
-        target_credential,
-    ) {
+    if let Err(error) = apply_keychain_credential_operations(&task.id, &keychain_operations) {
         if let Err(rollback_error) = state.config_store.save_tasks(&previous_tasks) {
             return Err(format!(
                 "{error}; task persistence rolled back failed: {}",
@@ -8375,6 +8385,19 @@ fn persist_patched_sync_task_and_collect_history_warnings(
     update: UpdateSyncTaskRequest,
     state: &AppState,
 ) -> Result<(SyncTaskRecord, Vec<String>), String> {
+    let (task, warnings, tasks) = prepare_patched_sync_task_and_collect_history_warnings(update, state)?;
+    state
+        .config_store
+        .save_tasks(&tasks)
+        .map_err(config_store_error_to_string)?;
+
+    Ok((task, warnings))
+}
+
+fn prepare_patched_sync_task_and_collect_history_warnings(
+    update: UpdateSyncTaskRequest,
+    state: &AppState,
+) -> Result<(SyncTaskRecord, Vec<String>, Vec<SyncTaskRecord>), String> {
     input_validation::validate_task_id(&update.task_id).map_err(|e| e.to_string())?;
     let mut tasks = state
         .config_store
@@ -8399,39 +8422,40 @@ fn persist_patched_sync_task_and_collect_history_warnings(
     refresh_uuid_source_identity(&mut task, &current_volumes);
     tasks[index] = task.clone();
     validate_sync_task_records(&tasks)?;
-    state
-        .config_store
-        .save_tasks(&tasks)
-        .map_err(config_store_error_to_string)?;
-
     Ok((
         task.clone(),
         recurring_schedule_history_maintenance_failures(&task, &previous_schedule_ids, state),
+        tasks,
     ))
 }
 
-fn sync_network_mount_credentials(
+fn build_keychain_credential_operations(
     task_id: &str,
     previous_task: Option<&SyncTaskRecord>,
-    next_task: &SyncTaskRecord,
+    next_task: Option<&SyncTaskRecord>,
     source_credential: Option<NetworkCredentialPayload>,
     target_credential: Option<NetworkCredentialPayload>,
-) -> Result<(), String> {
-    sync_network_mount_credential(
+) -> Result<Vec<KeychainCredentialOperation>, String> {
+    let mut operations = Vec::new();
+    if let Some(operation) = build_keychain_credential_operation(
         task_id,
         NetworkMountRole::Source,
         previous_task.and_then(|task| task.source_network_mount.as_ref()),
-        next_task.source_network_mount.as_ref(),
+        next_task.and_then(|task| task.source_network_mount.as_ref()),
         source_credential,
-    )?;
-    sync_network_mount_credential(
+    )? {
+        operations.push(operation);
+    }
+    if let Some(operation) = build_keychain_credential_operation(
         task_id,
         NetworkMountRole::Target,
         previous_task.and_then(|task| task.target_network_mount.as_ref()),
-        next_task.target_network_mount.as_ref(),
+        next_task.and_then(|task| task.target_network_mount.as_ref()),
         target_credential,
-    )?;
-    Ok(())
+    )? {
+        operations.push(operation);
+    }
+    Ok(operations)
 }
 
 fn plan_keychain_credential_action<'a>(
@@ -8457,20 +8481,123 @@ fn plan_keychain_credential_action<'a>(
     (KeychainCredentialAction::KeepExisting, None)
 }
 
-fn sync_network_mount_credential(
+fn build_keychain_credential_operation(
     task_id: &str,
     role: NetworkMountRole,
     previous_mount: Option<&NetworkMountRecord>,
     next_mount: Option<&NetworkMountRecord>,
     credential: Option<NetworkCredentialPayload>,
-) -> Result<(), String> {
+) -> Result<Option<KeychainCredentialOperation>, String> {
     let (action, password) =
         plan_keychain_credential_action(previous_mount, next_mount, credential.as_ref());
-    match action {
-        KeychainCredentialAction::KeepExisting => Ok(()),
-        KeychainCredentialAction::DeleteExisting => network_mount::delete_password(task_id, role),
-        KeychainCredentialAction::StoreNew => network_mount::store_password(task_id, role, password),
+    if action == KeychainCredentialAction::KeepExisting {
+        return Ok(None);
     }
+
+    let previous_secret = network_mount::read_password(task_id, role)?;
+    Ok(Some(KeychainCredentialOperation {
+        role,
+        action,
+        new_password: password.map(ToString::to_string),
+        previous_secret,
+    }))
+}
+
+fn apply_keychain_credential_operation(
+    task_id: &str,
+    operation: &KeychainCredentialOperation,
+) -> Result<(), String> {
+    match operation.action {
+        KeychainCredentialAction::KeepExisting => Ok(()),
+        KeychainCredentialAction::DeleteExisting => {
+            network_mount::delete_password(task_id, operation.role)
+        }
+        KeychainCredentialAction::StoreNew => {
+            network_mount::store_password(task_id, operation.role, operation.new_password.as_deref())
+        }
+    }
+}
+
+fn rollback_keychain_credential_operation(
+    task_id: &str,
+    operation: &KeychainCredentialOperation,
+) -> Result<(), String> {
+    match operation.previous_secret.as_deref() {
+        Some(secret) => network_mount::store_password(task_id, operation.role, Some(secret)),
+        None => network_mount::delete_password(task_id, operation.role),
+    }
+}
+
+fn apply_keychain_credential_operations(
+    task_id: &str,
+    operations: &[KeychainCredentialOperation],
+) -> Result<(), String> {
+    let mut applied_indices: Vec<usize> = Vec::new();
+
+    for (index, operation) in operations.iter().enumerate() {
+        if let Err(error) = apply_keychain_credential_operation(task_id, operation) {
+            let mut rollback_failures = Vec::new();
+            for applied_index in applied_indices.into_iter().rev() {
+                if let Err(rollback_error) =
+                    rollback_keychain_credential_operation(task_id, &operations[applied_index])
+                {
+                    rollback_failures.push(format!(
+                        "{}: {}",
+                        operations[applied_index].role.as_str(),
+                        rollback_error
+                    ));
+                }
+            }
+
+            if rollback_failures.is_empty() {
+                return Err(error);
+            }
+
+            return Err(format!(
+                "{error}; keychain rollback failed: {}",
+                rollback_failures.join(", ")
+            ));
+        }
+        applied_indices.push(index);
+    }
+
+    Ok(())
+}
+
+async fn patch_sync_task_internal_core(
+    update: UpdateSyncTaskRequest,
+    source_credential: Option<NetworkCredentialPayload>,
+    target_credential: Option<NetworkCredentialPayload>,
+    state: &AppState,
+) -> Result<(SyncTaskRecord, Vec<String>), String> {
+    let previous_task = load_sync_task_by_id(&update.task_id, state).await?;
+    let previous_tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    let (task, warnings, next_tasks) =
+        prepare_patched_sync_task_and_collect_history_warnings(update, state)?;
+    let keychain_operations = build_keychain_credential_operations(
+        &task.id,
+        Some(&previous_task),
+        Some(&task),
+        source_credential,
+        target_credential,
+    )?;
+    state
+        .config_store
+        .save_tasks(&next_tasks)
+        .map_err(config_store_error_to_string)?;
+    if let Err(error) = apply_keychain_credential_operations(&task.id, &keychain_operations) {
+        if let Err(rollback_error) = state.config_store.save_tasks(&previous_tasks) {
+            return Err(format!(
+                "{error}; task persistence rolled back failed: {}",
+                config_store_error_to_string(rollback_error)
+            ));
+        }
+        return Err(error);
+    }
+    Ok((task, warnings))
 }
 
 async fn patch_sync_task_internal(
@@ -8480,27 +8607,8 @@ async fn patch_sync_task_internal(
     app: tauri::AppHandle,
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
-    let previous_task = load_sync_task_by_id(&update.task_id, state).await?;
-    let previous_tasks = state
-        .config_store
-        .load_tasks()
-        .map_err(config_store_error_to_string)?;
-    let (task, warnings) = persist_patched_sync_task_and_collect_history_warnings(update, state)?;
-    if let Err(error) = sync_network_mount_credentials(
-        &task.id,
-        Some(&previous_task),
-        &task,
-        source_credential,
-        target_credential,
-    ) {
-        if let Err(rollback_error) = state.config_store.save_tasks(&previous_tasks) {
-            return Err(format!(
-                "{error}; task persistence rolled back failed: {}",
-                config_store_error_to_string(rollback_error)
-            ));
-        }
-        return Err(error);
-    }
+    let (task, warnings) =
+        patch_sync_task_internal_core(update, source_credential, target_credential, state).await?;
     clear_dry_run_artifact(&task.id, state).await;
     for message in warnings {
         state.log_manager.log_with_category_and_event(
@@ -8516,26 +8624,49 @@ async fn patch_sync_task_internal(
     Ok(task)
 }
 
-async fn delete_sync_task_internal(
-    task_id: String,
-    app: tauri::AppHandle,
-    state: &AppState,
-) -> Result<bool, String> {
-    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+fn delete_sync_task_internal_core(task_id: &str, state: &AppState) -> Result<bool, String> {
+    input_validation::validate_task_id(task_id).map_err(|e| e.to_string())?;
     let mut tasks = state
         .config_store
         .load_tasks()
         .map_err(config_store_error_to_string)?;
     let before_len = tasks.len();
+    let previous_tasks = tasks.clone();
     tasks.retain(|task| task.id != task_id);
     let deleted = tasks.len() != before_len;
     if deleted {
-        let _ = network_mount::delete_password(&task_id, NetworkMountRole::Source);
-        let _ = network_mount::delete_password(&task_id, NetworkMountRole::Target);
+        let previous_task = previous_tasks.iter().find(|task| task.id == task_id).cloned();
+        let keychain_operations = build_keychain_credential_operations(
+            task_id,
+            previous_task.as_ref(),
+            None,
+            None,
+            None,
+        )?;
         state
             .config_store
             .save_tasks(&tasks)
             .map_err(config_store_error_to_string)?;
+        if let Err(error) = apply_keychain_credential_operations(task_id, &keychain_operations) {
+            if let Err(rollback_error) = state.config_store.save_tasks(&previous_tasks) {
+                return Err(format!(
+                    "{error}; task persistence rolled back failed: {}",
+                    config_store_error_to_string(rollback_error)
+                ));
+            }
+            return Err(error);
+        }
+    }
+    Ok(deleted)
+}
+
+async fn delete_sync_task_internal(
+    task_id: String,
+    app: tauri::AppHandle,
+    state: &AppState,
+) -> Result<bool, String> {
+    let deleted = delete_sync_task_internal_core(&task_id, state)?;
+    if deleted {
         clear_dry_run_artifact(&task_id, state).await;
         state
             .recurring_schedule_history_store

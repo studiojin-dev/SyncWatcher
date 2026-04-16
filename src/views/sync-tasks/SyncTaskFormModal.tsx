@@ -31,6 +31,9 @@ function SyncTaskFormModal({
     return null;
   }
 
+  const sourceNetworkMount = form.sourceNetworkMount;
+  const targetNetworkMount = form.targetNetworkMount;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
       <CardAnimation>
@@ -127,7 +130,7 @@ function SyncTaskFormModal({
               </div>
             ) : null}
 
-            {form.sourceType === 'path' && form.sourceNetworkMount?.enabled ? (
+            {form.sourceType === 'path' && sourceNetworkMount?.enabled ? (
               <div className="mt-2 space-y-2 border-l-2 border-[var(--accent-main)] pl-3">
                 <div className="text-xs font-mono text-[var(--text-secondary)]">
                   {t('syncTasks.smbAutoMountEnabled', {
@@ -135,10 +138,10 @@ function SyncTaskFormModal({
                   })}
                 </div>
                 <input
-                  value={form.sourceNetworkMount.username ?? ''}
+                  value={sourceNetworkMount.username ?? ''}
                   onChange={(event) =>
                     form.setSourceNetworkMount({
-                      ...form.sourceNetworkMount!,
+                      ...sourceNetworkMount,
                       username: event.target.value || null,
                     })
                   }
@@ -284,7 +287,7 @@ function SyncTaskFormModal({
                 <IconFolder size={18} />
               </button>
             </div>
-            {form.targetNetworkMount?.enabled ? (
+            {targetNetworkMount?.enabled ? (
               <div className="mt-2 space-y-2 border-l-2 border-[var(--accent-main)] pl-3">
                 <div className="text-xs font-mono text-[var(--text-secondary)]">
                   {t('syncTasks.smbAutoMountEnabled', {
@@ -292,10 +295,10 @@ function SyncTaskFormModal({
                   })}
                 </div>
                 <input
-                  value={form.targetNetworkMount.username ?? ''}
+                  value={targetNetworkMount.username ?? ''}
                   onChange={(event) =>
                     form.setTargetNetworkMount({
-                      ...form.targetNetworkMount!,
+                      ...targetNetworkMount,
                       username: event.target.value || null,
                     })
                   }
