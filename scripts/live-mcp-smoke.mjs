@@ -577,10 +577,20 @@ async function run() {
       tokenLength: authToken.length,
     });
 
-    const disabledMessage = await expectDisabled(
-      layout.appSupportDir,
-      options.protocolVersion,
-      authToken
+    const disabledMessage = await waitFor(
+      async () => {
+        try {
+          return await expectDisabled(
+            layout.appSupportDir,
+            options.protocolVersion,
+            authToken
+          );
+        } catch {
+          return null;
+        }
+      },
+      DISABLED_PHASE_TIMEOUT_MS,
+      'disabled MCP error'
     );
     report.phases.push({
       name: 'disabled-error',
