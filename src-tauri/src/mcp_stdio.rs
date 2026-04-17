@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -130,12 +131,14 @@ struct VolumesEnvelope {
 
 #[derive(Debug, Clone)]
 struct SyncWatcherMcpServer {
+    auth_token: String,
     tool_router: ToolRouter<Self>,
 }
 
 impl SyncWatcherMcpServer {
-    fn new() -> Self {
+    fn new(auth_token: String) -> Self {
         Self {
+            auth_token,
             tool_router: Self::tool_router(),
         }
     }
@@ -209,6 +212,7 @@ fn map_control_plane_error(response: &ControlPlaneResponse) -> ErrorData {
     match error.code.as_str() {
         "invalid_request" => ErrorData::invalid_request(error.message.clone(), data),
         "invalid_params" => ErrorData::invalid_params(error.message.clone(), data),
+        "unauthorized" => ErrorData::invalid_request(error.message.clone(), data),
         _ => ErrorData::internal_error(error.message.clone(), data),
     }
 }
@@ -218,12 +222,61 @@ fn next_request_id(method: &str) -> String {
     format!("syncwatcher-mcp-{method}-{sequence}")
 }
 
-async fn relay_request(method: &'static str, params: Value) -> Result<Json<Value>, ErrorData> {
+pub(crate) fn mcp_auth_token_from_args<I, S>(args: I) -> Result<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut args = args.into_iter().peekable();
+    while let Some(arg) = args.next() {
+        let arg = arg.as_ref().to_string_lossy();
+        if let Some(token) = arg.strip_prefix("--mcp-token=") {
+            let token = token.trim();
+            if token.is_empty() {
+                return Err(
+                    "MCP auth token is missing. Copy the SyncWatcher MCP config example and pass --mcp-token <token>."
+                        .to_string(),
+                );
+            }
+            return Ok(token.to_string());
+        }
+
+        if arg == "--mcp-token" {
+            let Some(token) = args.next() else {
+                return Err(
+                    "MCP auth token is missing. Copy the SyncWatcher MCP config example and pass --mcp-token <token>."
+                        .to_string(),
+                );
+            };
+            let token = token.as_ref().to_string_lossy();
+            let token = token.trim();
+            if token.is_empty() {
+                return Err(
+                    "MCP auth token is missing. Copy the SyncWatcher MCP config example and pass --mcp-token <token>."
+                        .to_string(),
+                );
+            }
+            return Ok(token.to_string());
+        }
+    }
+
+    Err(
+        "MCP auth token was not provided. Copy the SyncWatcher MCP config example and retry with --mcp-token <token>."
+            .to_string(),
+    )
+}
+
+async fn relay_request(
+    auth_token: &str,
+    method: &'static str,
+    params: Value,
+) -> Result<Json<Value>, ErrorData> {
     let socket_path =
         default_socket_path().map_err(|error| ErrorData::internal_error(error, None))?;
     let request = ControlPlaneRequest {
         request_id: next_request_id(method),
         method: method.to_string(),
+        auth_token: Some(auth_token.to_string()),
         params,
     };
 
@@ -257,11 +310,15 @@ async fn relay_request(method: &'static str, params: Value) -> Result<Json<Value
     Ok(Json(result))
 }
 
-async fn relay_request_typed<T>(method: &'static str, params: Value) -> Result<Json<T>, ErrorData>
+async fn relay_request_typed<T>(
+    auth_token: &str,
+    method: &'static str,
+    params: Value,
+) -> Result<Json<T>, ErrorData>
 where
     T: DeserializeOwned + JsonSchema,
 {
-    let Json(result) = relay_request(method, params).await?;
+    let Json(result) = relay_request(auth_token, method, params).await?;
     let typed = serde_json::from_value::<T>(result).map_err(|error| {
         ErrorData::internal_error(
             format!("Failed to decode relay result for {method}: {error}"),
@@ -284,7 +341,7 @@ impl SyncWatcherMcpServer {
         )
     )]
     async fn get_settings(&self) -> Result<Json<SettingsEnvelope>, ErrorData> {
-        relay_request_typed("syncwatcher_get_settings", json!({})).await
+        relay_request_typed(&self.auth_token, "syncwatcher_get_settings", json!({})).await
     }
 
     #[tool(
@@ -304,7 +361,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode settings patch: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_update_settings", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_update_settings", params).await
     }
 
     #[tool(
@@ -318,7 +375,7 @@ impl SyncWatcherMcpServer {
         )
     )]
     async fn list_sync_tasks(&self) -> Result<Json<SyncTasksEnvelope>, ErrorData> {
-        relay_request_typed("syncwatcher_list_sync_tasks", json!({})).await
+        relay_request_typed(&self.auth_token, "syncwatcher_list_sync_tasks", json!({})).await
     }
 
     #[tool(
@@ -338,7 +395,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode task id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_get_sync_task", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_get_sync_task", params).await
     }
 
     #[tool(
@@ -358,7 +415,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode sync task: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_create_sync_task", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_create_sync_task", params).await
     }
 
     #[tool(
@@ -378,7 +435,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode sync task update: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_update_sync_task", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_update_sync_task", params).await
     }
 
     #[tool(
@@ -398,7 +455,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode task id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_delete_sync_task", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_delete_sync_task", params).await
     }
 
     #[tool(
@@ -418,7 +475,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode task id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_start_dry_run", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_start_dry_run", params).await
     }
 
     #[tool(
@@ -438,7 +495,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode task id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_start_sync", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_start_sync", params).await
     }
 
     #[tool(
@@ -458,7 +515,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode task id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_start_orphan_scan", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_start_orphan_scan", params).await
     }
 
     #[tool(
@@ -478,7 +535,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode job id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_get_job", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_get_job", params).await
     }
 
     #[tool(
@@ -498,7 +555,7 @@ impl SyncWatcherMcpServer {
         let params = serde_json::to_value(params).map_err(|error| {
             ErrorData::internal_error(format!("Failed to encode job id: {error}"), None)
         })?;
-        relay_request_typed("syncwatcher_cancel_job", params).await
+        relay_request_typed(&self.auth_token, "syncwatcher_cancel_job", params).await
     }
 
     #[tool(
@@ -512,7 +569,7 @@ impl SyncWatcherMcpServer {
         )
     )]
     async fn get_runtime_state(&self) -> Result<Json<RuntimeStateEnvelope>, ErrorData> {
-        relay_request_typed("syncwatcher_get_runtime_state", json!({})).await
+        relay_request_typed(&self.auth_token, "syncwatcher_get_runtime_state", json!({})).await
     }
 
     #[tool(
@@ -526,7 +583,12 @@ impl SyncWatcherMcpServer {
         )
     )]
     async fn list_removable_volumes(&self) -> Result<Json<VolumesEnvelope>, ErrorData> {
-        relay_request_typed("syncwatcher_list_removable_volumes", json!({})).await
+        relay_request_typed(
+            &self.auth_token,
+            "syncwatcher_list_removable_volumes",
+            json!({}),
+        )
+        .await
     }
 }
 
@@ -549,11 +611,12 @@ impl ServerHandler for SyncWatcherMcpServer {
 }
 
 pub fn run_stdio_server() -> anyhow::Result<()> {
+    let auth_token = mcp_auth_token_from_args(std::env::args_os()).map_err(anyhow::Error::msg)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     runtime.block_on(async {
-        let server = SyncWatcherMcpServer::new();
+        let server = SyncWatcherMcpServer::new(auth_token);
         let transport = rmcp::transport::io::stdio();
         server.serve(transport).await?.waiting().await?;
         Ok(())

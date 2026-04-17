@@ -1161,6 +1161,55 @@ async fn current_settings_snapshot(
         .map_err(config_store_error_to_string)
 }
 
+fn current_mcp_auth_token(state: &AppState) -> Result<String, String> {
+    state
+        .config_store
+        .load_settings()
+        .map_err(config_store_error_to_string)?
+        .mcp_auth_token
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| {
+            "MCP auth token is unavailable. Open SyncWatcher and regenerate the MCP token from Help or Settings."
+                .to_string()
+        })
+}
+
+fn build_mcp_stdio_config_example(command: PathBuf, auth_token: String) -> McpStdioConfigExample {
+    McpStdioConfigExample {
+        command: command.to_string_lossy().into_owned(),
+        args: vec![
+            "--mcp-stdio".to_string(),
+            "--mcp-token".to_string(),
+            auth_token,
+        ],
+    }
+}
+
+fn validate_control_plane_auth(
+    request: &ControlPlaneRequest,
+    state: &AppState,
+) -> Result<(), String> {
+    let expected = current_mcp_auth_token(state)?;
+    let provided = request
+        .auth_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            "MCP auth token missing. Copy the SyncWatcher MCP config example and retry with the current token."
+                .to_string()
+        })?;
+
+    if provided != expected {
+        return Err(
+            "MCP auth token mismatch. Refresh the SyncWatcher MCP config example or regenerate the token, then retry."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 fn emit_config_store_changed(app: &tauri::AppHandle, scopes: &[&str]) {
     let _ = app.emit(
         "config-store-changed",
@@ -5737,13 +5786,29 @@ async fn get_settings(
 }
 
 #[tauri::command]
-async fn get_mcp_stdio_config_example() -> Result<McpStdioConfigExample, String> {
+async fn get_mcp_stdio_config_example(
+    state: tauri::State<'_, AppState>,
+) -> Result<McpStdioConfigExample, String> {
     let command = std::env::current_exe()
         .map_err(|error| format!("Failed to resolve current executable path: {error}"))?;
-    Ok(McpStdioConfigExample {
-        command: command.to_string_lossy().into_owned(),
-        args: vec!["--mcp-stdio".to_string()],
-    })
+    let auth_token = current_mcp_auth_token(state.inner())?;
+    Ok(build_mcp_stdio_config_example(command, auth_token))
+}
+
+#[tauri::command]
+async fn regenerate_mcp_auth_token(
+    state: tauri::State<'_, AppState>,
+) -> Result<McpStdioConfigExample, String> {
+    let command = std::env::current_exe()
+        .map_err(|error| format!("Failed to resolve current executable path: {error}"))?;
+    let settings = state
+        .config_store
+        .regenerate_mcp_auth_token()
+        .map_err(config_store_error_to_string)?;
+    let auth_token = settings.mcp_auth_token.ok_or_else(|| {
+        "Failed to regenerate MCP auth token. Try again from SyncWatcher Settings.".to_string()
+    })?;
+    Ok(build_mcp_stdio_config_example(command, auth_token))
 }
 
 #[tauri::command]
@@ -8033,6 +8098,9 @@ async fn handle_control_plane_request(
     state: AppState,
 ) -> ControlPlaneResponse {
     let request_id = request.request_id.clone();
+    if let Err(error) = validate_control_plane_auth(&request, &state) {
+        return ControlPlaneResponse::error(request_id, "unauthorized", error);
+    }
     let response = match request.method.as_str() {
         "syncwatcher_get_settings" => current_settings_snapshot(&app, &state)
             .await
@@ -8142,12 +8210,12 @@ async fn handle_control_plane_request(
             let update = serde_json::from_value::<UpdateSyncTaskRequest>(request.params.clone())
                 .map_err(|error| format!("Invalid sync task payload: {error}"));
             match update {
-                Ok(update) => match patch_sync_task_internal(update, None, None, app.clone(), &state)
-                    .await
-                {
-                    Ok(task) => Ok(serde_json::json!({ "task": task })),
-                    Err(error) => Err(error),
-                },
+                Ok(update) => {
+                    match patch_sync_task_internal(update, None, None, app.clone(), &state).await {
+                        Ok(task) => Ok(serde_json::json!({ "task": task })),
+                        Err(error) => Err(error),
+                    }
+                }
                 Err(error) => Err(error),
             }
         }
@@ -8385,7 +8453,8 @@ fn persist_patched_sync_task_and_collect_history_warnings(
     update: UpdateSyncTaskRequest,
     state: &AppState,
 ) -> Result<(SyncTaskRecord, Vec<String>), String> {
-    let (task, warnings, tasks) = prepare_patched_sync_task_and_collect_history_warnings(update, state)?;
+    let (task, warnings, tasks) =
+        prepare_patched_sync_task_and_collect_history_warnings(update, state)?;
     state
         .config_store
         .save_tasks(&tasks)
@@ -8512,9 +8581,11 @@ fn apply_keychain_credential_operation(
         KeychainCredentialAction::DeleteExisting => {
             network_mount::delete_password(task_id, operation.role)
         }
-        KeychainCredentialAction::StoreNew => {
-            network_mount::store_password(task_id, operation.role, operation.new_password.as_deref())
-        }
+        KeychainCredentialAction::StoreNew => network_mount::store_password(
+            task_id,
+            operation.role,
+            operation.new_password.as_deref(),
+        ),
     }
 }
 
@@ -8635,7 +8706,10 @@ fn delete_sync_task_internal_core(task_id: &str, state: &AppState) -> Result<boo
     tasks.retain(|task| task.id != task_id);
     let deleted = tasks.len() != before_len;
     if deleted {
-        let previous_task = previous_tasks.iter().find(|task| task.id == task_id).cloned();
+        let previous_task = previous_tasks
+            .iter()
+            .find(|task| task.id == task_id)
+            .cloned();
         let keychain_operations = build_keychain_credential_operations(
             task_id,
             previous_task.as_ref(),
@@ -9413,6 +9487,7 @@ pub fn run() {
             get_app_version,
             get_settings,
             get_mcp_stdio_config_example,
+            regenerate_mcp_auth_token,
             get_distribution_info,
             get_supporter_status,
             refresh_supporter_status,

@@ -346,7 +346,9 @@
       "mcpEnabled": "启用 MCP 控制",
       "mcpEnabledDesc": "允许本地 MCP 客户端控制当前正在运行的应用。SyncWatcher 不会因为 MCP 自动启动。",
       "mcpConfigExampleTitle": "MCP 客户端配置示例",
-      "mcpConfigExampleDesc": "请将已安装的 SyncWatcher 可执行文件路径设为 command，并传入 --mcp-stdio 参数。",
+      "mcpConfigExampleDesc": "请将已安装的 SyncWatcher 可执行文件路径设为 command，并同时传入 --mcp-stdio 与当前的 --mcp-token 值。",
+      "mcpRegenerateToken": "重新生成 MCP 令牌",
+      "mcpRegeneratingToken": "正在重新生成...",
       "closeAction": "关闭动作",
       "closeActionDesc": "选择关闭应用时的行为",
       "closeActionQuit": "退出应用",
@@ -472,6 +474,7 @@
           "description": "说明本地 MCP 客户端如何安全地控制正在运行的应用。",
           "runningAppOnly": "SyncWatcher 将 MCP 暴露为连接到运行中应用的轻量 stdio relay。relay 本身不会直接执行同步逻辑。",
           "enableFirst": "请先在 Settings 中开启 Enable MCP Control。MCP 默认是关闭的，也不会自动启动应用。",
+          "tokenRequired": "所有 MCP 请求都必须带上 SyncWatcher 当前的令牌。重新生成令牌后，旧的客户端配置会立即失效。",
           "jobPolling": "Dry Run、Sync、Orphan scan 这类长时间操作会返回 jobId。请轮询 syncwatcher_get_job 来查看进度或读取最终结果。",
           "exposedScope": "MCP v1 覆盖设置、SyncTask 的增删改查、dry-run、sync、orphan scan、运行时状态、job 控制以及可移动卷列表。不提供 orphan 删除、冲突处理、直接卸载控制、许可证操作或应用自动启动。"
         }

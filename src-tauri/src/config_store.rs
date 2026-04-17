@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -95,6 +95,8 @@ pub struct StoredSettings {
     pub close_action: CloseAction,
     #[serde(default)]
     pub mcp_enabled: bool,
+    #[serde(default)]
+    pub mcp_auth_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -470,7 +472,10 @@ impl ConfigStore {
     pub fn load_settings(&self) -> Result<StoredSettings, ConfigStoreError> {
         self.ensure_config_dir()?;
         let path = self.settings_file_path();
-        self.load_or_create_yaml(&path, default_settings())
+        let settings = self.load_or_create_yaml(&path, default_settings())?;
+        let normalized = normalize_loaded_settings(settings)?;
+        self.write_if_changed(&path, &normalized)?;
+        Ok(normalized)
     }
 
     pub fn save_settings(&self, settings: &StoredSettings) -> Result<(), ConfigStoreError> {
@@ -480,6 +485,13 @@ impl ConfigStore {
 
     pub fn reset_settings(&self) -> Result<StoredSettings, ConfigStoreError> {
         let settings = default_settings();
+        self.save_settings(&settings)?;
+        Ok(settings)
+    }
+
+    pub fn regenerate_mcp_auth_token(&self) -> Result<StoredSettings, ConfigStoreError> {
+        let mut settings = self.load_settings()?;
+        settings.mcp_auth_token = Some(generate_mcp_auth_token()?);
         self.save_settings(&settings)?;
         Ok(settings)
     }
@@ -977,6 +989,48 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_mcp_auth_token(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn generate_mcp_auth_token() -> Result<String, ConfigStoreError> {
+    let mut bytes = [0u8; 32];
+    let mut file = fs::File::open("/dev/urandom").map_err(|error| ConfigStoreError::IoError {
+        message: format!("Failed to open /dev/urandom for MCP auth token: {error}"),
+        file_path: Some("/dev/urandom".to_string()),
+    })?;
+    file.read_exact(&mut bytes)
+        .map_err(|error| ConfigStoreError::IoError {
+            message: format!("Failed to read MCP auth token entropy: {error}"),
+            file_path: Some("/dev/urandom".to_string()),
+        })?;
+
+    let mut token = String::from("swmcp_");
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut token, "{byte:02x}");
+    }
+    Ok(token)
+}
+
+fn normalize_loaded_settings(
+    mut settings: StoredSettings,
+) -> Result<StoredSettings, ConfigStoreError> {
+    settings.state_location_bookmark = normalize_optional_string(settings.state_location_bookmark);
+    settings.mcp_auth_token = match normalize_mcp_auth_token(settings.mcp_auth_token) {
+        Some(token) => Some(token),
+        None => Some(generate_mcp_auth_token()?),
+    };
+    Ok(settings)
+}
+
 fn normalize_network_mount(
     value: Option<NetworkMountRecord>,
 ) -> Result<Option<NetworkMountRecord>, ConfigStoreError> {
@@ -1039,6 +1093,7 @@ fn default_settings() -> StoredSettings {
         max_log_lines: DEFAULT_MAX_LOG_LINES,
         close_action: CloseAction::Quit,
         mcp_enabled: false,
+        mcp_auth_token: None,
     }
 }
 
@@ -1974,5 +2029,53 @@ mod tests {
             updated.recurring_schedules[0].cron_expression,
             "*/15 9-17 * * 1-5"
         );
+    }
+
+    #[test]
+    fn load_settings_backfills_missing_mcp_auth_token() {
+        let temp = tempdir().expect("tempdir should be created");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+        fs::create_dir_all(store.config_dir()).expect("config dir should exist");
+        fs::write(
+            store.settings_file_path(),
+            "language: en\nmcpEnabled: true\n",
+        )
+        .expect("legacy settings should be written");
+
+        let settings = store.load_settings().expect("settings should load");
+
+        let token = settings
+            .mcp_auth_token
+            .as_deref()
+            .expect("mcp auth token should be generated");
+        assert!(token.starts_with("swmcp_"));
+        assert_eq!(token.len(), 70);
+
+        let persisted =
+            fs::read_to_string(store.settings_file_path()).expect("settings file should exist");
+        assert!(persisted.contains("mcpAuthToken:"));
+        assert!(persisted.contains(token));
+    }
+
+    #[test]
+    fn regenerate_mcp_auth_token_replaces_existing_value() {
+        let temp = tempdir().expect("tempdir should be created");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+
+        let initial = store.load_settings().expect("settings should load");
+        let initial_token = initial
+            .mcp_auth_token
+            .clone()
+            .expect("initial token should be present");
+
+        let regenerated = store
+            .regenerate_mcp_auth_token()
+            .expect("token should regenerate");
+        let next_token = regenerated
+            .mcp_auth_token
+            .expect("regenerated token should be present");
+
+        assert_ne!(initial_token, next_token);
+        assert!(next_token.starts_with("swmcp_"));
     }
 }

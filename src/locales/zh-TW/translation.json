@@ -346,7 +346,9 @@
       "mcpEnabled": "啟用 MCP 控制",
       "mcpEnabledDesc": "允許本機 MCP 用戶端控制目前正在執行的應用程式。SyncWatcher 不會因為 MCP 自動啟動。",
       "mcpConfigExampleTitle": "MCP 用戶端設定範例",
-      "mcpConfigExampleDesc": "請將已安裝的 SyncWatcher 執行檔路徑設為 command，並傳入 --mcp-stdio 參數。",
+      "mcpConfigExampleDesc": "請將已安裝的 SyncWatcher 執行檔路徑設為 command，並同時傳入 --mcp-stdio 與目前的 --mcp-token 值。",
+      "mcpRegenerateToken": "重新產生 MCP Token",
+      "mcpRegeneratingToken": "重新產生中...",
       "closeAction": "關閉動作",
       "closeActionDesc": "選擇關閉應用程式時的行為",
       "closeActionQuit": "退出應用程式",
@@ -472,6 +474,7 @@
           "description": "說明本機 MCP 用戶端如何安全地控制正在執行的應用程式。",
           "runningAppOnly": "SyncWatcher 將 MCP 提供為連到執行中應用程式的輕量 stdio relay。relay 本身不會直接執行同步邏輯。",
           "enableFirst": "請先在 Settings 中開啟 Enable MCP Control。MCP 預設為關閉，也不會自動啟動應用程式。",
+          "tokenRequired": "所有 MCP 請求都必須帶上 SyncWatcher 目前的 token。重新產生 token 後，舊的用戶端設定會立即失效。",
           "jobPolling": "Dry Run、Sync、Orphan scan 這類長時間操作會回傳 jobId。請輪詢 syncwatcher_get_job 以查看進度或讀取最終結果。",
           "exposedScope": "MCP v1 涵蓋設定、SyncTask 的新增/讀取/更新/刪除、dry-run、sync、orphan scan、執行階段狀態、job 控制，以及可攜式磁碟清單。不提供 orphan 刪除、衝突處理、直接卸載控制、授權操作或應用程式自動啟動。"
         }

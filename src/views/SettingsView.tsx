@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch, Select } from '@mantine/core';
-import { invoke } from '@tauri-apps/api/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
 import { useDistribution } from '../hooks/useDistribution';
 import { useSettings } from '../hooks/useSettings';
@@ -10,6 +9,7 @@ import { DataUnitSystem } from '../utils/formatBytes';
 import { capturePathAccess } from '../utils/pathAccess';
 import { getDistributionPolicy } from '../utils/distributionPolicy';
 import LicenseActivation from '../components/features/LicenseActivation';
+import McpConfigExampleCard from '../components/features/McpConfigExampleCard';
 import { lemonSqueezyCheckoutUrl, privacyPolicyUrl, termsOfServiceUrl } from '../config/appLinks';
 
 const languages = [
@@ -21,11 +21,6 @@ const languages = [
     { value: 'es', label: 'Español' },
 ];
 
-interface McpStdioConfigExample {
-    command: string;
-    args: string[];
-}
-
 /**
  * Settings View - App configuration
  * Language, theme, notifications, sync options
@@ -35,7 +30,6 @@ function SettingsView() {
     const { info: distribution, loaded: distributionLoaded } = useDistribution();
     const { settings, updateSettings, setLaunchAtLogin, resetSettings, loaded } = useSettings();
     const [showLicenseModal, setShowLicenseModal] = useState(false);
-    const [mcpConfigExample, setMcpConfigExample] = useState<McpStdioConfigExample | null>(null);
     const policy = getDistributionPolicy(distribution);
     const canShowExternalCheckout =
         distributionLoaded && policy.supportsExternalCheckout && !!lemonSqueezyCheckoutUrl;
@@ -48,24 +42,6 @@ function SettingsView() {
         { value: 'binary', label: t('settings.unitBinary') },
         { value: 'decimal', label: t('settings.unitDecimal') },
     ];
-
-    useEffect(() => {
-        let cancelled = false;
-
-        void invoke<McpStdioConfigExample>('get_mcp_stdio_config_example')
-            .then((example) => {
-                if (!cancelled) {
-                    setMcpConfigExample(example);
-                }
-            })
-            .catch((error) => {
-                console.warn('Failed to load MCP stdio config example:', error);
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
 
     if (!loaded) {
         return (
@@ -260,17 +236,7 @@ function SettingsView() {
                             />
                         </div>
 
-                        {mcpConfigExample && (
-                            <div className="border-2 border-[var(--border-main)] bg-[var(--bg-primary)] p-4">
-                                <div className="font-bold mb-2">{t('settings.mcpConfigExampleTitle')}</div>
-                                <p className="text-xs text-[var(--text-secondary)] mb-3">
-                                    {t('settings.mcpConfigExampleDesc')}
-                                </p>
-                                <pre className="whitespace-pre-wrap break-all bg-[var(--bg-secondary)] border-2 border-[var(--border-main)] p-3 text-xs font-mono">
-                                    {JSON.stringify(mcpConfigExample, null, 2)}
-                                </pre>
-                            </div>
-                        )}
+                        <McpConfigExampleCard />
                     </div>
                 </section>
 

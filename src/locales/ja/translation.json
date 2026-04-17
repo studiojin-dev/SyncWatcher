@@ -346,7 +346,9 @@
       "mcpEnabled": "MCP 制御を有効化",
       "mcpEnabledDesc": "ローカル MCP クライアントが起動中のアプリを制御できるようにします。SyncWatcher が MCP のために自動起動することはありません。",
       "mcpConfigExampleTitle": "MCP クライアント設定例",
-      "mcpConfigExampleDesc": "インストール済みの SyncWatcher 実行ファイルを command に指定し、--mcp-stdio を渡してください。",
+      "mcpConfigExampleDesc": "インストール済みの SyncWatcher 実行ファイルを command に指定し、現在の --mcp-token 値と一緒に --mcp-stdio を渡してください。",
+      "mcpRegenerateToken": "MCP トークンを再生成",
+      "mcpRegeneratingToken": "再生成中...",
       "closeAction": "終了時の動作",
       "closeActionDesc": "アプリを閉じるときの動作を選択します",
       "closeActionQuit": "終了",
@@ -472,6 +474,7 @@
           "description": "ローカル MCP クライアントが実行中のアプリを安全に制御する方法です。",
           "runningAppOnly": "SyncWatcher の MCP は、実行中アプリへ接続する軽量な stdio リレーとして公開されます。リレー自体が同期ロジックを直接実行することはありません。",
           "enableFirst": "まず Settings -> Enable MCP Control を有効にしてください。MCP は初期状態で無効であり、アプリを自動起動することはありません。",
+          "tokenRequired": "すべての MCP リクエストには SyncWatcher の現在のトークンが必要です。トークンを再生成すると古いクライアント設定は直ちに無効になります。",
           "jobPolling": "Dry Run、Sync、Orphan scan のような長時間処理は jobId を返します。進捗確認や最終結果の取得には syncwatcher_get_job をポーリングしてください。",
           "exposedScope": "MCP v1 で扱えるのは、設定、SyncTask の CRUD、dry-run、sync、orphan scan、ランタイム状態、job 制御、リムーバブルボリューム一覧です。orphan 削除、競合解決、直接 unmount 制御、ライセンス操作、アプリ自動起動は公開しません。"
         }

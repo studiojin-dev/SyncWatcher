@@ -346,7 +346,9 @@
       "mcpEnabled": "MCP 제어 허용",
       "mcpEnabledDesc": "로컬 MCP 클라이언트가 현재 실행 중인 앱을 제어할 수 있습니다. SyncWatcher는 MCP 때문에 자동 실행되지 않습니다.",
       "mcpConfigExampleTitle": "MCP 클라이언트 설정 예제",
-      "mcpConfigExampleDesc": "설치된 SyncWatcher 실행 파일 경로를 command로 지정하고 --mcp-stdio 인자를 함께 전달하세요.",
+      "mcpConfigExampleDesc": "설치된 SyncWatcher 실행 파일 경로를 command로 지정하고, 현재 --mcp-token 값과 함께 --mcp-stdio 인자를 전달하세요.",
+      "mcpRegenerateToken": "MCP 토큰 재생성",
+      "mcpRegeneratingToken": "재생성 중...",
       "closeAction": "종료 동작",
       "closeActionDesc": "앱을 닫을 때의 동작을 선택합니다",
       "closeActionQuit": "완전 종료",
@@ -472,6 +474,7 @@
           "description": "로컬 MCP 클라이언트가 실행 중인 앱을 어떻게 안전하게 제어하는지 설명합니다.",
           "runningAppOnly": "SyncWatcher의 MCP는 실행 중인 앱으로 요청을 전달하는 얇은 stdio relay입니다. relay 자체가 동기화 엔진을 직접 실행하지는 않습니다.",
           "enableFirst": "먼저 Settings에서 MCP 제어 허용을 켜야 합니다. MCP는 기본적으로 꺼져 있으며 앱을 자동 실행하지 않습니다.",
+          "tokenRequired": "모든 MCP 요청에는 SyncWatcher의 현재 토큰이 포함되어야 합니다. 토큰을 재생성하면 기존 클라이언트 설정은 즉시 무효화됩니다.",
           "jobPolling": "Dry Run, Sync, Orphan 검사 같은 장기 작업은 jobId를 반환합니다. 진행 상황과 최종 결과는 syncwatcher_get_job으로 조회하세요.",
           "exposedScope": "MCP v1은 설정, SyncTask CRUD, dry-run, sync, orphan scan, 런타임 상태, job 제어, 이동식 볼륨 목록까지만 제공합니다. orphan 삭제, conflict resolution, 직접 unmount 제어, 라이선스 액션, 앱 자동 실행은 제공하지 않습니다."
         }

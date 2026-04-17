@@ -115,7 +115,13 @@ describe('SettingsView', () => {
       if (command === 'get_mcp_stdio_config_example') {
         return {
           command: '/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher',
-          args: ['--mcp-stdio'],
+          args: ['--mcp-stdio', '--mcp-token', 'swmcp_initial'],
+        };
+      }
+      if (command === 'regenerate_mcp_auth_token') {
+        return {
+          command: '/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher',
+          args: ['--mcp-stdio', '--mcp-token', 'swmcp_regenerated'],
         };
       }
       return null;
@@ -176,5 +182,56 @@ describe('SettingsView', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByText('--mcp-stdio', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('--mcp-token', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('swmcp_initial', { exact: false })).toBeInTheDocument();
+  });
+
+  it('regenerates the MCP auth token and refreshes the example', async () => {
+    renderWithMantine();
+
+    expect(await screen.findByText('swmcp_initial', { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.mcpRegenerateToken' }));
+
+    expect(await screen.findByText('swmcp_regenerated', { exact: false })).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith('regenerate_mcp_auth_token');
+  });
+
+  it('shows a retryable error when loading the MCP example fails', async () => {
+    invokeMock.mockImplementationOnce(async () => {
+      throw new Error('load failed');
+    });
+
+    renderWithMantine();
+
+    expect(await screen.findByText('load failed')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'common.retry' }));
+
+    expect(await screen.findByText('swmcp_initial', { exact: false })).toBeInTheDocument();
+  });
+
+  it('shows an inline error when token regeneration fails', async () => {
+    invokeMock.mockImplementation(async (command) => {
+      if (command === 'get_mcp_stdio_config_example') {
+        return {
+          command: '/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher',
+          args: ['--mcp-stdio', '--mcp-token', 'swmcp_initial'],
+        };
+      }
+      if (command === 'regenerate_mcp_auth_token') {
+        throw new Error('regen failed');
+      }
+      return null;
+    });
+
+    renderWithMantine();
+
+    expect(await screen.findByText('swmcp_initial', { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.mcpRegenerateToken' }));
+
+    expect(await screen.findByText('regen failed')).toBeInTheDocument();
+    expect(screen.getByText('swmcp_initial', { exact: false })).toBeInTheDocument();
   });
 });

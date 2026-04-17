@@ -1,12 +1,14 @@
 #[cfg(test)]
 mod integration_tests {
     use crate::config_store::{
-        apply_sync_task_update, launch_at_login_status_or_default, ConfigStore,
-        NetworkMountRecord, NetworkMountScheme, SourceIdentitySnapshot, SourceType,
-        SourceUuidType, SyncTaskRecord, UpdateSyncTaskRequest,
+        apply_sync_task_update, launch_at_login_status_or_default, ConfigStore, NetworkMountRecord,
+        NetworkMountScheme, SourceIdentitySnapshot, SourceType, SourceUuidType, SyncTaskRecord,
+        UpdateSyncTaskRequest,
     };
+    use crate::control_plane::ControlPlaneRequest;
     use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
+    use crate::mcp_stdio::mcp_auth_token_from_args;
     use crate::network_mount::{
         test_fail_next_delete, test_fail_next_store, test_get_secret, test_put_secret,
         test_reset_keychain,
@@ -27,7 +29,7 @@ mod integration_tests {
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
         compute_volume_mount_diff, create_sync_task_internal, decide_autostart_launch,
-        decide_runtime_auto_unmount, dequeue_runtime_sync_task,
+        decide_runtime_auto_unmount, delete_sync_task_internal_core, dequeue_runtime_sync_task,
         emit_task_log_with_recurring_detail, enqueue_runtime_sync_task_internal,
         enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
         find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
@@ -38,27 +40,27 @@ mod integration_tests {
         log_conflict_resolution_failure, log_conflict_resolution_success,
         log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
         normalize_uuid_sub_path, owner_license_debug_token_from_args, parse_uuid_source_path,
-        persist_patched_sync_task_and_collect_history_warnings, preflight_target_path,
-        progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
-        read_current_conflict_file_info, record_runtime_validation_issue,
-        refresh_uuid_source_identity, remove_runtime_sync_task_state,
-        resolve_conflict_items_internal, resolve_runtime_exclude_patterns,
-        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
-        runtime_watch_restart_task_ids, runtime_watch_task_needs_restart,
-        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
+        patch_sync_task_internal_core, persist_patched_sync_task_and_collect_history_warnings,
+        preflight_target_path, progress_phase_to_log_category,
+        prune_auto_unmount_session_disabled_tasks, read_current_conflict_file_info,
+        record_runtime_validation_issue, refresh_uuid_source_identity,
+        remove_runtime_sync_task_state, resolve_conflict_items_internal,
+        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
+        runtime_get_state_internal, runtime_validation_issue_log_message,
+        runtime_watch_bootstrap_task_ids, runtime_watch_restart_task_ids,
+        runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
+        set_auto_unmount_session_disabled_internal,
         should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_dry_run_artifact,
-        validate_runtime_tasks, volume_watch_next_tick_delay, AppState, CancelOperationType,
-        KeychainCredentialAction, delete_sync_task_internal_core,
-        patch_sync_task_internal_core,
+        validate_runtime_tasks, validate_control_plane_auth, volume_watch_next_tick_delay,
+        AppState, CancelOperationType,
         ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
         ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
-        RuntimeActiveProducer, RuntimeAutoUnmountDecision, RuntimeExclusionSet,
-        RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
-        RuntimeTaskValidationIssue, SyncLiveState, TargetNewerConflictItem,
-        VolumeEmitDebounceState,
+        KeychainCredentialAction, RuntimeActiveProducer, RuntimeAutoUnmountDecision,
+        RuntimeExclusionSet, RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask,
+        RuntimeTaskValidationCode, RuntimeTaskValidationIssue, SyncLiveState,
+        TargetNewerConflictItem, VolumeEmitDebounceState,
     };
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
@@ -705,11 +707,8 @@ mod integration_tests {
         let credential = crate::NetworkCredentialPayload {
             password: Some(String::new()),
         };
-        let (action, password) = crate::plan_keychain_credential_action(
-            Some(&mount),
-            Some(&mount),
-            Some(&credential),
-        );
+        let (action, password) =
+            crate::plan_keychain_credential_action(Some(&mount), Some(&mount), Some(&credential));
 
         assert_eq!(action, KeychainCredentialAction::KeepExisting);
         assert_eq!(password, None);
@@ -718,8 +717,7 @@ mod integration_tests {
     #[test]
     fn test_plan_keychain_credential_action_deletes_only_when_mount_removed() {
         let mount = build_network_mount();
-        let (action, password) =
-            crate::plan_keychain_credential_action(Some(&mount), None, None);
+        let (action, password) = crate::plan_keychain_credential_action(Some(&mount), None, None);
 
         assert_eq!(action, KeychainCredentialAction::DeleteExisting);
         assert_eq!(password, None);
@@ -731,11 +729,8 @@ mod integration_tests {
         let credential = crate::NetworkCredentialPayload {
             password: Some("secret".to_string()),
         };
-        let (action, password) = crate::plan_keychain_credential_action(
-            Some(&mount),
-            Some(&mount),
-            Some(&credential),
-        );
+        let (action, password) =
+            crate::plan_keychain_credential_action(Some(&mount), Some(&mount), Some(&credential));
 
         assert_eq!(action, KeychainCredentialAction::StoreNew);
         assert_eq!(password, Some("secret"));
@@ -796,7 +791,10 @@ mod integration_tests {
             crate::network_mount::NetworkMountRole::Target,
             "old-target",
         );
-        test_fail_next_store("task-network-update", crate::network_mount::NetworkMountRole::Target);
+        test_fail_next_store(
+            "task-network-update",
+            crate::network_mount::NetworkMountRole::Target,
+        );
 
         let error = patch_sync_task_internal_core(
             UpdateSyncTaskRequest {
@@ -818,21 +816,37 @@ mod integration_tests {
 
         assert!(error.contains("Injected keychain store failure"));
         assert_eq!(
-            test_get_secret("task-network-update", crate::network_mount::NetworkMountRole::Source),
+            test_get_secret(
+                "task-network-update",
+                crate::network_mount::NetworkMountRole::Source
+            ),
             Some("old-source".to_string())
         );
         assert_eq!(
-            test_get_secret("task-network-update", crate::network_mount::NetworkMountRole::Target),
+            test_get_secret(
+                "task-network-update",
+                crate::network_mount::NetworkMountRole::Target
+            ),
             Some("old-target".to_string())
         );
-        let tasks = state.config_store.load_tasks().expect("tasks should remain readable");
+        let tasks = state
+            .config_store
+            .load_tasks()
+            .expect("tasks should remain readable");
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].source_network_mount, existing_task.source_network_mount);
-        assert_eq!(tasks[0].target_network_mount, existing_task.target_network_mount);
+        assert_eq!(
+            tasks[0].source_network_mount,
+            existing_task.source_network_mount
+        );
+        assert_eq!(
+            tasks[0].target_network_mount,
+            existing_task.target_network_mount
+        );
     }
 
     #[tokio::test]
-    async fn test_delete_sync_task_internal_rolls_back_config_and_keychain_when_secret_delete_fails() {
+    async fn test_delete_sync_task_internal_rolls_back_config_and_keychain_when_secret_delete_fails(
+    ) {
         let _guard = keychain_test_guard();
         test_reset_keychain();
         let state = build_app_state();
@@ -871,21 +885,33 @@ mod integration_tests {
             crate::network_mount::NetworkMountRole::Target,
             "target-secret",
         );
-        test_fail_next_delete("task-network-delete", crate::network_mount::NetworkMountRole::Target);
+        test_fail_next_delete(
+            "task-network-delete",
+            crate::network_mount::NetworkMountRole::Target,
+        );
 
-        let error =
-            delete_sync_task_internal_core("task-network-delete", &state).expect_err("delete should fail");
+        let error = delete_sync_task_internal_core("task-network-delete", &state)
+            .expect_err("delete should fail");
 
         assert!(error.contains("Injected keychain delete failure"));
-        let tasks = state.config_store.load_tasks().expect("tasks should remain readable");
+        let tasks = state
+            .config_store
+            .load_tasks()
+            .expect("tasks should remain readable");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, "task-network-delete");
         assert_eq!(
-            test_get_secret("task-network-delete", crate::network_mount::NetworkMountRole::Source),
+            test_get_secret(
+                "task-network-delete",
+                crate::network_mount::NetworkMountRole::Source
+            ),
             Some("source-secret".to_string())
         );
         assert_eq!(
-            test_get_secret("task-network-delete", crate::network_mount::NetworkMountRole::Target),
+            test_get_secret(
+                "task-network-delete",
+                crate::network_mount::NetworkMountRole::Target
+            ),
             Some("target-secret".to_string())
         );
     }
@@ -1286,6 +1312,71 @@ mod integration_tests {
         let token = owner_license_debug_token_from_args(["syncwatcher", "--owner-license-debug="]);
 
         assert_eq!(token, None);
+    }
+
+    #[test]
+    fn test_mcp_auth_token_from_args_extracts_secret() {
+        let token =
+            mcp_auth_token_from_args(["syncwatcher", "--mcp-stdio", "--mcp-token", "secret-token"])
+                .expect("mcp token should parse");
+
+        assert_eq!(token, "secret-token");
+    }
+
+    #[test]
+    fn test_mcp_auth_token_from_args_requires_non_empty_secret() {
+        let error = mcp_auth_token_from_args(["syncwatcher", "--mcp-stdio", "--mcp-token="])
+            .expect_err("empty token should be rejected");
+
+        assert!(error.contains("--mcp-token"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_control_plane_auth_rejects_missing_auth_token() {
+        let state = build_app_state();
+        state
+            .config_store
+            .load_settings()
+            .expect("settings should initialize token");
+        let error = validate_control_plane_auth(
+            &ControlPlaneRequest {
+                request_id: "req-missing-token".to_string(),
+                method: "syncwatcher_get_settings".to_string(),
+                auth_token: None,
+                params: serde_json::json!({}),
+            },
+            &state,
+        )
+        .expect_err("missing token should be rejected");
+
+        assert!(error.contains("missing"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_control_plane_auth_rejects_stale_auth_token_after_rotation() {
+        let state = build_app_state();
+        let initial_token = state
+            .config_store
+            .load_settings()
+            .expect("settings should initialize token")
+            .mcp_auth_token
+            .expect("initial token should exist");
+        state
+            .config_store
+            .regenerate_mcp_auth_token()
+            .expect("token should rotate");
+        let error = validate_control_plane_auth(
+            &ControlPlaneRequest {
+                request_id: "req-stale-token".to_string(),
+                method: "syncwatcher_get_settings".to_string(),
+                auth_token: Some(initial_token),
+                params: serde_json::json!({}),
+            },
+            &state,
+        )
+        .expect_err("stale token should be rejected");
+
+        assert!(error.contains("mismatch"));
     }
 
     #[test]

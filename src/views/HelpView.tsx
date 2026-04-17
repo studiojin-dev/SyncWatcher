@@ -9,6 +9,7 @@ import {
   IconEye,
   IconBrandGithub,
 } from '@tabler/icons-react';
+import McpConfigExampleCard from '../components/features/McpConfigExampleCard';
 
 function HelpView() {
   const { t } = useTranslation();
@@ -101,6 +102,7 @@ function HelpView() {
       features: [
         t('help.sections.mcpControl.runningAppOnly'),
         t('help.sections.mcpControl.enableFirst'),
+        t('help.sections.mcpControl.tokenRequired'),
         t('help.sections.mcpControl.jobPolling'),
         t('help.sections.mcpControl.exposedScope'),
       ],
@@ -184,6 +186,11 @@ function HelpView() {
                   </li>
                 ))}
               </ul>
+              {section.id === 'mcpControl' ? (
+                <div className="mt-4">
+                  <McpConfigExampleCard />
+                </div>
+              ) : null}
             </article>
           );
         })}

@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import HelpView from './HelpView';
 
 vi.mock('react-i18next', () => ({
@@ -25,6 +26,14 @@ vi.mock('react-i18next', () => ({
         'help.sections.mcpControl.title': 'MCP Control',
         'help.sections.mcpControl.runningAppOnly':
           'SyncWatcher exposes MCP as a thin stdio relay to the running app. It does not run sync logic directly inside the relay.',
+        'help.sections.mcpControl.tokenRequired':
+          'Every MCP request must include the current token from SyncWatcher. Regenerating the token invalidates old client configs immediately.',
+        'settings.mcpConfigExampleTitle': 'MCP Client Config Example',
+        'settings.mcpConfigExampleDesc':
+          'Point your MCP client at the installed SyncWatcher executable and pass both --mcp-stdio and the current --mcp-token value.',
+        'settings.mcpRegenerateToken': 'Regenerate MCP Token',
+        'settings.mcpRegeneratingToken': 'Regenerating...',
+        'common.retry': 'Retry',
         'help.feedback.title': 'Questions & Suggestions',
         'help.feedback.description': 'Share questions or feature suggestions in GitHub Discussions.',
         'help.feedback.linkText': 'Questions/Suggestions (Discussions)',
@@ -35,7 +44,32 @@ vi.mock('react-i18next', () => ({
   })),
 }));
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+}));
+
 describe('HelpView', () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    invokeMock.mockImplementation(async (command) => {
+      if (command === 'get_mcp_stdio_config_example') {
+        return {
+          command: '/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher',
+          args: ['--mcp-stdio', '--mcp-token', 'swmcp_help_initial'],
+        };
+      }
+      if (command === 'regenerate_mcp_auth_token') {
+        return {
+          command: '/Applications/Sync Watcher.app/Contents/MacOS/syncwatcher',
+          args: ['--mcp-stdio', '--mcp-token', 'swmcp_help_regenerated'],
+        };
+      }
+      return null;
+    });
+  });
+
   it('renders safety checklist and runtime/conflict guidance sections', () => {
     render(<HelpView />);
 
@@ -69,6 +103,23 @@ describe('HelpView', () => {
         'SyncWatcher exposes MCP as a thin stdio relay to the running app. It does not run sync logic directly inside the relay.'
       )
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Every MCP request must include the current token from SyncWatcher. Regenerating the token invalidates old client configs immediately.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('renders the MCP example and regenerates the token', async () => {
+    render(<HelpView />);
+
+    expect(await screen.findByText('MCP Client Config Example')).toBeInTheDocument();
+    expect(screen.getByText('swmcp_help_initial', { exact: false })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate MCP Token' }));
+
+    expect(await screen.findByText('swmcp_help_regenerated', { exact: false })).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith('regenerate_mcp_auth_token');
   });
 
   it('renders discussions and issues links', () => {

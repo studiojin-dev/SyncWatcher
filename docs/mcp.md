@@ -11,7 +11,7 @@ SyncWatcher does not run sync logic directly inside the MCP relay.
 Instead, the installed `syncwatcher` executable can be launched with:
 
 ```bash
-syncwatcher --mcp-stdio
+syncwatcher --mcp-stdio --mcp-token <token>
 ```
 
 That stdio process is a thin relay. It forwards MCP tool calls to the already running SyncWatcher app over a local Unix socket.
@@ -20,16 +20,19 @@ Important behavior:
 
 - MCP is disabled by default.
 - The app must already be running.
+- SyncWatcher generates and persists an MCP auth token automatically when the app runs and no token exists yet.
 - SyncWatcher never auto-launches itself for MCP.
 - The running app backend remains the single owner of sync execution, runtime state, and config persistence.
+- Every MCP request must include the current token. If you regenerate the token in SyncWatcher, old client configs stop working immediately.
 
 ## Before You Connect
 
 1. Launch SyncWatcher normally.
 2. Open `Settings`.
 3. Turn on `Enable MCP Control`.
-4. Point your MCP client at the installed SyncWatcher executable.
-5. Pass `--mcp-stdio` as the argument.
+4. Copy the MCP client config example from `Settings` or `Help -> MCP Control`.
+5. Point your MCP client at the installed SyncWatcher executable.
+6. Pass both `--mcp-stdio` and `--mcp-token <current token>`.
 
 If MCP is disabled, tool calls fail with an actionable error that tells the client to enable MCP Control first.
 

@@ -19,7 +19,8 @@ Related ADR: [ADR-20260306-0010](./adr/ADR-20260306-0010-MCP-enabled-running-app
   - `settings.yaml`
   - `tasks.yaml`
   - `exclusion_sets.yaml`
-- The main executable `syncwatcher --mcp-stdio` is a thin relay to the app-local Unix socket control plane.
+- The main executable `syncwatcher --mcp-stdio --mcp-token <token>` is a thin relay to the app-local Unix socket control plane.
+- The running app generates and persists the MCP auth token automatically when needed.
 - Long-running MCP operations now return `jobId` and are observed through `syncwatcher_get_job`.
 - The frontend continues to receive progress and runtime state through the existing Tauri event pipeline.
 
@@ -82,8 +83,9 @@ The script:
 - builds `syncwatcher`
 - creates an isolated app-support directory under `/tmp`
 - writes an isolated `settings.yaml`
-- verifies the disabled error before app startup
 - launches `pnpm tauri dev`
+- waits for the app to generate an MCP auth token
+- verifies the disabled error before MCP is enabled
 - enables MCP and waits for the Unix socket listener
 - creates temp source and target fixtures
 - executes `dry-run`, orphan scan, and real sync through MCP stdio mode

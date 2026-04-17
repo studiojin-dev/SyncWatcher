@@ -14,6 +14,8 @@ pub struct ControlPlaneRequest {
     pub request_id: String,
     pub method: String,
     #[serde(default)]
+    pub auth_token: Option<String>,
+    #[serde(default)]
     pub params: serde_json::Value,
 }
 

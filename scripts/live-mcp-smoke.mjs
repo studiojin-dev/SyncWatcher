@@ -132,6 +132,12 @@ function setMcpEnabledInSettings(pathname, enabled) {
   writeYamlFile(pathname, settings);
 }
 
+function readMcpAuthToken(pathname) {
+  const settings = fs.existsSync(pathname) ? (readYamlFile(pathname) ?? {}) : {};
+  const token = typeof settings.mcpAuthToken === 'string' ? settings.mcpAuthToken.trim() : '';
+  return token || null;
+}
+
 function createFixture(layout, payloadMib) {
   const sourceDir = path.join(layout.fixtureRoot, 'source');
   const targetDir = path.join(layout.fixtureRoot, 'target');
@@ -312,11 +318,11 @@ function startApp(appSupportDir) {
 }
 
 class McpStdioClient {
-  constructor(appSupportDir, protocolVersion) {
+  constructor(appSupportDir, protocolVersion, authToken) {
     this.nextId = 1;
     this.buffer = '';
     this.pending = new Map();
-    this.child = spawn(mcpBinaryPath(), ['--mcp-stdio'], {
+    this.child = spawn(mcpBinaryPath(), ['--mcp-stdio', '--mcp-token', authToken], {
       cwd: repoRoot,
       env: {
         ...process.env,
@@ -438,8 +444,8 @@ class McpStdioClient {
   }
 }
 
-async function withClient(appSupportDir, protocolVersion, fn) {
-  const client = new McpStdioClient(appSupportDir, protocolVersion);
+async function withClient(appSupportDir, protocolVersion, authToken, fn) {
+  const client = new McpStdioClient(appSupportDir, protocolVersion, authToken);
   try {
     await client.initialize();
     return await fn(client);
@@ -448,8 +454,8 @@ async function withClient(appSupportDir, protocolVersion, fn) {
   }
 }
 
-async function expectDisabled(appSupportDir, protocolVersion) {
-  return withClient(appSupportDir, protocolVersion, async (client) => {
+async function expectDisabled(appSupportDir, protocolVersion, authToken) {
+  return withClient(appSupportDir, protocolVersion, authToken, async (client) => {
     let message = '';
     try {
       await client.callTool('syncwatcher_get_settings', {});
@@ -468,10 +474,10 @@ async function waitForSocket(appSupportDir) {
   return socketPath;
 }
 
-async function waitForToolSuccess(appSupportDir, protocolVersion, toolName, args = {}, timeoutMs = SOCKET_TIMEOUT_MS) {
+async function waitForToolSuccess(appSupportDir, protocolVersion, authToken, toolName, args = {}, timeoutMs = SOCKET_TIMEOUT_MS) {
   return waitFor(async () => {
     try {
-      return await withClient(appSupportDir, protocolVersion, async (client) => client.callTool(toolName, args));
+      return await withClient(appSupportDir, protocolVersion, authToken, async (client) => client.callTool(toolName, args));
     } catch {
       return null;
     }
@@ -559,16 +565,22 @@ async function run() {
       settingsPath,
     });
 
-    const disabledMessage = await waitFor(
-      async () => {
-        try {
-          return await expectDisabled(layout.appSupportDir, options.protocolVersion);
-        } catch {
-          return null;
-        }
-      },
-      DISABLED_PHASE_TIMEOUT_MS,
-      'disabled MCP error'
+    log('phase', 'Starting app to generate MCP token');
+    app = startApp(layout.appSupportDir);
+    const authToken = await waitFor(
+      () => readMcpAuthToken(settingsPath),
+      SOCKET_TIMEOUT_MS,
+      'generated MCP auth token'
+    );
+    report.phases.push({
+      name: 'token-generated',
+      tokenLength: authToken.length,
+    });
+
+    const disabledMessage = await expectDisabled(
+      layout.appSupportDir,
+      options.protocolVersion,
+      authToken
     );
     report.phases.push({
       name: 'disabled-error',
@@ -576,14 +588,17 @@ async function run() {
     });
 
     log('phase', 'Enabling MCP in isolated settings');
+    await app.stop();
+    app = null;
     setMcpEnabledInSettings(settingsPath, true);
-
-    log('phase', 'Starting enabled phase app');
+    log('phase', 'Restarting app with MCP enabled');
     app = startApp(layout.appSupportDir);
+
     const socketPath = await waitForSocket(layout.appSupportDir);
     const enabledSettings = await waitForToolSuccess(
       layout.appSupportDir,
       options.protocolVersion,
+      authToken,
       'syncwatcher_get_settings',
       {}
     );
@@ -603,7 +618,7 @@ async function run() {
       orphanPath: fixture.orphanPath,
     };
 
-    await withClient(layout.appSupportDir, options.protocolVersion, async (client) => {
+    await withClient(layout.appSupportDir, options.protocolVersion, authToken, async (client) => {
       const listedTools = await client.listTools();
       const toolNames = (listedTools.tools ?? []).map((tool) => tool.name).sort();
       for (const toolName of EXPECTED_TOOLS) {

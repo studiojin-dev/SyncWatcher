@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260417-0028-MAT",
+    "title": "MCP auth token for the running-app control plane",
+    "tags": [
+      "mcp",
+      "control-plane",
+      "auth",
+      "config-store",
+      "security",
+      "tauri",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-17",
+    "tldr": "Require every MCP control-plane request to carry a backend-owned auth token, auto-generate and persist that token on app launch when missing, and expose the current token plus regeneration from SyncWatcher UI help/settings surfaces.",
+    "path": "docs/adr/ADR-20260417-0028-MAT-mcp-auth-token-for-running-app-control-plane.md"
+  },
+  {
     "id": "ADR-20260414-0027-NMT",
     "title": "SyncTask SMB auto-mount and Keychain credentials",
     "tags": [
