@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { IconRefresh, IconArrowDown, IconArrowLeft } from '@tabler/icons-react';
@@ -26,6 +26,19 @@ interface TaskLogsModalProps {
     onBack: () => void;
 }
 
+function appendLogEntries(previousLogs: LogEntry[], nextEntries: LogEntry[]): LogEntry[] {
+    if (nextEntries.length === 0) {
+        return previousLogs;
+    }
+
+    const newLogs = [...previousLogs, ...nextEntries];
+    if (newLogs.length > 10000) {
+        return newLogs.slice(newLogs.length - 10000);
+    }
+
+    return newLogs;
+}
+
 export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModalProps) {
     const { t } = useTranslation();
     const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -33,7 +46,7 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
     const virtuoso = useRef<VirtuosoHandle>(null);
     const [autoScroll, setAutoScroll] = useState(true);
 
-    const fetchLogs = async () => {
+    const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
             const data = await invoke<LogEntry[]>('get_task_logs', { taskId });
@@ -49,48 +62,76 @@ export default function TaskLogsModal({ taskId, taskName, onBack }: TaskLogsModa
         } finally {
             setLoading(false);
         }
-    };
+    }, [taskId]);
 
     useEffect(() => {
         // Initial fetch
-        fetchLogs();
+        void fetchLogs();
 
         // Listen for new log events (Single)
         const unlistenSinglePromise = listen<{ task_id?: string; entry: LogEntry }>('new-log-task', (event) => {
             if (event.payload.task_id === taskId) {
-                setLogs(prevLogs => {
-                    const newLogs = [...prevLogs, event.payload.entry];
-                    // Keep max 10000 logs (matches backend)
-                    if (newLogs.length > 10000) {
-                        return newLogs.slice(newLogs.length - 10000);
-                    }
-                    return newLogs;
-                });
+                setLogs((prevLogs) => appendLogEntries(prevLogs, [event.payload.entry]));
             }
+        });
+        const unlistenBatchPromise = listen<LogBatchEvent>('new-logs-batch', (event) => {
+            if ((event.payload.task_id ?? taskId) !== taskId) {
+                return;
+            }
+
+            setLogs((prevLogs) => appendLogEntries(prevLogs, event.payload.entries));
         });
 
-        // Listen for new log events (Batch)
-        const unlistenBatchPromise = listen<LogBatchEvent>('new-logs-batch', (event) => {
-            if (event.payload.task_id === taskId) {
-                setLogs(prevLogs => {
-                    if (event.payload.entries.length === 0) {
-                        return prevLogs;
-                    }
-                    const newLogs = [...prevLogs, ...event.payload.entries];
-                    if (newLogs.length > 10000) {
-                        return newLogs.slice(newLogs.length - 10000);
-                    }
-                    return newLogs;
-                });
+        let active = true;
+        let batchSubscriptionId: string | null = null;
+        const unsubscribeTaskLogBatches = async () => {
+            if (!batchSubscriptionId) {
+                return false;
             }
+
+            const subscriptionId = batchSubscriptionId;
+            batchSubscriptionId = null;
+            return invoke<boolean>('unsubscribe_task_log_batches', {
+                subscriptionId,
+            });
+        };
+        const batchChannel = new Channel<LogBatchEvent>((batch) => {
+            if ((batch.task_id ?? taskId) !== taskId) {
+                return;
+            }
+
+            setLogs((prevLogs) => appendLogEntries(prevLogs, batch.entries));
         });
+
+        const subscriptionPromise = invoke<string>('subscribe_task_log_batches', {
+            taskId,
+            batchChannel,
+        })
+            .then((subscriptionId) => {
+                batchSubscriptionId = subscriptionId;
+                if (!active) {
+                    return unsubscribeTaskLogBatches();
+                }
+
+                return true;
+            })
+            .catch((error) => {
+                console.error('Failed to subscribe task log batches:', error);
+                return false;
+            });
 
         // Cleanup listener on unmount
         return () => {
+            active = false;
             unlistenSinglePromise.then(unlisten => unlisten());
             unlistenBatchPromise.then(unlisten => unlisten());
+            void subscriptionPromise
+                .then(() => unsubscribeTaskLogBatches())
+                .catch((error) => {
+                    console.warn('Failed to unsubscribe task log batches:', error);
+                });
         };
-    }, [taskId]);
+    }, [fetchLogs, taskId]);
 
     useEffect(() => {
         if (autoScroll && logs.length > 0) {

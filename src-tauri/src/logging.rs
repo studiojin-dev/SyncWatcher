@@ -180,7 +180,7 @@ impl LogManager {
         self.append_entries(&entries);
 
         if let Some(app) = app {
-            let _ = app.emit("new-logs-batch", &LogBatchEvent { task_id, entries });
+            crate::emit_task_log_batch_transport(app, &LogBatchEvent { task_id, entries });
         }
     }
 

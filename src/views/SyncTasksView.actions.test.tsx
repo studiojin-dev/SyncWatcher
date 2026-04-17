@@ -13,6 +13,7 @@ import type { TaskStatus } from '../hooks/useSyncTaskStatus';
 import SyncTasksView from './SyncTasksView';
 
 const {
+  MockChannel,
   addTaskMock,
   deleteTaskMock,
   showToastMock,
@@ -21,6 +22,15 @@ const {
   updateTaskMock,
   useSyncTaskStatusStoreMock,
 } = vi.hoisted(() => {
+  class MockChannel<T = unknown> {
+    id = Math.floor(Math.random() * 1000);
+    onmessage: (response: T) => void;
+
+    constructor(onmessage?: (response: T) => void) {
+      this.onmessage = onmessage ?? (() => undefined);
+    }
+  }
+
   const addTaskMock = vi.fn();
   const deleteTaskMock = vi.fn();
   const updateTaskMock = vi.fn();
@@ -59,6 +69,7 @@ const {
   });
 
   return {
+    MockChannel,
     addTaskMock,
     deleteTaskMock,
     showToastMock,
@@ -76,6 +87,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
+  Channel: MockChannel,
   invoke: vi.fn(),
 }));
 
@@ -123,6 +135,12 @@ vi.mock('../components/ui/Toast', () => ({
 
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
+
+function getInvokeArgs(command: string) {
+  const call = invokeMock.mock.calls.find(([name]) => name === command);
+  expect(call).toBeDefined();
+  return call?.[1] as Record<string, unknown>;
+}
 
 function createDefaultTask(): SyncTask {
   return {
@@ -214,6 +232,9 @@ describe('SyncTasksView sync and watch confirmations', () => {
     statusState.setLastLog.mockReset();
     statusState.clearDryRunSession.mockReset();
     statusState.clearSyncSession.mockReset();
+    statusState.getSyncSession.mockImplementation((taskId: string) =>
+      statusState.syncSessions.get(taskId),
+    );
     statusState.beginSyncSession.mockImplementation((taskId: string, taskName: string) => {
       statusState.syncSessions.set(taskId, {
         taskId,
@@ -328,8 +349,55 @@ describe('SyncTasksView sync and watch confirmations', () => {
     await waitFor(() => {
       expect(screen.getByText('syncTasks.startSync · Task 1')).toBeInTheDocument();
     });
+
+    expect(getInvokeArgs('start_sync')).toEqual(
+      expect.objectContaining({
+        taskId: 'task-1',
+        fileBatchChannel: expect.any(MockChannel),
+      }),
+    );
     expect(statusState.beginSyncSession).toHaveBeenCalledWith('task-1', 'Task 1');
     expect(statusState.completeSyncSession).not.toHaveBeenCalled();
+  });
+
+  it('applies sync file batches through the invoke-scoped channel', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.startSync')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.startSync'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => {
+      expect(invokeMock.mock.calls.some((call) => call[0] === 'start_sync')).toBe(true);
+    });
+
+    const { fileBatchChannel } = getInvokeArgs('start_sync');
+    (fileBatchChannel as InstanceType<typeof MockChannel>).onmessage([
+      {
+        path: 'copying.mov',
+        kind: 'New',
+        status: 'copied',
+        source_size: 10,
+        target_size: 0,
+      },
+    ]);
+
+    expect(statusState.appendSyncFileBatch).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        taskId: 'task-1',
+        origin: 'manual',
+        entries: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'copying.mov',
+            status: 'copied',
+          }),
+        ]),
+      }),
+    );
   });
 
   it('does not execute sync before in-app confirmation and when cancelled', async () => {

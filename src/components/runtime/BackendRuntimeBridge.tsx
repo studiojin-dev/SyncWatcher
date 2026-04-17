@@ -18,7 +18,6 @@ import {
 import {
     DryRunDiffBatchEvent,
     DryRunProgressEvent,
-    SyncFileBatchEvent,
     SyncProgressEvent,
     SyncSessionFinishedEvent,
     isTerminalDryRunSessionStatus,
@@ -265,26 +264,13 @@ function BackendRuntimeBridge({
             }
 
             const store = useSyncTaskStatusStore.getState();
-            if (isTerminalDryRunSessionStatus(store.getDryRunSession(event.payload.taskId)?.status)) {
-                return;
-            }
-            store.setDryRunning(event.payload.taskId, true);
-            store.appendDryRunDiffBatch(event.payload.taskId, event.payload);
-        });
-
-        const unlistenSyncFileBatch = listen<SyncFileBatchEvent>('sync-file-batch', (event) => {
-            const { taskId, origin } = event.payload;
-            if (!taskId || origin !== 'manual') {
+            const taskId = event.payload.taskId;
+            if (isTerminalDryRunSessionStatus(store.getDryRunSession(taskId)?.status)) {
                 return;
             }
 
-            const store = useSyncTaskStatusStore.getState();
-            const currentSession = store.getSyncSession(taskId);
-            if (!currentSession || isTerminalSyncSessionStatus(currentSession.status)) {
-                return;
-            }
-
-            store.appendSyncFileBatch(taskId, event.payload);
+            store.setDryRunning(taskId, true);
+            store.appendDryRunDiffBatch(taskId, event.payload);
         });
 
         const unlistenSyncSessionFinished = listen<SyncSessionFinishedEvent>(
@@ -438,7 +424,6 @@ function BackendRuntimeBridge({
             unlistenDryRunState.then((fn) => fn());
             unlistenDryRunProgress.then((fn) => fn());
             unlistenDryRunDiffBatch.then((fn) => fn());
-            unlistenSyncFileBatch.then((fn) => fn());
             unlistenSyncSessionFinished.then((fn) => fn());
             unlistenWatchState.then((fn) => fn());
             unlistenQueueState.then((fn) => fn());

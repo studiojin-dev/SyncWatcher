@@ -16,6 +16,7 @@ import type { TaskStatus } from '../hooks/useSyncTaskStatus';
 import SyncTasksView from './SyncTasksView';
 
 const {
+  MockChannel,
   addTaskMock,
   deleteTaskMock,
   showToastMock,
@@ -24,6 +25,15 @@ const {
   updateTaskMock,
   useSyncTaskStatusStoreMock,
 } = vi.hoisted(() => {
+  class MockChannel<T = unknown> {
+    id = Math.floor(Math.random() * 1000);
+    onmessage: (response: T) => void;
+
+    constructor(onmessage?: (response: T) => void) {
+      this.onmessage = onmessage ?? (() => undefined);
+    }
+  }
+
   const addTaskMock = vi.fn();
   const deleteTaskMock = vi.fn();
   const updateTaskMock = vi.fn();
@@ -62,6 +72,7 @@ const {
   });
 
   return {
+    MockChannel,
     addTaskMock,
     deleteTaskMock,
     showToastMock,
@@ -79,6 +90,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
+  Channel: MockChannel,
   invoke: vi.fn(),
 }));
 
@@ -132,6 +144,12 @@ vi.mock('../components/ui/Toast', () => ({
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 const listenMock = listen as unknown as ReturnType<typeof vi.fn>;
 const askMock = ask as unknown as ReturnType<typeof vi.fn>;
+
+function getInvokeArgs(command: string) {
+  const call = invokeMock.mock.calls.find(([name]) => name === command);
+  expect(call).toBeDefined();
+  return call?.[1] as Record<string, unknown>;
+}
 
 function createDefaultTask(): SyncTask {
   return {
@@ -370,6 +388,9 @@ describe('SyncTasksView dry-run flows', () => {
     statusState.failSyncSession.mockReset();
     statusState.clearSyncSession.mockReset();
     installStatefulStatusMockImplementations();
+    statusState.getDryRunSession.mockImplementation((taskId: string) =>
+      statusState.dryRunSessions.get(taskId),
+    );
     listenMock.mockResolvedValue(() => {});
     askMock.mockResolvedValue(true);
     installDefaultInvokeMock();
@@ -412,12 +433,94 @@ describe('SyncTasksView dry-run flows', () => {
         invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
       ).toBe(true);
     });
+    expect(getInvokeArgs('sync_dry_run')).toEqual(
+      expect.objectContaining({
+        taskId: 'task-1',
+        diffBatchChannel: expect.any(MockChannel),
+      }),
+    );
     expect(statusState.beginDryRunSession).toHaveBeenCalledWith('task-1', 'Task 1');
     expect(statusState.setDryRunning).toHaveBeenCalledWith('task-1', true);
     expect(statusState.completeDryRunSession).toHaveBeenCalledWith(
       'task-1',
       createEmptyDryRunResult(),
     );
+  });
+
+  it('applies dry-run diff batches through the invoke-scoped channel', async () => {
+    let resolveDryRun!: (result: DryRunResult) => void;
+    const dryRunPromise = new Promise<DryRunResult>((resolve) => {
+      resolveDryRun = resolve;
+    });
+
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'list_conflict_review_sessions') {
+        return [];
+      }
+      if (command === 'get_removable_volumes') {
+        return [];
+      }
+      if (command === 'sync_dry_run') {
+        return await dryRunPromise;
+      }
+      return undefined;
+    });
+
+    renderWithMantine(<SyncTasksView />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('syncTasks.dryRun')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('syncTasks.dryRun'));
+    fireEvent.click(screen.getByRole('button', { name: 'common.confirm' }));
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some((call) => call[0] === 'sync_dry_run'),
+      ).toBe(true);
+    });
+
+    const { diffBatchChannel } = getInvokeArgs('sync_dry_run');
+    (diffBatchChannel as InstanceType<typeof MockChannel>).onmessage({
+      diffs: [
+        {
+          path: 'a.txt',
+          kind: 'New',
+          source_size: 1024,
+          target_size: null,
+          checksum_source: null,
+          checksum_target: null,
+        },
+      ],
+      summary: {
+        total_files: 10,
+        files_to_copy: 1,
+        files_modified: 0,
+        bytes_to_copy: 1024,
+      },
+    });
+
+    expect(statusState.appendDryRunDiffBatch).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        taskId: 'task-1',
+        diffs: expect.arrayContaining([
+          expect.objectContaining({
+            path: 'a.txt',
+            kind: 'New',
+          }),
+        ]),
+      }),
+    );
+
+    resolveDryRun(createEmptyDryRunResult());
+    await waitFor(() => {
+      expect(statusState.completeDryRunSession).toHaveBeenCalledWith(
+        'task-1',
+        createEmptyDryRunResult(),
+      );
+    });
   });
 
   it('reopens an existing dry-run session instead of starting a new run', async () => {
@@ -540,6 +643,7 @@ describe('SyncTasksView dry-run flows', () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('start_sync_from_dry_run', {
         taskId: 'task-1',
+        fileBatchChannel: expect.any(MockChannel),
       });
     });
 

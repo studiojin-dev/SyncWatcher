@@ -56,18 +56,24 @@ mod integration_tests {
         validate_runtime_tasks, validate_control_plane_auth, volume_watch_next_tick_delay,
         AppState, CancelOperationType,
         ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
-        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunLiveState,
+        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunDiffBatchEvent,
+        DryRunLiveState, SyncEventOrigin, SyncFileBatchEvent, TaskLogBatchSubscription,
+        emit_dry_run_diff_batch, emit_sync_file_batch, emit_task_log_batch_transport,
         KeychainCredentialAction, RuntimeActiveProducer, RuntimeAutoUnmountDecision,
         RuntimeExclusionSet, RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask,
         RuntimeTaskValidationCode, RuntimeTaskValidationIssue, SyncLiveState,
         TargetNewerConflictItem, VolumeEmitDebounceState,
     };
+    use serde::de::DeserializeOwned;
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::mpsc::{sync_channel, Receiver};
     use std::sync::{Arc, Mutex as StdMutex, OnceLock};
     use std::time::{Duration, Instant};
+    use tauri::ipc::{Channel, InvokeResponseBody};
+    use tauri::Manager;
+    use tauri::test::{mock_builder, mock_context, noop_assets};
     use tauri::Listener;
     use tempfile::tempdir;
     use tokio::sync::{Mutex, Notify, RwLock};
@@ -222,6 +228,8 @@ mod integration_tests {
         AppState {
             config_store: Arc::new(ConfigStore::from_config_dir(temp_config_dir())),
             log_manager: Arc::new(LogManager::new(100)),
+            task_log_batch_subscriptions: Arc::new(StdMutex::new(HashMap::new())),
+            task_log_batch_subscription_seq: Arc::new(AtomicU64::new(0)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_running_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -253,6 +261,47 @@ mod integration_tests {
             mcp_job_seq: Arc::new(AtomicU64::new(0)),
             security_scoped_access_manager: Arc::new(SecurityScopedAccessManager::default()),
         }
+    }
+
+    fn build_managed_mock_app() -> tauri::App<tauri::test::MockRuntime> {
+        mock_builder()
+            .manage(build_app_state())
+            .build(mock_context(noop_assets()))
+            .expect("mock app should build")
+    }
+
+    fn decode_channel_payload<T: DeserializeOwned>(body: InvokeResponseBody) -> T {
+        match body {
+            InvokeResponseBody::Json(json) => {
+                serde_json::from_str(&json).expect("channel payload should deserialize")
+            }
+            InvokeResponseBody::Raw(_) => panic!("expected JSON channel payload"),
+        }
+    }
+
+    fn build_channel_receiver<T: DeserializeOwned + Send + 'static>() -> (Channel<T>, Receiver<T>) {
+        let (tx, rx) = sync_channel(1);
+        let channel = Channel::new(move |body| {
+            tx.send(decode_channel_payload::<T>(body))
+                .expect("channel payload should be received");
+            Ok(())
+        });
+        (channel, rx)
+    }
+
+    fn listen_for_named_event<T: DeserializeOwned + Send + 'static, R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        event_name: &str,
+    ) -> Receiver<T> {
+        let (tx, rx) = sync_channel(1);
+        let event_name = event_name.to_string();
+        app.listen_any(event_name, move |event| {
+            let payload = serde_json::from_str::<T>(event.payload())
+                .expect("event payload should deserialize");
+            tx.send(payload)
+                .expect("event payload should be received");
+        });
+        rx
     }
 
     fn build_conflict_item(relative_path: &str) -> TargetNewerConflictItem {
@@ -553,6 +602,165 @@ mod integration_tests {
         assert!(event.entry.message.contains(
             "Conflict review [session-skip-event] skipped pending item on close: photos/c.jpg"
         ));
+    }
+
+    #[test]
+    fn test_emit_dry_run_diff_batch_prefers_channel_over_event_fallback() {
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let event_rx = listen_for_named_event::<DryRunDiffBatchEvent, _>(&app_handle, "dry-run-diff-batch");
+        let (channel, channel_rx) = build_channel_receiver::<DryRunDiffBatchEvent>();
+        let event = DryRunDiffBatchEvent {
+            task_id: "task-1".to_string(),
+            phase: DryRunPhase::Comparing,
+            message: "compare".to_string(),
+            summary: DryRunSummary {
+                total_files: 2,
+                files_to_copy: 1,
+                files_modified: 1,
+                bytes_to_copy: 2048,
+            },
+            diffs: vec![FileDiff {
+                path: PathBuf::from("a.txt"),
+                kind: FileDiffKind::New,
+                source_size: Some(1024),
+                target_size: None,
+                checksum_source: None,
+                checksum_target: None,
+            }],
+            target_preflight: None,
+        };
+
+        emit_dry_run_diff_batch(&app_handle, Some(&channel), &event);
+
+        let received = channel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected dry-run diff batch on channel");
+        assert_eq!(received.task_id, "task-1");
+        assert_eq!(received.diffs.len(), 1);
+        assert!(event_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn test_emit_dry_run_diff_batch_falls_back_to_event_without_channel() {
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let event_rx = listen_for_named_event::<DryRunDiffBatchEvent, _>(&app_handle, "dry-run-diff-batch");
+        let event = DryRunDiffBatchEvent {
+            task_id: "task-1".to_string(),
+            phase: DryRunPhase::Comparing,
+            message: "compare".to_string(),
+            summary: DryRunSummary {
+                total_files: 1,
+                files_to_copy: 1,
+                files_modified: 0,
+                bytes_to_copy: 1024,
+            },
+            diffs: vec![FileDiff {
+                path: PathBuf::from("a.txt"),
+                kind: FileDiffKind::New,
+                source_size: Some(1024),
+                target_size: None,
+                checksum_source: None,
+                checksum_target: None,
+            }],
+            target_preflight: None,
+        };
+
+        emit_dry_run_diff_batch(&app_handle, None, &event);
+
+        let received = event_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected dry-run diff batch fallback event");
+        assert_eq!(received.task_id, "task-1");
+        assert_eq!(received.diffs.len(), 1);
+    }
+
+    #[test]
+    fn test_emit_sync_file_batch_prefers_channel_over_event_fallback() {
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let event_rx = listen_for_named_event::<SyncFileBatchEvent, _>(&app_handle, "sync-file-batch");
+        let (channel, channel_rx) = build_channel_receiver::<SyncFileBatchEvent>();
+        let event = SyncFileBatchEvent {
+            task_id: "task-1".to_string(),
+            origin: SyncEventOrigin::Manual,
+            entries: vec![SyncFileEntry {
+                path: PathBuf::from("copy.txt"),
+                kind: FileDiffKind::New,
+                status: SyncFileStatus::Copied,
+                source_size: Some(1),
+                target_size: Some(0),
+                error: None,
+            }],
+        };
+
+        emit_sync_file_batch(&app_handle, Some(&channel), &event);
+
+        let received = channel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected sync file batch on channel");
+        assert_eq!(received.task_id, "task-1");
+        assert_eq!(received.entries.len(), 1);
+        assert!(event_rx.recv_timeout(Duration::from_millis(100)).is_err());
+    }
+
+    #[test]
+    fn test_emit_task_log_batch_transport_uses_subscription_and_falls_back_after_unsubscribe() {
+        let app = build_managed_mock_app();
+        let app_handle = app.handle().clone();
+        let event_rx = listen_for_named_event::<crate::logging::LogBatchEvent, _>(
+            &app_handle,
+            "new-logs-batch",
+        );
+        let (channel, channel_rx) = build_channel_receiver::<crate::logging::LogBatchEvent>();
+
+        {
+            let state = app_handle.state::<AppState>();
+            let mut subscriptions = state.task_log_batch_subscriptions.lock().unwrap();
+            subscriptions.insert(
+                "sub-1".to_string(),
+                TaskLogBatchSubscription {
+                    task_id: "task-1".to_string(),
+                    batch_channel: channel,
+                },
+            );
+        }
+
+        let batch = crate::logging::LogBatchEvent {
+            task_id: Some("task-1".to_string()),
+            entries: vec![crate::logging::LogEntry {
+                id: "1".to_string(),
+                timestamp: "2026-04-17T00:00:00Z".to_string(),
+                level: "info".to_string(),
+                message: "Copy: /tmp/file.txt".to_string(),
+                task_id: Some("task-1".to_string()),
+                category: crate::logging::LogCategory::FileCopied,
+            }],
+        };
+
+        emit_task_log_batch_transport(&app_handle, &batch);
+
+        let received = channel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected subscribed task log batch on channel");
+        assert_eq!(received.task_id.as_deref(), Some("task-1"));
+        assert_eq!(received.entries.len(), 1);
+        assert!(event_rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+        {
+            let state = app_handle.state::<AppState>();
+            let mut subscriptions = state.task_log_batch_subscriptions.lock().unwrap();
+            assert!(subscriptions.remove("sub-1").is_some());
+        }
+
+        emit_task_log_batch_transport(&app_handle, &batch);
+
+        let fallback = event_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected event fallback after unsubscribe");
+        assert_eq!(fallback.task_id.as_deref(), Some("task-1"));
+        assert_eq!(fallback.entries.len(), 1);
     }
 
     #[tokio::test]
@@ -3168,6 +3376,7 @@ mod integration_tests {
 
         let result = sync_dry_run_internal(
             None,
+            None,
             "task-1".to_string(),
             base.path().join("missing-source"),
             target,
@@ -3380,6 +3589,7 @@ mod integration_tests {
 
         let result = sync_dry_run_internal(
             None,
+            None,
             "task-1".to_string(),
             source.clone(),
             target.clone(),
@@ -3413,6 +3623,7 @@ mod integration_tests {
         std::fs::write(source.join("a.txt"), b"aaa").expect("should write a.txt");
         sync_dry_run_internal(
             None,
+            None,
             "task-1".to_string(),
             source.clone(),
             target.clone(),
@@ -3443,6 +3654,7 @@ mod integration_tests {
         std::fs::write(source.join("b.txt"), b"bbb").expect("should write b.txt");
 
         sync_dry_run_internal(
+            None,
             None,
             "task-1".to_string(),
             source.clone(),

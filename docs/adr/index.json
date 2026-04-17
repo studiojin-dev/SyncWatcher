@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20260417-0029-CHN",
+    "title": "Channel transport for large batch live streams",
+    "tags": [
+      "tauri",
+      "runtime",
+      "events",
+      "channels",
+      "sync",
+      "dry-run",
+      "logs"
+    ],
+    "status": "Accepted",
+    "date": "2026-04-17",
+    "tldr": "Keep small runtime/status notifications on Tauri events, but move large live batch payloads to invoke-scoped or subscription-scoped Tauri channels with event fallback only when no channel is attached.",
+    "path": "docs/adr/ADR-20260417-0029-CHN-channel-transport-for-large-batch-live-streams.md"
+  },
+  {
     "id": "ADR-20260417-0028-MAT",
     "title": "MCP auth token for the running-app control plane",
     "tags": [

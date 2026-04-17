@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   useCallback,
@@ -17,13 +17,18 @@ import { getDistributionPolicy } from '../../utils/distributionPolicy';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
 import { capturePathAccess } from '../../utils/pathAccess';
 import { isUuidSourceResolutionError } from '../../utils/syncTaskSourceRecommendations';
-import { isTerminalSyncSessionStatus } from '../../types/syncEngine';
+import {
+  isTerminalDryRunSessionStatus,
+  isTerminalSyncSessionStatus,
+} from '../../types/syncEngine';
 import type {
   ConflictReviewQueueChangedEvent,
   ConflictSessionSummary,
+  DryRunDiffBatchEvent,
   DryRunResult,
   DryRunSessionState,
   SyncExecutionResult,
+  SyncFileBatchEvent,
 } from '../../types/syncEngine';
 import type {
   RuntimeTaskValidationIssue,
@@ -591,6 +596,10 @@ export function useSyncTaskActions({
       store.beginSyncSession(task.id, task.name);
       openSyncSession(task);
 
+      const fileBatchChannel = new Channel<
+        SyncFileBatchEvent | SyncFileBatchEvent['entries']
+      >();
+
       try {
         setSyncing(task.id);
         showToast(
@@ -604,10 +613,37 @@ export function useSyncTaskActions({
           'info',
         );
 
+        fileBatchChannel.onmessage = (payload) => {
+          const currentSession = store.getSyncSession(task.id);
+          if (!currentSession || isTerminalSyncSessionStatus(currentSession.status)) {
+            return;
+          }
+
+          const batch =
+            Array.isArray(payload)
+              ? {
+                  taskId: task.id,
+                  origin: 'manual' as const,
+                  entries: payload,
+                }
+              : {
+                  ...payload,
+                  taskId: payload.taskId ?? task.id,
+                  origin: payload.origin ?? 'manual',
+                };
+
+          store.appendSyncFileBatch(task.id, {
+            ...batch,
+            taskId: batch.taskId ?? task.id,
+            origin: batch.origin ?? 'manual',
+          });
+        };
+
         const execution =
           mode === 'dryRunArtifact'
             ? await invoke<SyncExecutionResult>('start_sync_from_dry_run', {
                 taskId: task.id,
+                fileBatchChannel,
               })
             : await invoke<SyncExecutionResult>('start_sync', {
                 taskId: task.id,
@@ -617,6 +653,7 @@ export function useSyncTaskActions({
                 checksumMode: task.checksumMode,
                 verifyAfterCopy: task.verifyAfterCopy ?? true,
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
+                fileBatchChannel,
               });
         showTargetPreflightToast(execution.targetPreflight, showToast, t);
 
@@ -903,6 +940,18 @@ export function useSyncTaskActions({
       openDryRunSession(task);
       showToast(t('syncTasks.dryRun') + '...', 'info');
 
+      const diffBatchChannel = new Channel<DryRunDiffBatchEvent>((batch) => {
+        if (isTerminalDryRunSessionStatus(store.getDryRunSession(task.id)?.status)) {
+          return;
+        }
+
+        store.setDryRunning(task.id, true);
+        store.appendDryRunDiffBatch(task.id, {
+          ...batch,
+          taskId: batch.taskId ?? task.id,
+        });
+      });
+
       try {
         const result = await invoke<DryRunResult>('sync_dry_run', {
           taskId: task.id,
@@ -910,6 +959,7 @@ export function useSyncTaskActions({
           target: task.target,
           checksumMode: task.checksumMode,
           excludePatterns: getPatternsForSets(task.exclusionSets || []),
+          diffBatchChannel,
         });
         store.completeDryRunSession(task.id, result);
         showTargetPreflightToast(result.targetPreflight, showToast, t);

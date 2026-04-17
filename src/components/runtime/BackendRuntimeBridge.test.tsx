@@ -484,7 +484,7 @@ describe('BackendRuntimeBridge', () => {
     expect(storeState.setLastLog).toHaveBeenCalledTimes(1);
   });
 
-  it('updates manual sync sessions from sync progress and file batches only', async () => {
+  it('updates manual sync sessions from sync progress while leaving file batches to invoke channels', async () => {
     mockInvoke.mockResolvedValue({
       watchingTasks: [],
       syncingTasks: [],
@@ -499,9 +499,10 @@ describe('BackendRuntimeBridge', () => {
 
     await waitFor(() => {
       expect(eventHandlers.has('sync-progress')).toBe(true);
-      expect(eventHandlers.has('sync-file-batch')).toBe(true);
       expect(eventHandlers.has('sync-session-finished')).toBe(true);
     });
+
+    expect(eventHandlers.has('sync-file-batch')).toBe(false);
 
     act(() => {
       eventHandlers.get('sync-progress')?.({
@@ -511,48 +512,10 @@ describe('BackendRuntimeBridge', () => {
           message: 'copying.mov',
         },
       });
-      eventHandlers.get('sync-file-batch')?.({
-        payload: {
-          taskId: 'task-1',
-          origin: 'manual',
-          entries: [
-            {
-              path: 'copying.mov',
-              kind: 'New',
-              status: 'copied',
-              source_size: 10,
-              target_size: 0,
-            },
-            {
-              path: 'copying-2.mov',
-              kind: 'Modified',
-              status: 'failed',
-              source_size: 5,
-              target_size: 3,
-              error: 'copy failed',
-            },
-          ],
-        },
-      });
-      eventHandlers.get('sync-file-batch')?.({
-        payload: {
-          taskId: 'task-1',
-          origin: 'watch',
-          entries: [
-            {
-              path: 'ignored.mov',
-              kind: 'Modified',
-              status: 'copied',
-              source_size: 1,
-              target_size: 1,
-            },
-          ],
-        },
-      });
     });
 
     expect(storeState.setSyncProgress).toHaveBeenCalledTimes(1);
-    expect(storeState.appendSyncFileBatch).toHaveBeenCalledTimes(1);
+    expect(storeState.appendSyncFileBatch).not.toHaveBeenCalled();
   });
 
   it('terminalizes manual sync sessions from sync-session-finished', async () => {
@@ -670,7 +633,7 @@ describe('BackendRuntimeBridge', () => {
     expect(onUuidSourceResolutionError).toHaveBeenCalledWith('task-1');
   });
 
-  it('stores dry-run progress and batches using the dry-run listeners', async () => {
+  it('stores dry-run progress and accepts dry-run diff batch fallback events', async () => {
     mockInvoke.mockResolvedValue({
       watchingTasks: [],
       syncingTasks: [],
@@ -708,6 +671,8 @@ describe('BackendRuntimeBridge', () => {
       eventHandlers.get('dry-run-diff-batch')?.({
         payload: {
           taskId: 'task-1',
+          phase: 'comparing',
+          message: 'Comparing',
           diffs: [
             {
               path: 'a.txt',
@@ -724,6 +689,7 @@ describe('BackendRuntimeBridge', () => {
             files_modified: 0,
             bytes_to_copy: 1024,
           },
+          targetPreflight: null,
         },
       });
     });
@@ -739,7 +705,8 @@ describe('BackendRuntimeBridge', () => {
     expect(storeState.appendDryRunDiffBatch).toHaveBeenCalledWith(
       'task-1',
       expect.objectContaining({
-        diffs: expect.any(Array),
+        taskId: 'task-1',
+        message: 'Comparing',
       }),
     );
     expect(storeState.setLastLog).toHaveBeenCalledWith(
@@ -781,7 +748,7 @@ describe('BackendRuntimeBridge', () => {
     expect(storeState.setStatus).not.toHaveBeenCalledWith('task-1', 'idle');
   });
 
-  it('ignores late dry-run progress and batches after a terminal session', async () => {
+  it('ignores late dry-run progress after a terminal session', async () => {
     storeState.dryRunSessions = new Map<string, unknown>([
       [
         'task-1',
@@ -825,7 +792,16 @@ describe('BackendRuntimeBridge', () => {
       eventHandlers.get('dry-run-diff-batch')?.({
         payload: {
           taskId: 'task-1',
+          phase: 'comparing',
+          message: 'late diff batch',
           diffs: [],
+          summary: {
+            total_files: 0,
+            files_to_copy: 0,
+            files_modified: 0,
+            bytes_to_copy: 0,
+          },
+          targetPreflight: null,
         },
       });
     });

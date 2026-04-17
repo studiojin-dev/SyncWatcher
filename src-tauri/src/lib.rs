@@ -29,7 +29,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalSize, Size, WebviewUrl, WebviewWindow,
+    ipc::{Channel, JavaScriptChannelId},
+    AppHandle, Emitter, Manager, PhysicalSize, Size, Webview, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
@@ -58,8 +59,7 @@ use config_store::{
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
 use license::generate_licenses_report;
-use logging::LogManager;
-use logging::{add_log, get_system_logs, get_task_logs, LogCategory, DEFAULT_MAX_LOG_LINES};
+use logging::{add_log, get_system_logs, get_task_logs, LogCategory, LogManager, DEFAULT_MAX_LOG_LINES};
 use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
 use network_mount::{NetworkMountCapturePayload, NetworkMountRole};
 use recurring::{
@@ -463,6 +463,10 @@ struct DryRunArtifact {
 pub struct AppState {
     config_store: Arc<ConfigStore>,
     log_manager: Arc<LogManager>,
+    /// task log batch channel subscriptions
+    task_log_batch_subscriptions: Arc<StdMutex<HashMap<String, TaskLogBatchSubscription>>>,
+    /// task log batch subscription id sequence
+    task_log_batch_subscription_seq: Arc<AtomicU64>,
     /// 현재 실행 중인 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     /// 현재 실행 중인 dry-run 작업들의 취소 토큰 맵 (task_id -> CancellationToken)
@@ -614,7 +618,7 @@ struct RuntimeWatchStateEvent {
     reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum SyncEventOrigin {
     Manual,
@@ -662,7 +666,7 @@ struct SyncProgressEvent {
     current_file_total_bytes: u64,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SyncFileBatchEvent {
     task_id: String,
@@ -699,7 +703,7 @@ struct DryRunProgressEvent {
     summary: DryRunSummary,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DryRunDiffBatchEvent {
     task_id: String,
@@ -709,6 +713,12 @@ struct DryRunDiffBatchEvent {
     diffs: Vec<FileDiff>,
     #[serde(rename = "targetPreflight")]
     target_preflight: Option<TargetPreflightInfo>,
+}
+
+#[derive(Clone)]
+struct TaskLogBatchSubscription {
+    task_id: String,
+    batch_channel: Channel<logging::LogBatchEvent>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1456,16 +1466,82 @@ fn emit_dry_run_progress(app: &tauri::AppHandle, event: &DryRunProgressEvent) {
     let _ = app.emit("dry-run-progress", event);
 }
 
-fn emit_dry_run_diff_batch(app: &tauri::AppHandle, event: &DryRunDiffBatchEvent) {
-    let _ = app.emit("dry-run-diff-batch", event);
+fn emit_batch_via_channel_or_event<R: tauri::Runtime, T: serde::Serialize + Clone>(
+    app: &tauri::AppHandle<R>,
+    event_name: &str,
+    batch_channel: Option<&Channel<T>>,
+    event: &T,
+) {
+    if let Some(batch_channel) = batch_channel {
+        let _ = batch_channel.send(event.clone());
+    } else {
+        let _ = app.emit(event_name, event);
+    }
+}
+
+pub(crate) fn emit_task_log_batch_transport<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    event: &logging::LogBatchEvent,
+) {
+    let Some(task_id) = event.task_id.as_deref() else {
+        let _ = app.emit("new-logs-batch", event);
+        return;
+    };
+
+    let Some(state) = app.try_state::<AppState>() else {
+        let _ = app.emit("new-logs-batch", event);
+        return;
+    };
+
+    let subscriptions: Vec<(String, Channel<logging::LogBatchEvent>)> = {
+        let subscriptions = state.task_log_batch_subscriptions.lock().unwrap();
+        subscriptions
+            .iter()
+            .filter(|(_, subscription)| subscription.task_id == task_id)
+            .map(|(subscription_id, subscription)| {
+                (subscription_id.clone(), subscription.batch_channel.clone())
+            })
+            .collect()
+    };
+
+    if subscriptions.is_empty() {
+        let _ = app.emit("new-logs-batch", event);
+        return;
+    }
+
+    let mut stale_subscription_ids = Vec::new();
+    for (subscription_id, batch_channel) in subscriptions {
+        if batch_channel.send(event.clone()).is_err() {
+            stale_subscription_ids.push(subscription_id);
+        }
+    }
+
+    if !stale_subscription_ids.is_empty() {
+        let mut subscriptions = state.task_log_batch_subscriptions.lock().unwrap();
+        for subscription_id in stale_subscription_ids {
+            subscriptions.remove(&subscription_id);
+        }
+    }
+}
+
+fn emit_dry_run_diff_batch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    diff_batch_channel: Option<&Channel<DryRunDiffBatchEvent>>,
+    event: &DryRunDiffBatchEvent,
+) {
+    emit_batch_via_channel_or_event(app, "dry-run-diff-batch", diff_batch_channel, event);
 }
 
 fn emit_sync_progress(app: &tauri::AppHandle, event: &SyncProgressEvent) {
     let _ = app.emit("sync-progress", event);
 }
 
-fn emit_sync_file_batch(app: &tauri::AppHandle, event: &SyncFileBatchEvent) {
-    let _ = app.emit("sync-file-batch", event);
+fn emit_sync_file_batch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    file_batch_channel: Option<&Channel<SyncFileBatchEvent>>,
+    event: &SyncFileBatchEvent,
+) {
+    emit_batch_via_channel_or_event(app, "sync-file-batch", file_batch_channel, event);
 }
 
 fn emit_sync_session_finished(app: &tauri::AppHandle, event: &SyncSessionFinishedEvent) {
@@ -3028,6 +3104,7 @@ async fn run_due_recurring_schedule(
         state.clone(),
         false,
         SyncOrigin::Scheduled,
+        None,
         None,
         None,
         None,
@@ -4891,6 +4968,7 @@ async fn execute_sync_internal(
     sync_origin: SyncOrigin,
     external_cancel_token: Option<CancellationToken>,
     mcp_job_id: Option<String>,
+    file_batch_channel: Option<Channel<SyncFileBatchEvent>>,
     prepared_dry_run_artifact: Option<DryRunArtifact>,
 ) -> Result<SyncExecutionResult, SyncExecutionFailure> {
     if !sync_slot_pre_acquired && !acquire_sync_slot(&task_id, &state).await {
@@ -4978,6 +5056,7 @@ async fn execute_sync_internal(
             let sync_event_origin_value = sync_event_origin(sync_origin);
             let task_id_for_file_batch = task_id.clone();
             let app_for_file_batch = app.clone();
+            let file_batch_channel_for_file_batch = file_batch_channel.clone();
             let sync_event_origin_for_file_batch = sync_event_origin_value.clone();
             let sync_live_state_for_file_batch = sync_live_state.clone();
             let task_id_for_progress = task_id.clone();
@@ -5144,7 +5223,11 @@ async fn execute_sync_internal(
                                 origin: sync_event_origin_for_file_batch.clone(),
                                 entries,
                             };
-                            emit_sync_file_batch(&app_for_file_batch, &event);
+                            emit_sync_file_batch(
+                                &app_for_file_batch,
+                                file_batch_channel_for_file_batch.as_ref(),
+                                &event,
+                            );
                         }
                     }) => {
                         if let Some(entries) = sync_live_state.flush_pending_entries() {
@@ -5153,14 +5236,18 @@ async fn execute_sync_internal(
                                 origin: sync_event_origin_value.clone(),
                                 entries,
                             };
-                            emit_sync_file_batch(&app, &event);
+                            emit_sync_file_batch(&app, file_batch_channel.as_ref(), &event);
                         }
                         if let Some(batch) = progress_state.flush_logs() {
                             capture_recurring_schedule_detail_entries(
                                 &recurring_history_detail_entries_for_progress,
                                 &batch,
                             );
-                            log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
+                            log_manager.log_batch_entries(
+                                batch,
+                                Some(task_id.clone()),
+                                Some(&app),
+                            );
                         }
                         res
                     },
@@ -5171,14 +5258,18 @@ async fn execute_sync_internal(
                                 origin: sync_event_origin_value.clone(),
                                 entries,
                             };
-                            emit_sync_file_batch(&app, &event);
+                            emit_sync_file_batch(&app, file_batch_channel.as_ref(), &event);
                         }
                         if let Some(batch) = progress_state.flush_logs() {
                             capture_recurring_schedule_detail_entries(
                                 &recurring_history_detail_entries_for_progress,
                                 &batch,
                             );
-                            log_manager.log_batch_entries(batch, Some(task_id.clone()), Some(&app));
+                            log_manager.log_batch_entries(
+                                batch,
+                                Some(task_id.clone()),
+                                Some(&app),
+                            );
                         }
                         Err(anyhow::anyhow!(SYNC_CANCELLED_BY_USER_ERROR))
                     }
@@ -5432,6 +5523,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         state.clone(),
         true,
         SyncOrigin::Watch,
+        None,
         None,
         None,
         None,
@@ -6168,6 +6260,7 @@ async fn repair_config_store_file(
 
 async fn sync_dry_run_internal(
     app: Option<AppHandle>,
+    diff_batch_channel: Option<Channel<DryRunDiffBatchEvent>>,
     task_id: String,
     source: PathBuf,
     target: PathBuf,
@@ -6249,6 +6342,7 @@ async fn sync_dry_run_internal(
         let live_state = DryRunLiveState::new();
         let progress_target_preflight = target_preflight.clone();
         let diff_target_preflight = target_preflight.clone();
+        let diff_batch_channel_for_progress = diff_batch_channel.clone();
 
         let progress_state = live_state.clone();
         let progress_app = app.clone();
@@ -6269,7 +6363,11 @@ async fn sync_dry_run_internal(
                         diffs,
                         target_preflight: Some(progress_target_preflight.clone()),
                     };
-                    emit_dry_run_diff_batch(app_handle, &event);
+                    emit_dry_run_diff_batch(
+                        app_handle,
+                        diff_batch_channel_for_progress.as_ref(),
+                        &event,
+                    );
                 }
 
                 if let Some(job_id) = progress_job_id.as_deref() {
@@ -6299,6 +6397,7 @@ async fn sync_dry_run_internal(
 
         let diff_state = live_state.clone();
         let diff_app = app.clone();
+        let diff_batch_channel_for_diff = diff_batch_channel.clone();
         let diff_jobs = state.mcp_jobs.clone();
         let diff_job_id = mcp_job_id.clone();
         let diff_task_id = task_id.clone();
@@ -6314,7 +6413,11 @@ async fn sync_dry_run_internal(
                         diffs,
                         target_preflight: Some(diff_target_preflight.clone()),
                     };
-                    emit_dry_run_diff_batch(app_handle, &event);
+                    emit_dry_run_diff_batch(
+                        app_handle,
+                        diff_batch_channel_for_diff.as_ref(),
+                        &event,
+                    );
                 }
 
                 if let Some(job_id) = diff_job_id.as_deref() {
@@ -6358,7 +6461,11 @@ async fn sync_dry_run_internal(
                                 diffs,
                                 target_preflight: Some(target_preflight.clone()),
                             };
-                            emit_dry_run_diff_batch(app_handle, &event);
+                            emit_dry_run_diff_batch(
+                                app_handle,
+                                diff_batch_channel.as_ref(),
+                                &event,
+                            );
                         }
 
                         if let Some(job_id) = mcp_job_id.as_deref() {
@@ -6414,7 +6521,7 @@ async fn sync_dry_run_internal(
                         diffs,
                         target_preflight: Some(target_preflight.clone()),
                     };
-                    emit_dry_run_diff_batch(app_handle, &event);
+                    emit_dry_run_diff_batch(app_handle, diff_batch_channel.as_ref(), &event);
                 }
 
                 if let Some(job_id) = mcp_job_id.as_deref() {
@@ -6682,16 +6789,19 @@ async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), Strin
 #[tauri::command]
 async fn sync_dry_run(
     app: AppHandle,
+    webview: Webview,
     task_id: String,
     source: PathBuf,
     target: PathBuf,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
+    diff_batch_channel: Option<JavaScriptChannelId>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
     activate_task_path_access(&task_id, state.inner()).await?;
     sync_dry_run_internal(
         Some(app),
+        diff_batch_channel.map(|channel_id| channel_id.channel_on(webview)),
         task_id,
         source,
         target,
@@ -7394,6 +7504,8 @@ async fn start_sync(
     verify_after_copy: bool,
     exclude_patterns: Vec<String>,
     app: tauri::AppHandle,
+    webview: Webview,
+    file_batch_channel: Option<JavaScriptChannelId>,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncExecutionResult, String> {
     activate_task_path_access(&task_id, state.inner()).await?;
@@ -7411,6 +7523,7 @@ async fn start_sync(
         SyncOrigin::Manual,
         None,
         None,
+        file_batch_channel.map(|channel_id| channel_id.channel_on(webview)),
         None,
     )
     .await
@@ -7423,6 +7536,8 @@ async fn start_sync(
 async fn start_sync_from_dry_run(
     task_id: String,
     app: tauri::AppHandle,
+    webview: Webview,
+    file_batch_channel: Option<JavaScriptChannelId>,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncExecutionResult, String> {
     let (task, exclude_patterns) = load_task_context(&task_id, state.inner()).await?;
@@ -7444,12 +7559,46 @@ async fn start_sync_from_dry_run(
         SyncOrigin::Manual,
         None,
         None,
+        file_batch_channel.map(|channel_id| channel_id.channel_on(webview)),
         Some(artifact),
     )
     .await
     .map_err(|error| error.error_detail)?;
 
     Ok(result)
+}
+
+#[tauri::command]
+async fn subscribe_task_log_batches(
+    task_id: String,
+    batch_channel: JavaScriptChannelId,
+    webview: Webview,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
+    let subscription_seq = state
+        .task_log_batch_subscription_seq
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
+    let subscription_id = format!("task-log-batch-{subscription_seq}");
+    let mut subscriptions = state.task_log_batch_subscriptions.lock().unwrap();
+    subscriptions.insert(
+        subscription_id.clone(),
+        TaskLogBatchSubscription {
+            task_id,
+            batch_channel: batch_channel.channel_on(webview),
+        },
+    );
+    Ok(subscription_id)
+}
+
+#[tauri::command]
+async fn unsubscribe_task_log_batches(
+    subscription_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let mut subscriptions = state.task_log_batch_subscriptions.lock().unwrap();
+    Ok(subscriptions.remove(&subscription_id).is_some())
 }
 
 #[tauri::command]
@@ -7885,6 +8034,7 @@ async fn spawn_mcp_sync_job(
             Some(cancel_token.clone()),
             Some(job_id_for_job.clone()),
             None,
+            None,
         )
         .await;
         state_for_job
@@ -7962,6 +8112,7 @@ async fn spawn_mcp_dry_run_job(
             .await;
         let result = sync_dry_run_internal(
             Some(app.clone()),
+            None,
             task.id.clone(),
             PathBuf::from(task.source.clone()),
             PathBuf::from(task.target.clone()),
@@ -8449,6 +8600,7 @@ fn recurring_schedule_history_maintenance_failures(
     failures
 }
 
+#[cfg(test)]
 fn persist_patched_sync_task_and_collect_history_warnings(
     update: UpdateSyncTaskRequest,
     state: &AppState,
@@ -9452,6 +9604,8 @@ pub fn run() {
         .manage(AppState {
             config_store: managed_config_store,
             log_manager: managed_log_manager,
+            task_log_batch_subscriptions: Arc::new(StdMutex::new(HashMap::new())),
+            task_log_batch_subscription_seq: Arc::new(AtomicU64::new(0)),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_run_cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             dry_running_tasks: Arc::new(RwLock::new(HashSet::new())),
@@ -9502,6 +9656,8 @@ pub fn run() {
             update_settings,
             reset_settings,
             sync_dry_run,
+            subscribe_task_log_batches,
+            unsubscribe_task_log_batches,
             find_orphan_files,
             delete_orphan_files,
             list_conflict_review_sessions,
