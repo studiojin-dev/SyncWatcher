@@ -30,6 +30,7 @@ mod integration_tests {
         classify_missing_target_path, close_conflict_review_session_internal,
         compute_volume_mount_diff, create_sync_task_internal, decide_autostart_launch,
         decide_runtime_auto_unmount, delete_sync_task_internal_core, dequeue_runtime_sync_task,
+        emit_dry_run_diff_batch, emit_sync_file_batch, emit_task_log_batch_transport,
         emit_task_log_with_recurring_detail, enqueue_runtime_sync_task_internal,
         enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
         find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
@@ -52,17 +53,15 @@ mod integration_tests {
         set_auto_unmount_session_disabled_internal,
         should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
-        take_runtime_pending_sync_task, unix_now_ms, validate_dry_run_artifact,
-        validate_runtime_tasks, validate_control_plane_auth, volume_watch_next_tick_delay,
-        AppState, CancelOperationType,
-        ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
-        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunDiffBatchEvent,
-        DryRunLiveState, SyncEventOrigin, SyncFileBatchEvent, TaskLogBatchSubscription,
-        emit_dry_run_diff_batch, emit_sync_file_batch, emit_task_log_batch_transport,
-        KeychainCredentialAction, RuntimeActiveProducer, RuntimeAutoUnmountDecision,
-        RuntimeExclusionSet, RuntimeProducerKind, RuntimeSyncEnqueueResult, RuntimeSyncTask,
-        RuntimeTaskValidationCode, RuntimeTaskValidationIssue, SyncLiveState,
-        TargetNewerConflictItem, VolumeEmitDebounceState,
+        take_runtime_pending_sync_task, unix_now_ms, validate_control_plane_auth,
+        validate_dry_run_artifact, validate_runtime_tasks, volume_watch_next_tick_delay, AppState,
+        CancelOperationType, ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction,
+        ConflictResolutionRequest, ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem,
+        DryRunDiffBatchEvent, DryRunLiveState, KeychainCredentialAction, RuntimeActiveProducer,
+        RuntimeAutoUnmountDecision, RuntimeExclusionSet, RuntimeProducerKind,
+        RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
+        RuntimeTaskValidationIssue, SyncEventOrigin, SyncFileBatchEvent, SyncLiveState,
+        TargetNewerConflictItem, TaskLogBatchSubscription, VolumeEmitDebounceState,
     };
     use serde::de::DeserializeOwned;
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -72,9 +71,9 @@ mod integration_tests {
     use std::sync::{Arc, Mutex as StdMutex, OnceLock};
     use std::time::{Duration, Instant};
     use tauri::ipc::{Channel, InvokeResponseBody};
-    use tauri::Manager;
     use tauri::test::{mock_builder, mock_context, noop_assets};
     use tauri::Listener;
+    use tauri::Manager;
     use tempfile::tempdir;
     use tokio::sync::{Mutex, Notify, RwLock};
     use tokio_util::sync::CancellationToken;
@@ -112,10 +111,17 @@ mod integration_tests {
     }
 
     fn build_network_mount() -> NetworkMountRecord {
+        build_network_mount_with_credentials("smb://nas.local/share", Some("backup-user"))
+    }
+
+    fn build_network_mount_with_credentials(
+        remount_url: &str,
+        username: Option<&str>,
+    ) -> NetworkMountRecord {
         NetworkMountRecord {
             scheme: NetworkMountScheme::Smb,
-            remount_url: "smb://nas.local/share".to_string(),
-            username: Some("backup-user".to_string()),
+            remount_url: remount_url.to_string(),
+            username: username.map(ToString::to_string),
             mount_root_path: "/Volumes/share".to_string(),
             relative_path_from_mount_root: ".".to_string(),
             enabled: true,
@@ -298,8 +304,7 @@ mod integration_tests {
         app.listen_any(event_name, move |event| {
             let payload = serde_json::from_str::<T>(event.payload())
                 .expect("event payload should deserialize");
-            tx.send(payload)
-                .expect("event payload should be received");
+            tx.send(payload).expect("event payload should be received");
         });
         rx
     }
@@ -608,7 +613,8 @@ mod integration_tests {
     fn test_emit_dry_run_diff_batch_prefers_channel_over_event_fallback() {
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
-        let event_rx = listen_for_named_event::<DryRunDiffBatchEvent, _>(&app_handle, "dry-run-diff-batch");
+        let event_rx =
+            listen_for_named_event::<DryRunDiffBatchEvent, _>(&app_handle, "dry-run-diff-batch");
         let (channel, channel_rx) = build_channel_receiver::<DryRunDiffBatchEvent>();
         let event = DryRunDiffBatchEvent {
             task_id: "task-1".to_string(),
@@ -645,7 +651,8 @@ mod integration_tests {
     fn test_emit_dry_run_diff_batch_falls_back_to_event_without_channel() {
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
-        let event_rx = listen_for_named_event::<DryRunDiffBatchEvent, _>(&app_handle, "dry-run-diff-batch");
+        let event_rx =
+            listen_for_named_event::<DryRunDiffBatchEvent, _>(&app_handle, "dry-run-diff-batch");
         let event = DryRunDiffBatchEvent {
             task_id: "task-1".to_string(),
             phase: DryRunPhase::Comparing,
@@ -680,7 +687,8 @@ mod integration_tests {
     fn test_emit_sync_file_batch_prefers_channel_over_event_fallback() {
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
-        let event_rx = listen_for_named_event::<SyncFileBatchEvent, _>(&app_handle, "sync-file-batch");
+        let event_rx =
+            listen_for_named_event::<SyncFileBatchEvent, _>(&app_handle, "sync-file-batch");
         let (channel, channel_rx) = build_channel_receiver::<SyncFileBatchEvent>();
         let event = SyncFileBatchEvent {
             task_id: "task-1".to_string(),
@@ -874,9 +882,15 @@ mod integration_tests {
                 source: "/tmp/source".to_string(),
                 target: "/tmp/target".to_string(),
                 source_bookmark: Some(String::new()),
-                source_network_mount: None,
+                source_network_mount: Some(build_network_mount_with_credentials(
+                    "smb://alice:secret@nas.local/share",
+                    None,
+                )),
                 target_bookmark: Some("   ".to_string()),
-                target_network_mount: None,
+                target_network_mount: Some(build_network_mount_with_credentials(
+                    "smb://backup-user:target-secret@nas.local/share",
+                    Some("saved-user"),
+                )),
                 checksum_mode: false,
                 verify_after_copy: true,
                 exclusion_sets: Vec::new(),
@@ -899,6 +913,40 @@ mod integration_tests {
 
         assert_eq!(created.source_bookmark, None);
         assert_eq!(created.target_bookmark, None);
+        assert_eq!(
+            created
+                .source_network_mount
+                .as_ref()
+                .expect("source network mount should exist")
+                .remount_url,
+            "smb://nas.local/share"
+        );
+        assert_eq!(
+            created
+                .source_network_mount
+                .as_ref()
+                .expect("source network mount should exist")
+                .username
+                .as_deref(),
+            Some("alice")
+        );
+        assert_eq!(
+            created
+                .target_network_mount
+                .as_ref()
+                .expect("target network mount should exist")
+                .remount_url,
+            "smb://nas.local/share"
+        );
+        assert_eq!(
+            created
+                .target_network_mount
+                .as_ref()
+                .expect("target network mount should exist")
+                .username
+                .as_deref(),
+            Some("saved-user")
+        );
 
         let tasks = state
             .config_store
@@ -907,6 +955,71 @@ mod integration_tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].source_bookmark, None);
         assert_eq!(tasks[0].target_bookmark, None);
+        assert_eq!(
+            tasks[0]
+                .source_network_mount
+                .as_ref()
+                .expect("source network mount should exist")
+                .remount_url,
+            "smb://nas.local/share"
+        );
+        assert_eq!(
+            tasks[0]
+                .source_network_mount
+                .as_ref()
+                .expect("source network mount should exist")
+                .username
+                .as_deref(),
+            Some("alice")
+        );
+        let raw = std::fs::read_to_string(state.config_store.tasks_file_path())
+            .expect("tasks file should exist");
+        assert!(!raw.contains("secret@"));
+        assert!(!raw.contains("target-secret@"));
+    }
+
+    #[test]
+    fn test_canonicalize_repaired_config_store_file_scrubs_network_mount_credentials() {
+        let content = serde_yaml::to_string(&vec![SyncTaskRecord {
+            id: "task-repair".to_string(),
+            name: "Task".to_string(),
+            source: "/Volumes/share/source".to_string(),
+            source_bookmark: None,
+            source_network_mount: Some(build_network_mount_with_credentials(
+                "smb://alice:secret@nas.local/share",
+                None,
+            )),
+            target: "/Volumes/share/target".to_string(),
+            target_bookmark: None,
+            target_network_mount: Some(build_network_mount_with_credentials(
+                "smb://backup-user:target-secret@nas.local/share",
+                Some("saved-user"),
+            )),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        }])
+        .expect("repair content should serialize");
+
+        let canonical = crate::canonicalize_repaired_config_store_file(
+            crate::ConfigStoreFileScope::SyncTasks,
+            &content,
+        )
+        .expect("repair canonicalization should succeed");
+
+        assert!(!canonical.contains("secret@"));
+        assert!(!canonical.contains("target-secret@"));
+        assert!(canonical.contains("remountUrl: smb://nas.local/share"));
+        assert!(canonical.contains("username: alice"));
+        assert!(canonical.contains("username: saved-user"));
     }
 
     #[test]

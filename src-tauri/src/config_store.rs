@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use reqwest::Url;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -501,7 +502,7 @@ impl ConfigStore {
         let path = self.tasks_file_path();
         let stored: Vec<SyncTaskRecord> =
             self.load_or_create_yaml(&path, Vec::<SyncTaskRecord>::new())?;
-        let normalized = normalize_task_records(stored);
+        let normalized = normalize_task_records(stored)?;
         self.write_if_changed(&path, &normalized)?;
         Ok(normalized)
     }
@@ -989,6 +990,17 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_trimmed_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
 fn normalize_mcp_auth_token(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
@@ -1031,7 +1043,41 @@ fn normalize_loaded_settings(
     Ok(settings)
 }
 
-fn normalize_network_mount(
+fn sanitize_network_mount_locator(
+    remount_url: &str,
+    username: Option<String>,
+) -> Result<(String, Option<String>), ConfigStoreError> {
+    let mut url = Url::parse(remount_url).map_err(|error| ConfigStoreError::ValidationError {
+        message: format!("Network mount remount URL is invalid: {error}"),
+    })?;
+    if url.scheme() != "smb" {
+        return Err(ConfigStoreError::ValidationError {
+            message: "Network mount remount URL must use smb://".to_string(),
+        });
+    }
+
+    let extracted_username = {
+        let user = url.username().trim();
+        if user.is_empty() {
+            None
+        } else {
+            Some(user.to_string())
+        }
+    };
+
+    url.set_username("")
+        .map_err(|_| ConfigStoreError::ValidationError {
+            message: "Network mount remount URL username could not be sanitized".to_string(),
+        })?;
+    url.set_password(None)
+        .map_err(|_| ConfigStoreError::ValidationError {
+            message: "Network mount remount URL password could not be sanitized".to_string(),
+        })?;
+
+    Ok((url.to_string(), username.or(extracted_username)))
+}
+
+pub(crate) fn normalize_network_mount(
     value: Option<NetworkMountRecord>,
 ) -> Result<Option<NetworkMountRecord>, ConfigStoreError> {
     let Some(mut mount) = value else {
@@ -1041,7 +1087,7 @@ fn normalize_network_mount(
     mount.remount_url = mount.remount_url.trim().to_string();
     mount.mount_root_path = mount.mount_root_path.trim().to_string();
     mount.relative_path_from_mount_root = mount.relative_path_from_mount_root.trim().to_string();
-    mount.username = normalize_optional_string(mount.username);
+    mount.username = normalize_trimmed_optional_string(mount.username);
 
     if mount.remount_url.is_empty() {
         return Err(ConfigStoreError::ValidationError {
@@ -1058,6 +1104,11 @@ fn normalize_network_mount(
     if mount.relative_path_from_mount_root.is_empty() {
         mount.relative_path_from_mount_root = ".".to_string();
     }
+
+    let (remount_url, username) =
+        sanitize_network_mount_locator(&mount.remount_url, mount.username)?;
+    mount.remount_url = remount_url;
+    mount.username = username;
 
     Ok(Some(mount))
 }
@@ -1481,14 +1532,18 @@ fn normalize_task_exclusion_set_ids(ids: Vec<String>) -> Vec<String> {
     normalized
 }
 
-fn normalize_task_records(tasks: Vec<SyncTaskRecord>) -> Vec<SyncTaskRecord> {
+pub(crate) fn normalize_task_records(
+    tasks: Vec<SyncTaskRecord>,
+) -> Result<Vec<SyncTaskRecord>, ConfigStoreError> {
     tasks
         .into_iter()
-        .map(|mut task| {
+        .map(|mut task| -> Result<SyncTaskRecord, ConfigStoreError> {
             task.source_bookmark = normalize_optional_string(task.source_bookmark);
             task.target_bookmark = normalize_optional_string(task.target_bookmark);
+            task.source_network_mount = normalize_network_mount(task.source_network_mount)?;
+            task.target_network_mount = normalize_network_mount(task.target_network_mount)?;
             task.exclusion_sets = normalize_task_exclusion_set_ids(task.exclusion_sets);
-            task
+            Ok(task)
         })
         .collect()
 }
@@ -1540,6 +1595,17 @@ fn should_enable_auto_unmount(task: &SyncTaskRecord) -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn build_network_mount(remount_url: &str, username: Option<&str>) -> NetworkMountRecord {
+        NetworkMountRecord {
+            scheme: NetworkMountScheme::Smb,
+            remount_url: remount_url.to_string(),
+            username: username.map(ToString::to_string),
+            mount_root_path: "/Volumes/share".to_string(),
+            relative_path_from_mount_root: ".".to_string(),
+            enabled: true,
+        }
+    }
 
     #[test]
     fn normalize_uuid_source_rebuilds_token() {
@@ -1855,6 +1921,75 @@ mod tests {
     }
 
     #[test]
+    fn normalize_network_mount_strips_embedded_credentials_and_promotes_username() {
+        let normalized = normalize_network_mount(Some(build_network_mount(
+            "smb://alice:secret@nas.local/share",
+            None,
+        )))
+        .expect("network mount should normalize")
+        .expect("network mount should exist");
+
+        assert_eq!(normalized.remount_url, "smb://nas.local/share");
+        assert_eq!(normalized.username.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn load_tasks_scrubs_network_mount_credentials_on_disk() {
+        let temp = tempdir().expect("tempdir should be created");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+        let tasks = vec![SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/Volumes/share/source".to_string(),
+            target: "/Volumes/share/target".to_string(),
+            source_bookmark: None,
+            source_network_mount: Some(build_network_mount(
+                "smb://alice:secret@nas.local/share",
+                None,
+            )),
+            target_bookmark: None,
+            target_network_mount: Some(build_network_mount(
+                "smb://backup-user:target-secret@nas.local/share",
+                Some("saved-user"),
+            )),
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        }];
+
+        store
+            .write_yaml_atomic(&store.tasks_file_path(), &tasks)
+            .expect("should write tasks");
+
+        let loaded_tasks = store.load_tasks().expect("should load tasks");
+        let source_mount = loaded_tasks[0]
+            .source_network_mount
+            .as_ref()
+            .expect("source network mount should exist");
+        let target_mount = loaded_tasks[0]
+            .target_network_mount
+            .as_ref()
+            .expect("target network mount should exist");
+        assert_eq!(source_mount.remount_url, "smb://nas.local/share");
+        assert_eq!(source_mount.username.as_deref(), Some("alice"));
+        assert_eq!(target_mount.remount_url, "smb://nas.local/share");
+        assert_eq!(target_mount.username.as_deref(), Some("saved-user"));
+
+        let raw = fs::read_to_string(store.tasks_file_path()).expect("tasks file should exist");
+        assert!(!raw.contains("secret@"));
+        assert!(!raw.contains("target-secret@"));
+        assert!(raw.contains("remountUrl: smb://nas.local/share"));
+    }
+
+    #[test]
     fn create_rejects_unsupported_custom_recurring_cron() {
         let error = build_sync_task_record(
             "task-1".to_string(),
@@ -1979,6 +2114,62 @@ mod tests {
         .expect_err("invalid recurring schedule id should be rejected");
 
         assert!(matches!(error, ConfigStoreError::ValidationError { .. }));
+    }
+
+    #[test]
+    fn update_sanitizes_network_mount_credentials() {
+        let task = normalize_sync_task(SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            source_network_mount: None,
+            target_bookmark: None,
+            target_network_mount: None,
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        })
+        .expect("task should normalize");
+
+        let updated = apply_sync_task_update(
+            task,
+            &UpdateSyncTaskRequest {
+                task_id: "task-1".to_string(),
+                source_network_mount: Some(build_network_mount(
+                    "smb://alice:secret@nas.local/share",
+                    None,
+                )),
+                target_network_mount: Some(build_network_mount(
+                    "smb://backup-user:target-secret@nas.local/share",
+                    Some("saved-user"),
+                )),
+                ..UpdateSyncTaskRequest::default()
+            },
+        )
+        .expect("network mount update should normalize");
+
+        let source_mount = updated
+            .source_network_mount
+            .as_ref()
+            .expect("source network mount should exist");
+        let target_mount = updated
+            .target_network_mount
+            .as_ref()
+            .expect("target network mount should exist");
+        assert_eq!(source_mount.remount_url, "smb://nas.local/share");
+        assert_eq!(source_mount.username.as_deref(), Some("alice"));
+        assert_eq!(target_mount.remount_url, "smb://nas.local/share");
+        assert_eq!(target_mount.username.as_deref(), Some("saved-user"));
     }
 
     #[test]

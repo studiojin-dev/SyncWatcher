@@ -59,7 +59,9 @@ use config_store::{
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
 use license::generate_licenses_report;
-use logging::{add_log, get_system_logs, get_task_logs, LogCategory, LogManager, DEFAULT_MAX_LOG_LINES};
+use logging::{
+    add_log, get_system_logs, get_task_logs, LogCategory, LogManager, DEFAULT_MAX_LOG_LINES,
+};
 use mcp_jobs::{McpJobKind, McpJobProgress, McpJobRecord, McpJobRegistry, McpJobStatus};
 use network_mount::{NetworkMountCapturePayload, NetworkMountRole};
 use recurring::{
@@ -1062,9 +1064,13 @@ fn normalize_optional_bookmark(value: Option<String>) -> Option<String> {
     })
 }
 
-fn normalize_sync_task_record(mut task: SyncTaskRecord) -> SyncTaskRecord {
+fn normalize_sync_task_record(
+    mut task: SyncTaskRecord,
+) -> Result<SyncTaskRecord, ConfigStoreError> {
     task.source_bookmark = normalize_optional_bookmark(task.source_bookmark);
     task.target_bookmark = normalize_optional_bookmark(task.target_bookmark);
+    task.source_network_mount = config_store::normalize_network_mount(task.source_network_mount)?;
+    task.target_network_mount = config_store::normalize_network_mount(task.target_network_mount)?;
 
     if matches!(
         task.source_type.clone(),
@@ -1079,7 +1085,7 @@ fn normalize_sync_task_record(mut task: SyncTaskRecord) -> SyncTaskRecord {
     task.auto_unmount = task.auto_unmount
         && task.watch_mode
         && is_uuid_source(&task.source, task.source_type.clone());
-    task
+    Ok(task)
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1298,6 +1304,25 @@ fn validate_repaired_config_store_file(
             let sets = serde_yaml::from_str::<Vec<ExclusionSetRecord>>(content)
                 .map_err(|error| format!("Invalid exclusion_sets.yaml content: {error}"))?;
             validate_exclusion_sets(&sets).map_err(config_store_error_to_string)
+        }
+    }
+}
+
+fn canonicalize_repaired_config_store_file(
+    scope: ConfigStoreFileScope,
+    content: &str,
+) -> Result<String, String> {
+    match scope {
+        ConfigStoreFileScope::SyncTasks => {
+            let tasks = serde_yaml::from_str::<Vec<SyncTaskRecord>>(content)
+                .map_err(|error| format!("Invalid tasks.yaml content: {error}"))?;
+            let normalized = config_store::normalize_task_records(tasks)
+                .map_err(config_store_error_to_string)?;
+            serde_yaml::to_string(&normalized)
+                .map_err(|error| format!("Failed to serialize tasks.yaml content: {error}"))
+        }
+        ConfigStoreFileScope::Settings | ConfigStoreFileScope::ExclusionSets => {
+            Ok(content.to_string())
         }
     }
 }
@@ -6236,6 +6261,7 @@ async fn repair_config_store_file(
 ) -> Result<(), String> {
     let scope = ConfigStoreFileScope::parse(&scope)?;
     validate_repaired_config_store_file(scope, &content)?;
+    let content = canonicalize_repaired_config_store_file(scope, &content)?;
 
     let path = scope.file_path(&state.config_store);
     state
@@ -8498,7 +8524,7 @@ async fn create_sync_task_internal(
     app: Option<&tauri::AppHandle>,
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
-    let mut task = normalize_sync_task_record(task);
+    let mut task = normalize_sync_task_record(task).map_err(config_store_error_to_string)?;
     validate_strict_recurring_schedule_ids(&task.recurring_schedules).map_err(|message| {
         config_store_error_to_string(ConfigStoreError::ValidationError { message })
     })?;

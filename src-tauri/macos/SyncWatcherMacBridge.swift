@@ -109,6 +109,29 @@ private func relativePath(from rootPath: String, to fullPath: String) -> String 
   return trimmed.isEmpty ? "." : trimmed
 }
 
+private func sanitizeNetworkRemountURL(_ url: URL) -> (url: URL, username: String?)? {
+  guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+    return nil
+  }
+
+  let trimmedUser = components.user?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let username: String?
+  if let trimmedUser, !trimmedUser.isEmpty {
+    username = trimmedUser
+  } else {
+    username = nil
+  }
+
+  components.user = nil
+  components.password = nil
+
+  guard let sanitizedURL = components.url else {
+    return nil
+  }
+
+  return (sanitizedURL, username)
+}
+
 private func encodeJSON<T: Encodable>(_ payload: T) -> String {
   let encoder = JSONEncoder()
   encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -380,11 +403,23 @@ public func syncwatcher_capture_network_mount(_ pathPtr: UnsafePointer<CChar>?) 
       return bridgeString(encodeJSON(payload))
     }
 
+    guard let sanitizedRemount = sanitizeNetworkRemountURL(remountURL) else {
+      let payload = NetworkMountCapturePayload(
+        scheme: remountURL.scheme?.lowercased() ?? "",
+        remountUrl: "",
+        username: nil,
+        mountRootPath: values.volume?.path ?? "",
+        relativePathFromMountRoot: ".",
+        error: "Failed to sanitize network remount URL."
+      )
+      return bridgeString(encodeJSON(payload))
+    }
+
     guard remountURL.scheme?.lowercased() == "smb" else {
       let payload = NetworkMountCapturePayload(
         scheme: remountURL.scheme?.lowercased() ?? "",
-        remountUrl: remountURL.absoluteString,
-        username: remountURL.user,
+        remountUrl: sanitizedRemount.url.absoluteString,
+        username: sanitizedRemount.username,
         mountRootPath: values.volume?.path ?? "",
         relativePathFromMountRoot: ".",
         error: "Unsupported network scheme."
@@ -395,8 +430,8 @@ public func syncwatcher_capture_network_mount(_ pathPtr: UnsafePointer<CChar>?) 
     let mountRootPath = values.volume?.path ?? path
     let payload = NetworkMountCapturePayload(
       scheme: "smb",
-      remountUrl: remountURL.absoluteString,
-      username: remountURL.user,
+      remountUrl: sanitizedRemount.url.absoluteString,
+      username: sanitizedRemount.username,
       mountRootPath: mountRootPath,
       relativePathFromMountRoot: relativePath(from: mountRootPath, to: path),
       error: nil
