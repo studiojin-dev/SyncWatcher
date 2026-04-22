@@ -208,6 +208,7 @@ fi
 
 echo "Setting CFBundleVersion=${APP_STORE_BUILD_NUMBER}"
 plutil -replace CFBundleVersion -string "${APP_STORE_BUILD_NUMBER}" "${INFO_PLIST}"
+plutil -remove LSRequiresCarbon "${INFO_PLIST}" 2>/dev/null || true
 
 MAIN_EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${INFO_PLIST}")"
 if [[ -z "${MAIN_EXECUTABLE_NAME}" ]]; then

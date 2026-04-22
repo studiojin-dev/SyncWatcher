@@ -18,7 +18,7 @@
 ## App Store Connect
 
 - Create the macOS app as a free app.
-- Add the non-consumable in-app purchase `Lifetime Supporter`.
+- Add the non-consumable in-app purchase `Lifetime Supporter` with product ID `LifetimeSupporter`.
 - Set the App Store product page URL in `VITE_APP_STORE_URL`.
 - Inject `SYNCWATCHER_APP_STORE_APP_ID` locally for App Store builds when you want best-effort metadata-based update checks.
 - Fill in the Privacy Policy URL and Support URL.
@@ -31,7 +31,7 @@
 Use review notes that clearly state the following:
 
 - SyncWatcher is free to download and use.
-- `Lifetime Supporter` is an optional one-time support purchase.
+- `Lifetime Supporter` (`LifetimeSupporter`) is an optional one-time support purchase.
 - The purchase does not unlock additional sync features or change existing behavior.
 - The Mac App Store build uses StoreKit 2 only.
 - The GitHub DMG build is a separate distribution channel with Lemon Squeezy support purchases.

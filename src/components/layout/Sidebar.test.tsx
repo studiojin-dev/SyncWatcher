@@ -42,6 +42,7 @@ const mockState = vi.hoisted(() => ({
     'license.enterLicense': 'Enter License',
     'license.manage': 'Manage License',
     'license.appStorePurchase': 'Purchase Supporter',
+    'license.appStoreSupporterActive': 'Support active',
     'license.restore': 'Restore',
     'common.loading': 'Loading...',
   } as Record<string, string>,

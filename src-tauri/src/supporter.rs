@@ -5,7 +5,7 @@ use crate::apple_bridge;
 use crate::distribution::{channel_policy, detect_distribution_channel, DistributionChannel};
 use crate::license_validation;
 
-const APP_STORE_SUPPORTER_PRODUCT_ID: &str = "dev.studiojin.syncwatcher.lifetime_supporter";
+const APP_STORE_SUPPORTER_PRODUCT_ID: &str = "LifetimeSupporter";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,8 +127,13 @@ pub async fn restore_supporter_for_app(
 
 #[cfg(test)]
 mod tests {
-    use super::supporter_status_for_channel;
+    use super::{supporter_status_for_channel, APP_STORE_SUPPORTER_PRODUCT_ID};
     use crate::distribution::DistributionChannel;
+
+    #[test]
+    fn app_store_supporter_product_id_matches_app_store_connect() {
+        assert_eq!(APP_STORE_SUPPORTER_PRODUCT_ID, "LifetimeSupporter");
+    }
 
     #[test]
     fn supporter_status_uses_provider_for_distribution_channel() {

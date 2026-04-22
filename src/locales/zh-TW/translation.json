@@ -615,7 +615,7 @@
       "removeFailed": "移除授權失敗。",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "這是用來支持開發的一次性可選應用程式內購買，不會解鎖額外功能。",
-      "appStoreSupportStatus": "Mac App Store 支援狀態",
+      "appStoreSupportStatus": "支援",
       "appStorePurchase": "成為支持者",
       "appStorePurchasing": "購買中...",
       "appStorePurchased": "感謝支持 SyncWatcher！",
@@ -624,7 +624,7 @@
       "appStoreRestoring": "恢復中...",
       "appStorePurchaseFailed": "無法完成 App Store 購買。",
       "appStorePending": "App Store 購買仍在等待批准。",
-      "appStoreSupporterActive": "App Store 支援已啟用",
+      "appStoreSupporterActive": "支援已啟用",
       "restore": "恢復購買"
     }
   }

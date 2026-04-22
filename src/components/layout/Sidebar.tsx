@@ -191,7 +191,7 @@ function Sidebar({ activeTab, onTabChange }: SidebarProps) {
                                 className="w-full text-center text-[10px] font-black uppercase tracking-widest bg-[var(--bg-secondary)] text-[var(--text-primary)] py-2 border-t border-[var(--border-main)] hover:bg-[var(--bg-primary)] transition-colors"
                             >
                                 {policy.supportsStoreKitRestore
-                                    ? t('license.restore')
+                                    ? t('license.appStoreSupporterActive')
                                     : t('license.manage')}
                             </button>
                         </div>
