@@ -615,7 +615,7 @@
       "removeFailed": "ライセンスを解除できませんでした。",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "開発支援のための任意の一回限りのアプリ内課金です。追加機能はアンロックされません。",
-      "appStoreSupportStatus": "Mac App Store での支援状態",
+      "appStoreSupportStatus": "支援",
       "appStorePurchase": "サポーターになる",
       "appStorePurchasing": "購入処理中...",
       "appStorePurchased": "SyncWatcher を支援していただきありがとうございます！",
@@ -624,7 +624,7 @@
       "appStoreRestoring": "復元中...",
       "appStorePurchaseFailed": "App Store 購入を完了できませんでした。",
       "appStorePending": "App Store 購入はまだ承認待ちです。",
-      "appStoreSupporterActive": "App Store サポーター有効",
+      "appStoreSupporterActive": "支援が有効です",
       "restore": "購入を復元"
     }
   }

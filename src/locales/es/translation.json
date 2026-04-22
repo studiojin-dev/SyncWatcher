@@ -615,7 +615,7 @@
       "removeFailed": "No se pudo eliminar la licencia.",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "Esta es una compra única opcional dentro de la app para apoyar el desarrollo. No desbloquea funciones extra.",
-      "appStoreSupportStatus": "Apoyo de Mac App Store",
+      "appStoreSupportStatus": "Apoyo",
       "appStorePurchase": "Hazte patrocinador",
       "appStorePurchasing": "Procesando compra...",
       "appStorePurchased": "¡Gracias por apoyar SyncWatcher!",
@@ -624,7 +624,7 @@
       "appStoreRestoring": "Restaurando...",
       "appStorePurchaseFailed": "No se pudo completar la compra en App Store.",
       "appStorePending": "La compra de App Store sigue pendiente de aprobación.",
-      "appStoreSupporterActive": "Patrocinio de App Store activo",
+      "appStoreSupporterActive": "Apoyo activo",
       "restore": "Restaurar compra"
     }
   }

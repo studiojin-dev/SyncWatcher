@@ -372,13 +372,15 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
                             >
                                 {t('common.cancel')}
                             </button>
-                            <button
-                                onClick={() => void handleRestore()}
-                                disabled={isBusy}
-                                className="border-2 border-[var(--border-main)] px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
-                            >
-                                {state === 'restoring' ? t('license.appStoreRestoring') : t('license.restore')}
-                            </button>
+                            {!status?.isRegistered ? (
+                                <button
+                                    onClick={() => void handleRestore()}
+                                    disabled={isBusy}
+                                    className="border-2 border-[var(--border-main)] px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
+                                >
+                                    {state === 'restoring' ? t('license.appStoreRestoring') : t('license.restore')}
+                                </button>
+                            ) : null}
                             {!status?.isRegistered ? (
                                 <button
                                     onClick={() => void handlePurchase()}

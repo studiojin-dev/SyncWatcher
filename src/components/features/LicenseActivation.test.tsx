@@ -59,6 +59,7 @@ vi.mock('react-i18next', () => ({
         'license.appStoreTitle': 'App Store Support',
         'license.appStoreDescription': 'Support SyncWatcher in the App Store.',
         'license.appStoreSupportStatus': 'Support status',
+        'license.appStoreSupporterActive': 'Support active',
         'license.appStorePurchase': 'Purchase Supporter',
         'license.appStorePurchasing': 'Purchasing...',
         'license.appStorePurchased': 'Purchased!',
@@ -214,6 +215,32 @@ describe('LicenseActivation', () => {
     expect(screen.queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restore' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Purchase Supporter' })).toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith('get_license_status');
+  });
+
+  it('hides App Store purchase and restore controls after supporter status is active', async () => {
+    distributionState.info = createDistributionInfo({
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+    });
+
+    invokeMock.mockImplementation(async (command) => {
+      switch (command) {
+        case 'get_supporter_status':
+          return { isRegistered: true, provider: 'app_store' };
+        default:
+          throw new Error(`Unexpected command: ${command}`);
+      }
+    });
+
+    render(<LicenseActivation open onClose={vi.fn()} />);
+
+    expect(await screen.findByText('Registered')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restore' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Purchase Supporter' })).not.toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith('get_license_status');
   });
 });

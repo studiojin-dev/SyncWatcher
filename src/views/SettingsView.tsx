@@ -351,7 +351,7 @@ function SettingsView() {
                                     ? t('common.loading')
                                     : policy.supportsStoreKitPurchase
                                         ? settings.isRegistered
-                                            ? t('license.restore')
+                                            ? t('license.appStoreSupporterActive')
                                             : t('license.appStorePurchase')
                                         : settings.isRegistered
                                             ? t('license.manage')
