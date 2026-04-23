@@ -541,10 +541,15 @@ jobs:
       - name: Dispatch stable release notes sync
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
           set -euo pipefail
 
-          gh workflow run dispatch-studiojin-home-release-notes.yml \
-            --ref main \
-            -f tag_name="${TAG_NAME}"
+          jq -n --arg tag_name "${TAG_NAME}" \
+            '{ref: "main", inputs: {tag_name: $tag_name}}' \
+            | gh api \
+                --method POST \
+                -H 'Accept: application/vnd.github+json' \
+                "repos/${GH_REPO}/actions/workflows/dispatch-studiojin-home-release-notes.yml/dispatches" \
+                --input -
