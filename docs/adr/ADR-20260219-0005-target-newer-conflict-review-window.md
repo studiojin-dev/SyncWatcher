@@ -48,6 +48,11 @@ TL;DR: When target files are newer than source, skip auto-copy and defer handlin
    - If `hasPendingConflicts = true`, skip auto unmount in manual/runtime paths.
 10. Session persistence:
     - Memory-only (lost on app restart).
+11. Repeated detections for the same `SyncTask` and same resolved source/target roots:
+    - If a pending conflict review session already exists for the task and the same resolved roots, merge new conflict detections into that session instead of creating another one.
+    - Treat `targetPath` as the duplicate key.
+    - When the same target file appears again, keep only the latest detected source/target snapshot as the pending review item while retaining resolved review items as audit history.
+    - Apply this to manual sync, watch sync, and recurring scheduled sync.
 
 ## Consequences
 
@@ -55,6 +60,9 @@ TL;DR: When target files are newer than source, skip auto-copy and defer handlin
 - Introduces additional review step and delayed completion for conflict cases.
 - Keeps watch-mode non-blocking while still surfacing conflicts in queue + notification path.
 - Memory-only sessions are simpler but unresolved sessions do not survive restart.
+- Prevents recurring or repeated sync runs from showing multiple review sessions for the same unresolved task conflict.
+- A repeated conflict for the same target file refreshes the pending review item, so the user reviews the latest source/target state rather than stale duplicates.
+- If a task's source or target roots change while conflicts are pending, old-root conflicts remain in a separate review session to avoid misleading cross-root resolution.
 
 ## Alternatives Considered
 

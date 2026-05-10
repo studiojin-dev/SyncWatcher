@@ -61,4 +61,28 @@ describe('ConflictSessionListPanel', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onOpenSession).toHaveBeenCalledWith('session-1');
   });
+
+  it('renders a merged task session as one row with updated pending count', () => {
+    render(
+      <ConflictSessionListPanel
+        sessions={[
+          buildSession({
+            id: 'session-merged',
+            taskId: 'task-merged',
+            taskName: 'Merged Task',
+            totalCount: 3,
+            pendingCount: 3,
+            resolvedCount: 0,
+          }),
+        ]}
+        loading={false}
+        onRefresh={vi.fn()}
+        onOpenSession={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('1 session(s)')).toBeInTheDocument();
+    expect(screen.getByText(/pending 3\/3/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /검토 창 열기/i })).toHaveLength(1);
+  });
 });

@@ -37,6 +37,15 @@ If docs are unavailable, do not make hard assumptions. State uncertainty or ask 
 - Do not ship changes that conflict with existing ADRs before updating ADRs
 - If new constraints or non-obvious choices appear, confirm ADR need first
 
+### App Store Review Gate (MUST)
+
+- Before App Store-related changes or submission, review
+  `docs/app-store-launch-checklist.md` and
+  `docs/adr/ADR-20260401-0021-MAS-app-store-channel-split-storekit-and-sandbox-bookmarks.md`.
+- Changes to Mac App Store updater, payment, license, sandbox, startup, or
+  packaging behavior MUST be checked against the Apple App Review guideline
+  gates and existing ADRs before implementation.
+
 ### Verification (MUST)
 
 Do not claim correctness without verification steps:

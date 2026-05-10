@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
@@ -52,7 +52,9 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-function buildSession() {
+type ConflictReviewTestSession = ReturnType<typeof buildBaseSession>;
+
+function buildBaseSession() {
   return {
     id: 'session-1',
     taskId: 'task-1',
@@ -77,6 +79,13 @@ function buildSession() {
         resolvedAtUnixMs: null,
       },
     ],
+  };
+}
+
+function buildSession(overrides: Partial<ConflictReviewTestSession> = {}) {
+  return {
+    ...buildBaseSession(),
+    ...overrides,
   };
 }
 
@@ -121,6 +130,64 @@ describe('ConflictReviewWindow', () => {
       }
       return null;
     });
+  });
+
+  it('reloads the open session when a conflict session update event arrives', async () => {
+    const listeners = new Map<string, (event: { payload: { sessionId: string } }) => void | Promise<void>>();
+    mockListen.mockImplementation(async (eventName: string, callback: (event: { payload: { sessionId: string } }) => void | Promise<void>) => {
+      listeners.set(eventName, callback);
+      return () => {};
+    });
+
+    let loadCount = 0;
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'get_conflict_review_session') {
+        loadCount += 1;
+        if (loadCount === 1) {
+          return buildSession();
+        }
+        return buildSession({
+          totalCount: 2,
+          pendingCount: 2,
+          items: [
+            ...buildBaseSession().items,
+            {
+              id: 'item-2',
+              relativePath: 'b.txt',
+              sourcePath: '/src/b.txt',
+              targetPath: '/dst/b.txt',
+              source: { size: 20, modifiedUnixMs: 1_700_000_000_000, createdUnixMs: null },
+              target: { size: 21, modifiedUnixMs: 1_700_000_000_500, createdUnixMs: null },
+              status: 'pending',
+              note: null,
+              resolvedAtUnixMs: null,
+            },
+          ],
+        });
+      }
+      if (command === 'get_conflict_item_preview') {
+        return {
+          kind: 'other',
+          sourceText: null,
+          targetText: null,
+          sourceTruncated: false,
+          targetTruncated: false,
+        };
+      }
+      return null;
+    });
+
+    render(<ConflictReviewWindow />);
+    await screen.findByText('Task 1 (task-1) · pending 1/1');
+
+    await act(async () => {
+      await listeners.get('conflict-review-session-updated')?.({
+        payload: { sessionId: 'session-1' },
+      });
+    });
+
+    expect(await screen.findByText('Task 1 (task-1) · pending 2/2')).toBeInTheDocument();
+    expect(mockInvoke.mock.calls.filter(([command]) => command === 'get_conflict_review_session')).toHaveLength(2);
   });
 
   it('opens in-app confirmation before force-skipping pending items on close', async () => {

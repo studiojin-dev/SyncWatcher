@@ -6,6 +6,7 @@ mod integration_tests {
         UpdateSyncTaskRequest,
     };
     use crate::control_plane::ControlPlaneRequest;
+    use crate::distribution::DistributionChannel;
     use crate::logging::{LogEvent, LogManager};
     use crate::mcp_jobs::McpJobRegistry;
     use crate::mcp_stdio::mcp_auth_token_from_args;
@@ -19,8 +20,8 @@ mod integration_tests {
     };
     use crate::security_scoped::SecurityScopedAccessManager;
     use crate::sync_engine::types::{
-        DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind, SyncFileEntry,
-        SyncFileStatus, TargetPreflightKind,
+        ConflictFileSnapshot, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind,
+        SyncFileEntry, SyncFileStatus, TargetNewerConflictCandidate, TargetPreflightKind,
     };
     use crate::system_integration::VolumeInfo;
     use crate::watcher::WatcherManager;
@@ -28,30 +29,30 @@ mod integration_tests {
         build_dry_run_artifact, build_runtime_watch_upstreams, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
-        compute_volume_mount_diff, create_sync_task_internal, decide_autostart_launch,
-        decide_runtime_auto_unmount, delete_sync_task_internal_core, dequeue_runtime_sync_task,
-        emit_dry_run_diff_batch, emit_sync_file_batch, emit_task_log_batch_transport,
-        emit_task_log_with_recurring_detail, enqueue_runtime_sync_task_internal,
-        enqueue_runtime_watch_bootstrap_tasks, ensure_non_overlapping_paths,
-        find_orphan_files_internal, find_runtime_orphan_target_conflict_issue,
-        find_runtime_task_validation_issue, find_runtime_watch_cycle,
-        find_task_source_recommendation, finish_runtime_producer, format_bytes_with_unit,
-        get_app_version, handle_volume_watch_event, handle_volume_watch_tick, has_autostart_arg,
-        is_auto_unmount_session_disabled_internal, is_runtime_watch_task_active, join_paths,
-        log_conflict_resolution_failure, log_conflict_resolution_success,
-        log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
-        normalize_uuid_sub_path, owner_license_debug_token_from_args, parse_uuid_source_path,
-        patch_sync_task_internal_core, persist_patched_sync_task_and_collect_history_warnings,
-        preflight_target_path, progress_phase_to_log_category,
-        prune_auto_unmount_session_disabled_tasks, read_current_conflict_file_info,
-        record_runtime_validation_issue, refresh_uuid_source_identity,
-        remove_runtime_sync_task_state, resolve_conflict_items_internal,
-        resolve_runtime_exclude_patterns, runtime_desired_watch_sources, runtime_find_watch_task,
-        runtime_get_state_internal, runtime_validation_issue_log_message,
-        runtime_watch_bootstrap_task_ids, runtime_watch_restart_task_ids,
-        runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
-        set_auto_unmount_session_disabled_internal,
-        should_reconcile_runtime_watchers_for_volume_change,
+        compute_volume_mount_diff, create_conflict_review_session, create_sync_task_internal,
+        decide_autostart_launch, decide_runtime_auto_unmount, delete_sync_task_internal_core,
+        dequeue_runtime_sync_task, emit_dry_run_diff_batch, emit_sync_file_batch,
+        emit_task_log_batch_transport, emit_task_log_with_recurring_detail,
+        enqueue_runtime_sync_task_internal, enqueue_runtime_watch_bootstrap_tasks,
+        ensure_non_overlapping_paths, find_orphan_files_internal,
+        find_runtime_orphan_target_conflict_issue, find_runtime_task_validation_issue,
+        find_runtime_watch_cycle, find_task_source_recommendation, finish_runtime_producer,
+        format_bytes_with_unit, get_app_version, handle_volume_watch_event,
+        handle_volume_watch_tick, has_autostart_arg, is_auto_unmount_session_disabled_internal,
+        is_runtime_watch_task_active, join_paths, log_conflict_resolution_failure,
+        log_conflict_resolution_success, log_conflict_skip_on_close,
+        mark_downstream_watch_tasks_settle_for_target, normalize_uuid_sub_path,
+        owner_license_debug_token_from_args, parse_uuid_source_path, patch_sync_task_internal_core,
+        persist_patched_sync_task_and_collect_history_warnings, preflight_target_path,
+        progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
+        read_current_conflict_file_info, record_runtime_validation_issue,
+        refresh_uuid_source_identity, remove_runtime_sync_task_state,
+        resolve_conflict_items_internal, resolve_runtime_exclude_patterns,
+        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
+        runtime_watch_restart_task_ids, runtime_watch_task_needs_restart,
+        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
+        should_include_check_for_updates_menu, should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_control_plane_auth,
         validate_dry_run_artifact, validate_runtime_tasks, volume_watch_next_tick_delay, AppState,
@@ -60,7 +61,7 @@ mod integration_tests {
         DryRunDiffBatchEvent, DryRunLiveState, KeychainCredentialAction, RuntimeActiveProducer,
         RuntimeAutoUnmountDecision, RuntimeExclusionSet, RuntimeProducerKind,
         RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
-        RuntimeTaskValidationIssue, SyncEventOrigin, SyncFileBatchEvent, SyncLiveState,
+        RuntimeTaskValidationIssue, SyncEventOrigin, SyncFileBatchEvent, SyncLiveState, SyncOrigin,
         TargetNewerConflictItem, TaskLogBatchSubscription, VolumeEmitDebounceState,
     };
     use serde::de::DeserializeOwned;
@@ -108,6 +109,16 @@ mod integration_tests {
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
         }
+    }
+
+    #[test]
+    fn check_for_updates_menu_is_hidden_for_app_store_channel() {
+        assert!(should_include_check_for_updates_menu(
+            DistributionChannel::Github
+        ));
+        assert!(!should_include_check_for_updates_menu(
+            DistributionChannel::AppStore
+        ));
     }
 
     fn build_network_mount() -> NetworkMountRecord {
@@ -299,7 +310,7 @@ mod integration_tests {
         app: &tauri::AppHandle<R>,
         event_name: &str,
     ) -> Receiver<T> {
-        let (tx, rx) = sync_channel(1);
+        let (tx, rx) = sync_channel(8);
         let event_name = event_name.to_string();
         app.listen_any(event_name, move |event| {
             let payload = serde_json::from_str::<T>(event.payload())
@@ -328,6 +339,30 @@ mod integration_tests {
             status: ConflictItemStatus::Pending,
             note: None,
             resolved_at_unix_ms: None,
+        }
+    }
+
+    fn build_conflict_candidate(
+        relative_path: &str,
+        source_path: &str,
+        target_path: &str,
+        source_size: u64,
+        target_size: u64,
+    ) -> TargetNewerConflictCandidate {
+        TargetNewerConflictCandidate {
+            path: PathBuf::from(relative_path),
+            source_path: PathBuf::from(source_path),
+            target_path: PathBuf::from(target_path),
+            source: ConflictFileSnapshot {
+                size: source_size,
+                modified_unix_ms: Some(200),
+                created_unix_ms: Some(190),
+            },
+            target: ConflictFileSnapshot {
+                size: target_size,
+                modified_unix_ms: Some(300),
+                created_unix_ms: Some(180),
+            },
         }
     }
 
@@ -607,6 +642,270 @@ mod integration_tests {
         assert!(event.entry.message.contains(
             "Conflict review [session-skip-event] skipped pending item on close: photos/c.jpg"
         ));
+    }
+
+    #[tokio::test]
+    async fn test_create_conflict_review_session_merges_pending_task_session_by_target_path() {
+        let state = build_app_state();
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let queue_rx = listen_for_named_event::<serde_json::Value, _>(
+            &app_handle,
+            "conflict-review-queue-changed",
+        );
+        let update_rx = listen_for_named_event::<serde_json::Value, _>(
+            &app_handle,
+            "conflict-review-session-updated",
+        );
+        let source_root = PathBuf::from("/tmp/source");
+        let target_root = PathBuf::from("/tmp/target");
+
+        let mut resolved_item = build_conflict_item("photos/a.jpg");
+        resolved_item.status = ConflictItemStatus::Skipped;
+        resolved_item.note = Some("Skipped earlier".to_string());
+        resolved_item.resolved_at_unix_ms = Some(123);
+        let pending_item = build_conflict_item("photos/keep.jpg");
+        let mut session = build_conflict_session(
+            "session-existing",
+            "task-merge",
+            "Task Merge",
+            &source_root,
+            &target_root,
+            vec![resolved_item, pending_item],
+        );
+        session.created_at_unix_ms = 100;
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-existing".to_string(), session);
+        let mut duplicate_resolved_item = build_conflict_item("photos/resolved-from-duplicate.jpg");
+        duplicate_resolved_item.status = ConflictItemStatus::SafeCopied;
+        duplicate_resolved_item.note = Some("Resolved in duplicate session".to_string());
+        duplicate_resolved_item.resolved_at_unix_ms = Some(456);
+        let mut duplicate_pending_item = build_conflict_item("photos/from-duplicate.jpg");
+        duplicate_pending_item.id = "item-2".to_string();
+        let mut duplicate_session = build_conflict_session(
+            "session-duplicate",
+            "task-merge",
+            "Task Merge Duplicate",
+            &source_root,
+            &target_root,
+            vec![duplicate_resolved_item, duplicate_pending_item],
+        );
+        duplicate_session.created_at_unix_ms = 200;
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-duplicate".to_string(), duplicate_session);
+
+        let candidates = vec![
+            build_conflict_candidate(
+                "photos/a.jpg",
+                "/tmp/source/photos/a-v1.jpg",
+                "/tmp/target/photos/a.jpg",
+                20,
+                10,
+            ),
+            build_conflict_candidate(
+                "photos/b.jpg",
+                "/tmp/source/photos/b.jpg",
+                "/tmp/target/photos/b.jpg",
+                30,
+                15,
+            ),
+            build_conflict_candidate(
+                "photos/a.jpg",
+                "/tmp/source/photos/a-v2.jpg",
+                "/tmp/target/photos/a.jpg",
+                40,
+                25,
+            ),
+        ];
+
+        let session_id = create_conflict_review_session(
+            "task-merge",
+            "Task Merge Updated",
+            &source_root,
+            &target_root,
+            &candidates,
+            SyncOrigin::Scheduled,
+            &state,
+            &app_handle,
+        )
+        .await
+        .expect("existing session id should be returned");
+
+        assert_eq!(session_id, "session-existing");
+
+        let sessions = state.conflict_review_sessions.read().await;
+        assert_eq!(sessions.len(), 1);
+        let session = sessions.get("session-existing").unwrap();
+        assert_eq!(session.task_name, "Task Merge Updated");
+        assert_eq!(session.items.len(), 6);
+
+        let updated_item = session
+            .items
+            .iter()
+            .find(|item| {
+                item.target_path == "/tmp/target/photos/a.jpg"
+                    && item.status == ConflictItemStatus::Pending
+            })
+            .expect("target duplicate should create one latest pending item");
+        assert_eq!(updated_item.source_path, "/tmp/source/photos/a-v2.jpg");
+        assert_eq!(updated_item.source.size, 40);
+        assert_eq!(updated_item.target.size, 25);
+        assert_eq!(updated_item.status, ConflictItemStatus::Pending);
+        assert_eq!(updated_item.note, None);
+        assert_eq!(updated_item.resolved_at_unix_ms, None);
+
+        assert!(session
+            .items
+            .iter()
+            .any(|item| item.target_path == "/tmp/target/photos/b.jpg"));
+        assert!(session.items.iter().any(|item| {
+            item.relative_path == "photos/a.jpg"
+                && item.status == ConflictItemStatus::Skipped
+                && item.note.as_deref() == Some("Skipped earlier")
+        }));
+        assert!(session.items.iter().any(|item| {
+            item.relative_path == "photos/resolved-from-duplicate.jpg"
+                && item.status == ConflictItemStatus::SafeCopied
+                && item.note.as_deref() == Some("Resolved in duplicate session")
+        }));
+        assert_eq!(
+            session
+                .items
+                .iter()
+                .filter(|item| item.status == ConflictItemStatus::Pending)
+                .count(),
+            4
+        );
+        drop(sessions);
+
+        let queue_event = queue_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected conflict-review-queue-changed event");
+        assert_eq!(queue_event["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(queue_event["sessions"][0]["id"], "session-existing");
+        assert_eq!(queue_event["sessions"][0]["pendingCount"], 4);
+
+        let update_event = update_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected conflict-review-session-updated event");
+        assert_eq!(update_event["sessionId"], "session-existing");
+        assert_eq!(update_event["pendingCount"], 4);
+
+        let logs = state.log_manager.get_logs(Some("task-merge".to_string()));
+        assert!(logs.iter().any(|entry| {
+            entry.message.contains(
+                "Target newer conflicts merged into existing review session: detected=3 added=3 updated=0 session=session-existing",
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_create_conflict_review_session_keeps_same_task_different_roots_separate() {
+        let state = build_app_state();
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let source_root = PathBuf::from("/tmp/source-old");
+        let target_root = PathBuf::from("/tmp/target-old");
+        let existing = build_conflict_session(
+            "session-old-roots",
+            "task-same",
+            "Same Task",
+            &source_root,
+            &target_root,
+            vec![build_conflict_item("photos/old.jpg")],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-old-roots".to_string(), existing);
+
+        let candidates = vec![build_conflict_candidate(
+            "photos/new.jpg",
+            "/tmp/source-new/photos/new.jpg",
+            "/tmp/target-new/photos/new.jpg",
+            20,
+            10,
+        )];
+        let session_id = create_conflict_review_session(
+            "task-same",
+            "Same Task",
+            &PathBuf::from("/tmp/source-new"),
+            &PathBuf::from("/tmp/target-new"),
+            &candidates,
+            SyncOrigin::Manual,
+            &state,
+            &app_handle,
+        )
+        .await
+        .expect("changed roots should create a separate session");
+
+        assert_ne!(session_id, "session-old-roots");
+        let sessions = state.conflict_review_sessions.read().await;
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(
+            sessions.get("session-old-roots").unwrap().target_root,
+            "/tmp/target-old"
+        );
+        assert_eq!(
+            sessions.get(&session_id).unwrap().target_root,
+            "/tmp/target-new"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_conflict_review_session_keeps_other_task_sessions_separate() {
+        let state = build_app_state();
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let source_root = PathBuf::from("/tmp/source");
+        let target_root = PathBuf::from("/tmp/target");
+        let existing = build_conflict_session(
+            "session-other",
+            "task-other",
+            "Other Task",
+            &source_root,
+            &target_root,
+            vec![build_conflict_item("photos/other.jpg")],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-other".to_string(), existing);
+
+        let candidates = vec![build_conflict_candidate(
+            "photos/new.jpg",
+            "/tmp/source/photos/new.jpg",
+            "/tmp/target/photos/new.jpg",
+            20,
+            10,
+        )];
+
+        let session_id = create_conflict_review_session(
+            "task-new",
+            "New Task",
+            &source_root,
+            &target_root,
+            &candidates,
+            SyncOrigin::Manual,
+            &state,
+            &app_handle,
+        )
+        .await
+        .expect("new task should create a separate session");
+
+        assert_ne!(session_id, "session-other");
+        let sessions = state.conflict_review_sessions.read().await;
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.contains_key("session-other"));
+        assert!(sessions.contains_key(&session_id));
     }
 
     #[test]

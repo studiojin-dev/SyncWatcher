@@ -8,6 +8,8 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
 
 - SyncWatcher already ships through GitHub Releases with a Tauri updater and Lemon Squeezy supporter-license flow.
 - The Mac App Store imposes different rules for updater delivery, copy-protection UX, sandbox access, and in-app purchases.
+- The 2026 App Review rejection for Guideline 2.4.5(vii) confirmed that any
+  non-App-Store updater surface in the Mac App Store build is a release blocker.
 - The GitHub release workflow already owns DMG packaging, updater metadata, SBOMs, and attestations for the direct-download channel, while App Store submission requires different signing, metadata, and operator review steps.
 - SyncWatcher stores source and target directories as plain paths today, which is not sufficient for App Sandbox relaunch access.
 - The product policy remains "free to use, optional support purchase" rather than feature gating.
@@ -24,7 +26,17 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
    - GitHub build uses Lemon Squeezy checkout and license-key lifecycle
    - App Store build uses StoreKit 2 non-consumable purchase and restore flow
 4. Preserve the product policy that supporter purchases are optional support only and do not unlock a separate core feature tier.
-5. Disable the GitHub updater plugin for the App Store build and replace it with a best-effort App Store metadata check that only offers `Open App Store`.
+5. Disable the GitHub updater plugin for the App Store build and replace it
+   with a best-effort App Store metadata check that only offers `Open App
+   Store`.
+   - The App Store build must not expose GitHub updater flows,
+     direct-download update links, in-app update downloads, in-app update
+     installs, menu-bar update commands, or external updater mechanisms.
+   - The App Store build follows an App Store-only update policy; opening the
+     Mac App Store listing from the in-app update notice is the only allowed
+     update action.
+   - Mixing GitHub DMG updater behavior into the App Store channel is a release
+     blocker.
 6. Enable App Sandbox for the App Store build and persist user-selected directory access through security-scoped bookmarks for settings and sync-task paths.
 7. Allow first-run import of GitHub DMG settings, sync tasks, and exclusion sets into the App Store channel, but require users to reselect folders when sandbox access must be refreshed.
 8. Keep the Apple App Store flow serverless for v1:

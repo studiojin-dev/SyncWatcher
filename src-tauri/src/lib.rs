@@ -2019,7 +2019,10 @@ async fn list_conflict_session_summaries_internal(state: &AppState) -> Vec<Confl
     summaries
 }
 
-async fn emit_conflict_review_queue_changed(app: &tauri::AppHandle, state: &AppState) {
+async fn emit_conflict_review_queue_changed<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    state: &AppState,
+) {
     let sessions = list_conflict_session_summaries_internal(state).await;
     let _ = app.emit(
         "conflict-review-queue-changed",
@@ -2052,6 +2055,79 @@ fn build_conflict_item(
         note: None,
         resolved_at_unix_ms: None,
     }
+}
+
+fn dedupe_conflict_candidates_by_target_path(
+    candidates: &[TargetNewerConflictCandidate],
+) -> Vec<&TargetNewerConflictCandidate> {
+    let mut indexes_by_target = HashMap::new();
+    let mut deduped = Vec::new();
+
+    for candidate in candidates {
+        let target_key = candidate.target_path.to_string_lossy().to_string();
+        if let Some(index) = indexes_by_target.get(&target_key).copied() {
+            deduped[index] = candidate;
+        } else {
+            indexes_by_target.insert(target_key, deduped.len());
+            deduped.push(candidate);
+        }
+    }
+
+    deduped
+}
+
+fn next_conflict_item_id(session: &ConflictReviewSession) -> String {
+    format!("item-{:06}", session.items.len() + 1)
+}
+
+fn merge_pending_conflict_item_into_session(
+    session: &mut ConflictReviewSession,
+    mut item: TargetNewerConflictItem,
+) -> bool {
+    if let Some(existing) = session.items.iter_mut().find(|existing| {
+        existing.status == ConflictItemStatus::Pending && existing.target_path == item.target_path
+    }) {
+        item.id = existing.id.clone();
+        *existing = item;
+        true
+    } else {
+        item.id = next_conflict_item_id(session);
+        session.items.push(item);
+        false
+    }
+}
+
+fn append_resolved_conflict_item_to_session(
+    session: &mut ConflictReviewSession,
+    mut item: TargetNewerConflictItem,
+) {
+    item.id = next_conflict_item_id(session);
+    session.items.push(item);
+}
+
+fn pending_conflict_session_ids_for_task_roots(
+    sessions: &HashMap<String, ConflictReviewSession>,
+    task_id: &str,
+    source_root: &str,
+    target_root: &str,
+) -> Vec<String> {
+    let mut matching_sessions: Vec<(String, i64)> = sessions
+        .iter()
+        .filter(|(_, session)| {
+            session.task_id == task_id
+                && session.source_root == source_root
+                && session.target_root == target_root
+                && pending_conflict_count(&session.items) > 0
+        })
+        .map(|(session_id, session)| (session_id.clone(), session.created_at_unix_ms))
+        .collect();
+
+    matching_sessions
+        .sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+    matching_sessions
+        .into_iter()
+        .map(|(session_id, _)| session_id)
+        .collect()
 }
 
 fn conflict_resolution_success_log_details(
@@ -4894,7 +4970,7 @@ fn decide_runtime_auto_unmount(
     RuntimeAutoUnmountDecision::UnmountNow
 }
 
-async fn create_conflict_review_session(
+async fn create_conflict_review_session<R: tauri::Runtime>(
     task_id: &str,
     task_name: &str,
     source_root: &Path,
@@ -4902,52 +4978,148 @@ async fn create_conflict_review_session(
     candidates: &[TargetNewerConflictCandidate],
     origin: SyncOrigin,
     state: &AppState,
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<R>,
 ) -> Option<String> {
     if candidates.is_empty() {
         return None;
     }
 
-    let seq = state.conflict_review_seq.fetch_add(1, Ordering::SeqCst) + 1;
-    let session_id = session_id_for_task(task_id, seq);
-    let items = candidates
+    let deduped_candidates = dedupe_conflict_candidates_by_target_path(candidates);
+    let incoming_items: Vec<TargetNewerConflictItem> = deduped_candidates
         .iter()
         .enumerate()
         .map(|(index, candidate)| build_conflict_item(index + 1, candidate))
         .collect();
+    let source_root_key = source_root.to_string_lossy().to_string();
+    let target_root_key = target_root.to_string_lossy().to_string();
 
-    let session = ConflictReviewSession {
-        id: session_id.clone(),
-        task_id: task_id.to_string(),
-        task_name: task_name.to_string(),
-        source_root: source_root.to_string_lossy().to_string(),
-        target_root: target_root.to_string_lossy().to_string(),
-        origin: if origin == SyncOrigin::Watch {
-            ConflictSessionOrigin::Watch
+    let (session_id, removed_session_ids, created_new, added_count, updated_count) = {
+        let mut sessions = state.conflict_review_sessions.write().await;
+        let matching_session_ids = pending_conflict_session_ids_for_task_roots(
+            &sessions,
+            task_id,
+            &source_root_key,
+            &target_root_key,
+        );
+
+        if let Some(primary_session_id) = matching_session_ids.first().cloned() {
+            let duplicate_session_ids: Vec<String> =
+                matching_session_ids.iter().skip(1).cloned().collect();
+            let duplicate_items: Vec<TargetNewerConflictItem> = matching_session_ids
+                .iter()
+                .skip(1)
+                .filter_map(|session_id| sessions.remove(session_id))
+                .flat_map(|session| session.items)
+                .collect();
+
+            let session = sessions
+                .get_mut(&primary_session_id)
+                .expect("primary conflict review session should exist");
+            session.task_name = task_name.to_string();
+            session.source_root = source_root_key.clone();
+            session.target_root = target_root_key.clone();
+
+            let mut added_count = 0usize;
+            let mut updated_count = 0usize;
+            for item in duplicate_items {
+                if item.status == ConflictItemStatus::Pending {
+                    if merge_pending_conflict_item_into_session(session, item) {
+                        updated_count += 1;
+                    } else {
+                        added_count += 1;
+                    }
+                } else {
+                    append_resolved_conflict_item_to_session(session, item);
+                }
+            }
+            for item in incoming_items {
+                if merge_pending_conflict_item_into_session(session, item) {
+                    updated_count += 1;
+                } else {
+                    added_count += 1;
+                }
+            }
+
+            (
+                primary_session_id,
+                duplicate_session_ids,
+                false,
+                added_count,
+                updated_count,
+            )
         } else {
-            ConflictSessionOrigin::Manual
-        },
-        created_at_unix_ms: unix_now_ms(),
-        items,
+            let seq = state.conflict_review_seq.fetch_add(1, Ordering::SeqCst) + 1;
+            let session_id = session_id_for_task(task_id, seq);
+            let session = ConflictReviewSession {
+                id: session_id.clone(),
+                task_id: task_id.to_string(),
+                task_name: task_name.to_string(),
+                source_root: source_root_key,
+                target_root: target_root_key,
+                origin: if origin == SyncOrigin::Watch {
+                    ConflictSessionOrigin::Watch
+                } else {
+                    ConflictSessionOrigin::Manual
+                },
+                created_at_unix_ms: unix_now_ms(),
+                items: incoming_items,
+            };
+            let added_count = session.items.len();
+            sessions.insert(session_id.clone(), session);
+            (session_id, Vec::new(), true, added_count, 0)
+        }
     };
 
-    {
-        let mut sessions = state.conflict_review_sessions.write().await;
-        sessions.insert(session_id.clone(), session);
+    if created_new {
+        state.log_manager.log_with_category(
+            "warning",
+            &format!(
+                "Target newer conflicts detected: {} item(s). Session: {}",
+                candidates.len(),
+                session_id
+            ),
+            Some(task_id.to_string()),
+            LogCategory::Other,
+        );
+    } else {
+        state.log_manager.log_with_category(
+            "warning",
+            &format!(
+                "Target newer conflicts merged into existing review session: detected={} added={} updated={} session={}",
+                candidates.len(),
+                added_count,
+                updated_count,
+                session_id
+            ),
+            Some(task_id.to_string()),
+            LogCategory::Other,
+        );
     }
 
-    state.log_manager.log_with_category(
-        "warning",
-        &format!(
-            "Target newer conflicts detected: {} item(s). Session: {}",
-            candidates.len(),
-            session_id
-        ),
-        Some(task_id.to_string()),
-        LogCategory::Other,
-    );
-
     emit_conflict_review_queue_changed(app, state).await;
+    let pending_count = {
+        let sessions = state.conflict_review_sessions.read().await;
+        sessions
+            .get(&session_id)
+            .map(|session| pending_conflict_count(&session.items))
+            .unwrap_or(0)
+    };
+    let _ = app.emit(
+        "conflict-review-session-updated",
+        ConflictReviewSessionUpdatedEvent {
+            session_id: session_id.clone(),
+            pending_count,
+        },
+    );
+    for removed_session_id in removed_session_ids {
+        let _ = app.emit(
+            "conflict-review-session-updated",
+            ConflictReviewSessionUpdatedEvent {
+                session_id: removed_session_id,
+                pending_count: 0,
+            },
+        );
+    }
     Some(session_id)
 }
 
@@ -9161,7 +9333,16 @@ fn restore_main_window(app: &AppHandle) {
     }
 }
 
-fn build_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+fn should_include_check_for_updates_menu(
+    distribution_channel: distribution::DistributionChannel,
+) -> bool {
+    distribution::channel_policy(distribution_channel).can_self_update
+}
+
+fn build_app_menu<R: tauri::Runtime>(
+    app: &tauri::App<R>,
+    distribution_channel: distribution::DistributionChannel,
+) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 
     let about_metadata = AboutMetadataBuilder::new()
@@ -9169,11 +9350,17 @@ fn build_app_menu<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<tauri
         .version(Some(env!("CARGO_PKG_VERSION")))
         .build();
 
-    let app_menu = SubmenuBuilder::new(app, "SyncWatcher")
+    let mut app_menu = SubmenuBuilder::new(app, "SyncWatcher")
         .about(Some(about_metadata))
-        .separator()
-        .text(APP_CHECK_FOR_UPDATES_MENU_ID, "Check for Updates…")
-        .separator()
+        .separator();
+
+    if should_include_check_for_updates_menu(distribution_channel) {
+        app_menu = app_menu
+            .text(APP_CHECK_FOR_UPDATES_MENU_ID, "Check for Updates…")
+            .separator();
+    }
+
+    let app_menu = app_menu
         .services()
         .separator()
         .hide()
@@ -9308,7 +9495,13 @@ pub fn run() {
             eprintln!("[App] Menu event: {}", event.id.as_ref());
             let menu_id = event.id.as_ref().to_ascii_lowercase();
             if event.id.as_ref() == APP_CHECK_FOR_UPDATES_MENU_ID {
-                let _ = app.emit(APP_CHECK_FOR_UPDATES_EVENT, ());
+                let can_self_update = distribution::channel_policy(
+                    distribution::detect_distribution_channel(Some(app)),
+                )
+                .can_self_update;
+                if can_self_update {
+                    let _ = app.emit(APP_CHECK_FOR_UPDATES_EVENT, ());
+                }
                 return;
             }
             let looks_like_quit = menu_id == "quit"
@@ -9329,7 +9522,7 @@ pub fn run() {
 
     let builder = builder
         .setup(move |app| {
-            app.set_menu(build_app_menu(app)?)?;
+            app.set_menu(build_app_menu(app, distribution_channel)?)?;
 
             let autostart_arg_present = is_autostart_launch();
             let autostart_enabled = if autostart_arg_present {
