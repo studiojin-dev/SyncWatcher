@@ -29,7 +29,7 @@ mod integration_tests {
         build_dry_run_artifact, build_runtime_watch_upstreams, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
-        compute_volume_mount_diff, copy_file_preserve, create_conflict_review_session,
+        compute_volume_mount_diff, copy_file_preserve_under_root, create_conflict_review_session,
         create_sync_task_internal, decide_autostart_launch, decide_runtime_auto_unmount,
         delete_sync_task_internal_core, dequeue_runtime_sync_task, emit_dry_run_diff_batch,
         emit_sync_file_batch, emit_task_log_batch_transport, emit_task_log_with_recurring_detail,
@@ -37,7 +37,7 @@ mod integration_tests {
         ensure_non_overlapping_paths, find_orphan_files_internal,
         find_runtime_orphan_target_conflict_issue, find_runtime_task_validation_issue,
         find_runtime_watch_cycle, find_task_source_recommendation, finish_runtime_producer,
-        format_bytes_with_unit, get_app_version, handle_volume_watch_event,
+        format_bytes_with_unit, get_app_config_dir, get_app_version, handle_volume_watch_event,
         handle_volume_watch_tick, has_autostart_arg, is_auto_unmount_session_disabled_internal,
         is_runtime_watch_task_active, join_paths, log_conflict_resolution_failure,
         log_conflict_resolution_success, log_conflict_skip_on_close,
@@ -146,6 +146,23 @@ mod integration_tests {
         assert!(error.contains("parent-directory"));
     }
 
+    #[tokio::test]
+    async fn get_app_config_dir_returns_managed_config_store_dir() {
+        let root = tempdir().expect("temp dir should create");
+        let config_dir = root.path().join("custom-config");
+        let app = mock_builder()
+            .manage(build_app_state_with_config_dir(config_dir.clone()))
+            .build(mock_context(noop_assets()))
+            .expect("mock app should build");
+
+        let actual = get_app_config_dir(app.state::<AppState>())
+            .await
+            .expect("config dir should resolve");
+
+        assert_eq!(PathBuf::from(actual), config_dir);
+        assert!(config_dir.is_dir());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn conflict_copy_rejects_target_symlink() {
@@ -160,9 +177,35 @@ mod integration_tests {
         std::fs::write(&outside, "outside original").expect("outside should write");
         std::os::unix::fs::symlink(&outside, &target).expect("target symlink should create");
 
-        let error = copy_file_preserve(&source, &target)
+        let error = copy_file_preserve_under_root(&source, target_root.path(), &target)
             .await
             .expect_err("target symlink should be rejected");
+        assert!(error.contains("Refusing to write through symlink"));
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside should remain readable"),
+            "outside original"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn conflict_copy_rejects_parent_symlink_under_target_root() {
+        let source_root = tempdir().expect("source temp dir should create");
+        let target_root = tempdir().expect("target temp dir should create");
+        let outside_root = tempdir().expect("outside temp dir should create");
+        let source = source_root.path().join("source.txt");
+        let parent_link = target_root.path().join("linked-parent");
+        let target = parent_link.join("target.txt");
+        let outside = outside_root.path().join("target.txt");
+
+        std::fs::write(&source, "safe content").expect("source should write");
+        std::fs::write(&outside, "outside original").expect("outside should write");
+        std::os::unix::fs::symlink(outside_root.path(), &parent_link)
+            .expect("parent symlink should create");
+
+        let error = copy_file_preserve_under_root(&source, target_root.path(), &target)
+            .await
+            .expect_err("parent symlink should be rejected");
         assert!(error.contains("Refusing to write through symlink"));
         assert_eq!(
             std::fs::read_to_string(&outside).expect("outside should remain readable"),
@@ -291,8 +334,12 @@ mod integration_tests {
     }
 
     fn build_app_state() -> AppState {
+        build_app_state_with_config_dir(temp_config_dir())
+    }
+
+    fn build_app_state_with_config_dir(config_dir: PathBuf) -> AppState {
         AppState {
-            config_store: Arc::new(ConfigStore::from_config_dir(temp_config_dir())),
+            config_store: Arc::new(ConfigStore::from_config_dir(config_dir)),
             log_manager: Arc::new(LogManager::new(100)),
             task_log_batch_subscriptions: Arc::new(StdMutex::new(HashMap::new())),
             task_log_batch_subscription_seq: Arc::new(AtomicU64::new(0)),
@@ -1791,6 +1838,75 @@ mod integration_tests {
                     .message
                     .contains("Conflict review [session-rename] renamed target then copied source: photos/a.jpg")
         }));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_resolve_conflict_items_internal_rename_then_copy_rejects_parent_symlink() {
+        let state = build_app_state();
+        let temp = tempdir().expect("tempdir should be created");
+        let source_root = temp.path().join("source");
+        let target_root = temp.path().join("target");
+        let outside_root = temp.path().join("outside");
+        let relative_path = "linked-parent/a.jpg";
+        let source_path = source_root.join(relative_path);
+        let target_parent = target_root.join("linked-parent");
+        let target_path = target_parent.join("a.jpg");
+        let outside_target = outside_root.join("a.jpg");
+
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&outside_root).unwrap();
+        std::fs::create_dir_all(&target_root).unwrap();
+        std::fs::write(&source_path, "new-photo").unwrap();
+        std::fs::write(&outside_target, "outside-original").unwrap();
+        std::os::unix::fs::symlink(&outside_root, &target_parent)
+            .expect("parent symlink should create");
+
+        let item =
+            build_conflict_item_with_paths("item-link", relative_path, &source_path, &target_path)
+                .await;
+        let session = build_conflict_session(
+            "session-parent-link",
+            "task-parent-link",
+            "Task Parent Link",
+            &source_root,
+            &target_root,
+            vec![item],
+        );
+        state
+            .conflict_review_sessions
+            .write()
+            .await
+            .insert("session-parent-link".to_string(), session);
+
+        let result = resolve_conflict_items_internal(
+            "session-parent-link".to_string(),
+            vec![ConflictResolutionRequest {
+                item_id: "item-link".to_string(),
+                action: ConflictResolutionAction::RenameThenCopy,
+            }],
+            None,
+            &state,
+        )
+        .await
+        .expect("symlink rejection should be reported in result");
+
+        assert_eq!(result.processed_count, 0);
+        assert_eq!(result.pending_count, 1);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0]
+            .message
+            .contains("Refusing to write through symlink"));
+        assert_eq!(
+            std::fs::read_to_string(&outside_target).expect("outside target should be readable"),
+            "outside-original"
+        );
+
+        let sessions = state.conflict_review_sessions.read().await;
+        let session = sessions.get("session-parent-link").unwrap();
+        let item = &session.items[0];
+        assert_eq!(item.status, ConflictItemStatus::Pending);
+        assert!(item.resolved_at_unix_ms.is_none());
     }
 
     #[tokio::test]

@@ -48,13 +48,12 @@ use sync_engine::{
 use system_integration::DiskMonitor;
 
 use config_store::{
-    apply_sync_task_update, build_sync_task_record, default_config_dir,
-    default_exclusion_set_records, settings_snapshot_from_store, validate_exclusion_sets,
-    AppSettings, ConfigStore, ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope,
-    ExclusionSetEnvelope, ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch,
-    NetworkMountRecord, NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot,
-    SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope, UpdateSettingsPayload,
-    UpdateSyncTaskRequest,
+    apply_sync_task_update, build_sync_task_record, default_exclusion_set_records,
+    settings_snapshot_from_store, validate_exclusion_sets, AppSettings, ConfigStore,
+    ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope, ExclusionSetEnvelope,
+    ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NetworkMountRecord,
+    NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord,
+    SyncTasksEnvelope, UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
@@ -2314,35 +2313,61 @@ async fn read_current_conflict_file_info(path: &Path) -> Result<ConflictFileInfo
     })
 }
 
-async fn reject_target_symlink(path: &Path) -> Result<(), String> {
-    for component in path.components() {
-        if matches!(component, Component::ParentDir) {
-            return Err(format!(
-                "Refusing to write through parent-directory component: {}",
-                path.display()
-            ));
-        }
-    }
+async fn reject_symlink_destination_under_root(root: &Path, target: &Path) -> Result<(), String> {
+    let relative = target.strip_prefix(root).map_err(|_| {
+        format!(
+            "Target path '{}' is not under target root '{}'",
+            target.display(),
+            root.display()
+        )
+    })?;
+    let root_canonical = tokio::fs::canonicalize(root).await.map_err(|error| {
+        format!(
+            "Failed to canonicalize target root '{}': {error}",
+            root.display()
+        )
+    })?;
+    let mut current = root_canonical;
 
-    match tokio::fs::symlink_metadata(path).await {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err(format!(
-                "Refusing to write through symlink target path: {}",
-                path.display()
-            ));
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => current.push(part),
+            Component::CurDir => continue,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "Refusing to write through unsafe target path component: {}",
+                    target.display()
+                ));
+            }
         }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(format!("Failed to inspect '{}': {error}", path.display()));
+
+        match tokio::fs::symlink_metadata(&current).await {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "Refusing to write through symlink target path: {}",
+                    current.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect '{}': {error}",
+                    current.display()
+                ));
+            }
         }
     }
 
     Ok(())
 }
 
-async fn copy_file_preserve(source: &Path, target: &Path) -> Result<(), String> {
-    reject_target_symlink(target).await?;
+async fn copy_file_preserve_under_root(
+    source: &Path,
+    target_root: &Path,
+    target: &Path,
+) -> Result<(), String> {
+    reject_symlink_destination_under_root(target_root, target).await?;
 
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent)
@@ -2350,7 +2375,7 @@ async fn copy_file_preserve(source: &Path, target: &Path) -> Result<(), String> 
             .map_err(|e| format!("Failed to create parent directory: {e}"))?;
     }
 
-    reject_target_symlink(target).await?;
+    reject_symlink_destination_under_root(target_root, target).await?;
 
     let mut source_file = tokio::fs::File::open(source)
         .await
@@ -6150,9 +6175,8 @@ async fn enqueue_initial_runtime_watch_syncs(app: tauri::AppHandle, state: AppSt
 }
 
 #[tauri::command]
-async fn get_app_config_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let _ = app;
-    let config_dir = default_config_dir().map_err(config_store_error_to_string)?;
+async fn get_app_config_dir(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let config_dir = state.config_store.config_dir().to_path_buf();
     tokio::fs::create_dir_all(&config_dir)
         .await
         .map_err(|e| e.to_string())?;
@@ -7345,10 +7369,10 @@ async fn resolve_conflict_items_internal(
                 .iter()
                 .find(|item| item.id == request.item_id)
                 .cloned()
-                .map(|item| (item, session.task_id.clone()))
+                .map(|item| (item, session.task_id.clone(), session.target_root.clone()))
         };
 
-        let Some((item_snapshot, session_task_id)) = item_snapshot else {
+        let Some((item_snapshot, session_task_id, session_target_root)) = item_snapshot else {
             failures.push(ConflictResolutionFailure {
                 item_id: request.item_id.clone(),
                 message: "Conflict item not found".to_string(),
@@ -7362,6 +7386,7 @@ async fn resolve_conflict_items_internal(
 
         let source_path = PathBuf::from(&item_snapshot.source_path);
         let target_path = PathBuf::from(&item_snapshot.target_path);
+        let target_root = PathBuf::from(session_target_root);
 
         match (
             read_current_conflict_file_info(&source_path).await,
@@ -7441,14 +7466,15 @@ async fn resolve_conflict_items_internal(
                 )
                 .await;
 
-                let apply_result = copy_file_preserve(&source_path, &target_path)
-                    .await
-                    .map(|_| {
-                        (
-                            ConflictItemStatus::ForceCopied,
-                            Some("Copied source file to target (force overwrite).".to_string()),
-                        )
-                    });
+                let apply_result =
+                    copy_file_preserve_under_root(&source_path, &target_root, &target_path)
+                        .await
+                        .map(|_| {
+                            (
+                                ConflictItemStatus::ForceCopied,
+                                Some("Copied source file to target (force overwrite).".to_string()),
+                            )
+                        });
 
                 finish_runtime_producer(
                     &producer_id,
@@ -7479,15 +7505,18 @@ async fn resolve_conflict_items_internal(
                 let apply_result = async {
                     let source_path = source_path.clone();
                     let target_path = target_path.clone();
+                    let target_root = target_root.clone();
                     let parent = match target_path.parent() {
                         Some(value) => value.to_path_buf(),
                         None => Err("Target file parent directory is invalid".to_string())?,
                     };
+                    reject_symlink_destination_under_root(&target_root, &target_path).await?;
                     tokio::fs::create_dir_all(&parent)
                         .await
                         .map_err(|e| format!("Failed to ensure target parent directory: {e}"))?;
+                    reject_symlink_destination_under_root(&target_root, &target_path).await?;
 
-                    if tokio::fs::metadata(&target_path).await.is_err() {
+                    if tokio::fs::symlink_metadata(&target_path).await.is_err() {
                         Err("Target file does not exist for safe copy rename".to_string())?;
                     }
 
@@ -7517,7 +7546,8 @@ async fn resolve_conflict_items_internal(
                             format!("{stem}_{timestamp}_{suffix}")
                         };
                         let backup_path = parent.as_path().join(backup_name);
-                        if tokio::fs::metadata(&backup_path).await.is_ok() {
+                        reject_symlink_destination_under_root(&target_root, &backup_path).await?;
+                        if tokio::fs::symlink_metadata(&backup_path).await.is_ok() {
                             continue;
                         }
 
@@ -7535,7 +7565,7 @@ async fn resolve_conflict_items_internal(
                         }
                     };
 
-                    copy_file_preserve(&source_path, &target_path)
+                    copy_file_preserve_under_root(&source_path, &target_root, &target_path)
                         .await
                         .map(|_| {
                             (
