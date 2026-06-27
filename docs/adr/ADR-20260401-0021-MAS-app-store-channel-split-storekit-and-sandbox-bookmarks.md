@@ -47,6 +47,10 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
    - GitHub Actions remains the release automation path for the GitHub DMG channel
    - Mac App Store packaging, validation, and App Store Connect upload happen from a maintainer's local macOS environment
    - CI remains verification-only for the App Store path and does not submit to App Store Connect
+10. Keep signing certificates, provisioning profiles, and App Store Connect API
+    private keys outside the repository checkout for both local release paths.
+    Local release scripts must reject repo-local credential paths instead of
+    relying only on `.gitignore`.
 
 ## Consequences
 
@@ -56,6 +60,9 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
 - `isRegistered` remains a useful UI-level supporter signal, but its backing provider depends on the current channel.
 - Release and submission workflow becomes more complex because metadata, entitlements, and review notes now differ by channel.
 - App Store submission stays out of GitHub CI/CD, which reduces accidental cross-channel automation but keeps one local/manual operator step in the release process.
+- Local release operators must keep certificate, provisioning profile, and App
+  Store Connect private key paths in an external secure location and pass them
+  through environment variables.
 
 ## Alternatives Considered
 

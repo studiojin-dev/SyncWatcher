@@ -29,10 +29,10 @@ mod integration_tests {
         build_dry_run_artifact, build_runtime_watch_upstreams, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
-        compute_volume_mount_diff, create_conflict_review_session, create_sync_task_internal,
-        decide_autostart_launch, decide_runtime_auto_unmount, delete_sync_task_internal_core,
-        dequeue_runtime_sync_task, emit_dry_run_diff_batch, emit_sync_file_batch,
-        emit_task_log_batch_transport, emit_task_log_with_recurring_detail,
+        compute_volume_mount_diff, copy_file_preserve, create_conflict_review_session,
+        create_sync_task_internal, decide_autostart_launch, decide_runtime_auto_unmount,
+        delete_sync_task_internal_core, dequeue_runtime_sync_task, emit_dry_run_diff_batch,
+        emit_sync_file_batch, emit_task_log_batch_transport, emit_task_log_with_recurring_detail,
         enqueue_runtime_sync_task_internal, enqueue_runtime_watch_bootstrap_tasks,
         ensure_non_overlapping_paths, find_orphan_files_internal,
         find_runtime_orphan_target_conflict_issue, find_runtime_task_validation_issue,
@@ -55,10 +55,11 @@ mod integration_tests {
         should_include_check_for_updates_menu, should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_control_plane_auth,
-        validate_dry_run_artifact, validate_runtime_tasks, volume_watch_next_tick_delay, AppState,
-        CancelOperationType, ConflictFileInfo, ConflictItemStatus, ConflictResolutionAction,
-        ConflictResolutionRequest, ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem,
-        DryRunDiffBatchEvent, DryRunLiveState, KeychainCredentialAction, RuntimeActiveProducer,
+        validate_dry_run_artifact, validate_legacy_config_store_file_path, validate_runtime_tasks,
+        volume_watch_next_tick_delay, AppState, CancelOperationType, ConflictFileInfo,
+        ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
+        ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunDiffBatchEvent,
+        DryRunLiveState, KeychainCredentialAction, RuntimeActiveProducer,
         RuntimeAutoUnmountDecision, RuntimeExclusionSet, RuntimeProducerKind,
         RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
         RuntimeTaskValidationIssue, SyncEventOrigin, SyncFileBatchEvent, SyncLiveState, SyncOrigin,
@@ -119,6 +120,54 @@ mod integration_tests {
         assert!(!should_include_check_for_updates_menu(
             DistributionChannel::AppStore
         ));
+    }
+
+    #[test]
+    fn legacy_config_store_file_path_rejects_sibling_prefix() {
+        let root = tempdir().expect("temp dir should create");
+        let store = ConfigStore::from_config_dir(root.path().join("config"));
+        let allowed = store.settings_file_path();
+        assert!(validate_legacy_config_store_file_path(&allowed, &store).is_ok());
+
+        let sibling = root.path().join("config-sibling").join("settings.yaml");
+        let error = validate_legacy_config_store_file_path(&sibling, &store)
+            .expect_err("sibling config prefix should be denied");
+        assert!(error.contains("not a managed config store file"));
+    }
+
+    #[test]
+    fn legacy_config_store_file_path_rejects_parent_components() {
+        let root = tempdir().expect("temp dir should create");
+        let store = ConfigStore::from_config_dir(root.path().join("config"));
+        let escaped = store.config_dir().join("..").join("settings.yaml");
+
+        let error = validate_legacy_config_store_file_path(&escaped, &store)
+            .expect_err("parent components should be denied");
+        assert!(error.contains("parent-directory"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn conflict_copy_rejects_target_symlink() {
+        let source_root = tempdir().expect("source temp dir should create");
+        let target_root = tempdir().expect("target temp dir should create");
+        let outside_root = tempdir().expect("outside temp dir should create");
+        let source = source_root.path().join("source.txt");
+        let target = target_root.path().join("target.txt");
+        let outside = outside_root.path().join("outside.txt");
+
+        std::fs::write(&source, "safe content").expect("source should write");
+        std::fs::write(&outside, "outside original").expect("outside should write");
+        std::os::unix::fs::symlink(&outside, &target).expect("target symlink should create");
+
+        let error = copy_file_preserve(&source, &target)
+            .await
+            .expect_err("target symlink should be rejected");
+        assert!(error.contains("Refusing to write through symlink"));
+        assert_eq!(
+            std::fs::read_to_string(&outside).expect("outside should remain readable"),
+            "outside original"
+        );
     }
 
     fn build_network_mount() -> NetworkMountRecord {
@@ -1797,7 +1846,9 @@ mod integration_tests {
         assert_eq!(result.processed_count, 0);
         assert_eq!(result.pending_count, 1);
         assert_eq!(result.failures.len(), 1);
-        assert!(result.failures[0].message.contains("Failed to copy file"));
+        assert!(result.failures[0]
+            .message
+            .contains("Failed to open source file"));
 
         let sessions = state.conflict_review_sessions.read().await;
         let session = sessions.get("session-missing").unwrap();
@@ -1807,7 +1858,7 @@ mod integration_tests {
             .note
             .as_deref()
             .unwrap_or_default()
-            .contains("Failed to copy file"));
+            .contains("Failed to open source file"));
         assert!(item.resolved_at_unix_ms.is_none());
         drop(sessions);
 

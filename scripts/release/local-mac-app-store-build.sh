@@ -56,7 +56,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for bin in pnpm xcrun codesign pkgutil security node plutil; do
+for bin in pnpm xcrun codesign pkgutil security node plutil python3; do
   if ! command -v "$bin" >/dev/null 2>&1; then
     echo "Missing required command: $bin" >&2
     exit 1
@@ -100,6 +100,32 @@ normalize_path_var() {
 normalize_path_var "APPLE_APP_STORE_PROVISIONING_PROFILE_PATH"
 normalize_path_var "APPLE_API_KEY_PATH"
 normalize_path_var "TRANSPORTER_BIN"
+
+reject_repo_local_credential_path() {
+  local name="$1"
+  local value="${!name:-}"
+  if [[ -z "${value}" ]]; then
+    return
+  fi
+
+  if python3 - "${REPO_ROOT}" "${value}" <<'PY'
+from pathlib import Path
+import sys
+
+repo = Path(sys.argv[1]).resolve()
+path = Path(sys.argv[2]).resolve(strict=False)
+if path == repo or repo in path.parents:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+  then
+    echo "${name} must point outside the repository; got: ${value}" >&2
+    exit 1
+  fi
+}
+
+reject_repo_local_credential_path "APPLE_APP_STORE_PROVISIONING_PROFILE_PATH"
+reject_repo_local_credential_path "APPLE_API_KEY_PATH"
 
 for required in \
   APPLE_APP_STORE_SIGNING_IDENTITY \
@@ -150,6 +176,18 @@ fi
 CONFIG_PATH="src-tauri/tauri.appstore.conf.json"
 PRODUCT_NAME="$(node -p "require('./${CONFIG_PATH}').productName")"
 VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+APPSTORE_BUILD_CONFIG="$(python3 - "${CONFIG_PATH}" "${APPLE_APP_STORE_PROVISIONING_PROFILE_PATH}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config = json.loads(Path(sys.argv[1]).read_text())
+macos = config.setdefault("bundle", {}).setdefault("macOS", {})
+files = macos.setdefault("files", {})
+files["embedded.provisionprofile"] = sys.argv[2]
+print(json.dumps(config, separators=(",", ":")))
+PY
+)"
 APP_BUNDLE="${REPO_ROOT}/src-tauri/target/release/bundle/macos/${PRODUCT_NAME}.app"
 OUTPUT_DIR="${REPO_ROOT}/dist-appstore"
 OUTPUT_PKG="${OUTPUT_DIR}/SyncWatcher-${VERSION}-b${APP_STORE_BUILD_NUMBER}-mac-app-store.pkg"
@@ -169,7 +207,7 @@ ORIGINAL_APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 export APPLE_SIGNING_IDENTITY="${APPLE_APP_STORE_SIGNING_IDENTITY}"
 unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
 
-pnpm tauri build --bundles app --config "${CONFIG_PATH}"
+pnpm tauri build --bundles app --config "${APPSTORE_BUILD_CONFIG}"
 
 if [[ -n "${ORIGINAL_APPLE_SIGNING_IDENTITY}" ]]; then
   export APPLE_SIGNING_IDENTITY="${ORIGINAL_APPLE_SIGNING_IDENTITY}"

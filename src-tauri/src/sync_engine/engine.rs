@@ -54,6 +54,47 @@ fn is_hard_ignored_root_metadata_dir(relative_path: &Path, is_dir: bool) -> bool
     }
 }
 
+async fn reject_symlink_destination_under_root(root: &Path, target: &Path) -> Result<()> {
+    let relative = target.strip_prefix(root).with_context(|| {
+        format!(
+            "Target path '{}' is not under sync target root '{}'",
+            target.display(),
+            root.display()
+        )
+    })?;
+    let root_canonical = fs::canonicalize(root)
+        .await
+        .with_context(|| format!("Failed to canonicalize target root '{}'", root.display()))?;
+    let mut current = root_canonical;
+
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => current.push(part),
+            Component::CurDir => continue,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                anyhow::bail!("Unsafe target path component in '{}'", target.display());
+            }
+        }
+
+        match fs::symlink_metadata(&current).await {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "Refusing to write through symlink target path '{}'",
+                    current.display()
+                );
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to inspect '{}'", current.display()));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl SyncEngine {
     pub fn new(source: PathBuf, target: PathBuf) -> Self {
         Self { source, target }
@@ -1176,12 +1217,20 @@ impl SyncEngine {
     ) -> Result<()> {
         use tokio::io::AsyncWriteExt; // Import for write_all
 
+        reject_symlink_destination_under_root(&self.target, target).await?;
+
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).await?;
         }
 
+        reject_symlink_destination_under_root(&self.target, target).await?;
+
         let mut source_file = fs::File::open(source).await?;
-        let mut target_file = fs::File::create(target).await?;
+        let mut target_options = fs::OpenOptions::new();
+        target_options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        target_options.custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits());
+        let mut target_file = target_options.open(target).await?;
         let mut buffer = [0u8; 64 * 1024]; // 64KB chunks
 
         loop {
@@ -1245,6 +1294,35 @@ mod tests {
 
         let result = engine.sync_files(&options, |_| {}, |_| {}).await?;
         assert_eq!(result.files_copied, 1);
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn copy_file_chunked_rejects_target_symlink() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        let outside_dir = TempDir::new()?;
+
+        let source = source_dir.path().join("test.txt");
+        let target = target_dir.path().join("test.txt");
+        let outside = outside_dir.path().join("outside.txt");
+        fs::write(&source, b"safe content").await?;
+        fs::write(&outside, b"original outside").await?;
+        std::os::unix::fs::symlink(&outside, &target)?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let result = engine
+            .copy_file_chunked(&source, &target, &SyncOptions::default(), |_| {})
+            .await;
+
+        let err = result.expect_err("target symlink should be rejected");
+        assert!(format!("{:#}", err).contains("Refusing to write through symlink"));
+        assert_eq!(fs::read(&outside).await?, b"original outside");
 
         Ok(())
     }

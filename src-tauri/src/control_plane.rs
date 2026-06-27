@@ -2,11 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::config_store::default_control_plane_socket_path;
+
+pub(crate) const MAX_CONTROL_PLANE_REQUEST_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,9 +142,8 @@ where
                     };
                     let handler = Arc::clone(&handler);
                     tauri::async_runtime::spawn(async move {
-                        let mut request_bytes = Vec::new();
-                        let response = match stream.read_to_end(&mut request_bytes).await {
-                            Ok(_) => match serde_json::from_slice::<ControlPlaneRequest>(&request_bytes) {
+                        let response = match read_request_bytes(&mut stream).await {
+                            Ok(request_bytes) => match serde_json::from_slice::<ControlPlaneRequest>(&request_bytes) {
                                 Ok(request) => handler(request).await,
                                 Err(error) => ControlPlaneResponse::error(
                                     "unknown",
@@ -150,11 +151,7 @@ where
                                     format!("Failed to parse request: {error}"),
                                 ),
                             },
-                            Err(error) => ControlPlaneResponse::error(
-                                "unknown",
-                                "io_error",
-                                format!("Failed to read request: {error}"),
-                            ),
+                            Err(response) => response,
                         };
 
                         if let Ok(payload) = serde_json::to_vec(&response) {
@@ -173,4 +170,63 @@ where
         socket_path,
         shutdown,
     })
+}
+
+async fn read_request_bytes<R>(reader: &mut R) -> Result<Vec<u8>, ControlPlaneResponse>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut request_bytes = Vec::new();
+    let mut limited_reader = reader.take((MAX_CONTROL_PLANE_REQUEST_BYTES + 1) as u64);
+    limited_reader
+        .read_to_end(&mut request_bytes)
+        .await
+        .map_err(|error| {
+            ControlPlaneResponse::error(
+                "unknown",
+                "io_error",
+                format!("Failed to read request: {error}"),
+            )
+        })?;
+
+    if request_bytes.len() > MAX_CONTROL_PLANE_REQUEST_BYTES {
+        return Err(ControlPlaneResponse::error(
+            "unknown",
+            "invalid_request",
+            format!(
+                "Request too large: max {} bytes",
+                MAX_CONTROL_PLANE_REQUEST_BYTES
+            ),
+        ));
+    }
+
+    Ok(request_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn read_request_bytes_accepts_small_payload() {
+        let mut reader = tokio::io::repeat(b'a').take(8);
+        let bytes = read_request_bytes(&mut reader)
+            .await
+            .expect("small payload should read");
+        assert_eq!(bytes, vec![b'a'; 8]);
+    }
+
+    #[tokio::test]
+    async fn read_request_bytes_rejects_oversized_payload_before_parse() {
+        let mut reader = tokio::io::repeat(b'a').take((MAX_CONTROL_PLANE_REQUEST_BYTES + 1) as u64);
+        let response = read_request_bytes(&mut reader)
+            .await
+            .expect_err("oversized payload should be rejected");
+
+        assert_eq!(response.request_id, "unknown");
+        assert!(!response.ok);
+        let error = response.error.expect("error should be present");
+        assert_eq!(error.code, "invalid_request");
+        assert!(error.message.contains("Request too large"));
+    }
 }

@@ -94,6 +94,32 @@ normalize_path_var() {
 normalize_path_var "APPLE_API_KEY_PATH"
 normalize_path_var "APPLE_CERTIFICATE_PATH"
 
+reject_repo_local_credential_path() {
+  local name="$1"
+  local value="${!name:-}"
+  if [[ -z "${value}" ]]; then
+    return
+  fi
+
+  if python3 - "${REPO_ROOT}" "${value}" <<'PY'
+from pathlib import Path
+import sys
+
+repo = Path(sys.argv[1]).resolve()
+path = Path(sys.argv[2]).resolve(strict=False)
+if path == repo or repo in path.parents:
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+  then
+    echo "${name} must point outside the repository; got: ${value}" >&2
+    exit 1
+  fi
+}
+
+reject_repo_local_credential_path "APPLE_API_KEY_PATH"
+reject_repo_local_credential_path "APPLE_CERTIFICATE_PATH"
+
 for required in APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH; do
   if [[ -z "${!required:-}" ]]; then
     echo "Missing required environment variable: ${required}" >&2

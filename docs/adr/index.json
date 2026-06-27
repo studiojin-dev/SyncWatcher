@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260627-0030-PTH",
+    "title": "File operation path boundary hardening",
+    "tags": [
+      "security",
+      "path-validation",
+      "symlink",
+      "network-mount",
+      "tauri",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-06-27",
+    "tldr": "File operations that act on user-selected roots or app-owned config files must reject traversal and symlink escapes before reading, writing, or launching editors.",
+    "path": "docs/adr/ADR-20260627-0030-PTH-file-operation-path-boundary-hardening.md"
+  },
+  {
     "id": "ADR-20260417-0029-CHN",
     "title": "Channel transport for large batch live streams",
     "tags": [
@@ -345,7 +361,7 @@
   },
   {
     "id": "ADR-20260305-0009-RLS",
-    "title": "Release SBOMs, checksum manifests, stable cosign attestation, and separate local verification",
+    "title": "Release SBOMs, checksum manifests, and stable cosign attestation",
     "tags": [
       "release",
       "security",
@@ -356,7 +372,7 @@
     ],
     "status": "Accepted",
     "date": "2026-03-05",
-    "tldr": "Generate SBOMs and checksum manifests for every tagged release, force keyless cosign attestations for stable tags, keep prerelease attestation opt-in via a repo variable, and keep local cosign verification separate from the latest installer.",
+    "tldr": "Generate SBOMs and checksum manifests for every tagged release, force keyless cosign attestations for stable tags, require latest-installer attestation verification, and keep prerelease attestation opt-in via a repo variable.",
     "path": "docs/adr/ADR-20260305-0009-release-sbom-and-optional-cosign-attestation.md"
   },
   {

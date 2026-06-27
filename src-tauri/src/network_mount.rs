@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::apple_bridge;
-use crate::config_store::{NetworkMountRecord, NetworkMountScheme};
+use crate::config_store::{
+    normalize_network_mount_relative_subpath, NetworkMountRecord, NetworkMountScheme,
+};
 
 #[cfg_attr(test, allow(dead_code))]
 const KEYCHAIN_SERVICE_NAME: &str = "dev.studiojin.syncwatcher.network-mount";
@@ -84,7 +86,7 @@ fn capture_from_bridge_result(
         mount_root_path: captured.mount_root_path,
         relative_path_from_mount_root: normalize_relative_subpath(
             &captured.relative_path_from_mount_root,
-        ),
+        )?,
         enabled: true,
     }))
 }
@@ -278,7 +280,7 @@ pub fn ensure_mount_available(
     allow_ui: bool,
 ) -> Result<PathBuf, String> {
     if !mount.enabled {
-        return Ok(resolved_path_from_mount(Path::new(&mount.mount_root_path), mount));
+        return resolved_path_from_mount(Path::new(&mount.mount_root_path), mount);
     }
 
     let password = read_password(task_id, role)?;
@@ -293,29 +295,29 @@ pub fn ensure_mount_available(
         .map_err(|error| normalize_mount_error(error, None))?;
     if let Some(kind) = result.error_kind.as_deref() {
         return Err(normalize_mount_error(
-            result.error.unwrap_or_else(|| "network mount failed".to_string()),
+            result
+                .error
+                .unwrap_or_else(|| "network mount failed".to_string()),
             Some(kind),
         ));
     }
 
-    Ok(resolved_path_from_mount(Path::new(&result.mount_path), mount))
+    resolved_path_from_mount(Path::new(&result.mount_path), mount)
 }
 
-pub fn resolved_path_from_mount(mount_root: &Path, mount: &NetworkMountRecord) -> PathBuf {
-    let relative = normalize_relative_subpath(&mount.relative_path_from_mount_root);
+pub fn resolved_path_from_mount(
+    mount_root: &Path,
+    mount: &NetworkMountRecord,
+) -> Result<PathBuf, String> {
+    let relative = normalize_relative_subpath(&mount.relative_path_from_mount_root)?;
     if relative == "." {
-        return mount_root.to_path_buf();
+        return Ok(mount_root.to_path_buf());
     }
-    mount_root.join(relative)
+    Ok(mount_root.join(relative))
 }
 
-pub fn normalize_relative_subpath(value: &str) -> String {
-    let trimmed = value.trim().trim_start_matches('/');
-    if trimmed.is_empty() {
-        ".".to_string()
-    } else {
-        trimmed.to_string()
-    }
+pub fn normalize_relative_subpath(value: &str) -> Result<String, String> {
+    normalize_network_mount_relative_subpath(value).map_err(|error| error.message().to_string())
 }
 
 fn normalize_mount_error(error: String, kind: Option<&str>) -> String {
@@ -334,14 +336,23 @@ mod tests {
 
     #[test]
     fn normalize_relative_subpath_uses_dot_for_root() {
-        assert_eq!(normalize_relative_subpath(""), ".");
-        assert_eq!(normalize_relative_subpath("/"), ".");
-        assert_eq!(normalize_relative_subpath("///"), ".");
+        assert_eq!(normalize_relative_subpath("").unwrap(), ".");
+        assert_eq!(normalize_relative_subpath("/").unwrap(), ".");
+        assert_eq!(normalize_relative_subpath("///").unwrap(), ".");
     }
 
     #[test]
     fn normalize_relative_subpath_strips_leading_slash() {
-        assert_eq!(normalize_relative_subpath("/photos/raw"), "photos/raw");
+        assert_eq!(
+            normalize_relative_subpath("/photos/raw").unwrap(),
+            "photos/raw"
+        );
+    }
+
+    #[test]
+    fn normalize_relative_subpath_rejects_parent_components() {
+        assert!(normalize_relative_subpath("../secrets").is_err());
+        assert!(normalize_relative_subpath("photos/../../secrets").is_err());
     }
 
     #[test]
@@ -369,7 +380,7 @@ mod tests {
             enabled: true,
         };
         assert_eq!(
-            resolved_path_from_mount(Path::new("/Volumes/share"), &mount),
+            resolved_path_from_mount(Path::new("/Volumes/share"), &mount).unwrap(),
             PathBuf::from("/Volumes/share")
         );
     }
@@ -385,8 +396,21 @@ mod tests {
             enabled: true,
         };
         assert_eq!(
-            resolved_path_from_mount(Path::new("/Volumes/share"), &mount),
+            resolved_path_from_mount(Path::new("/Volumes/share"), &mount).unwrap(),
             PathBuf::from("/Volumes/share/photos/raw")
         );
+    }
+
+    #[test]
+    fn resolved_path_from_mount_rejects_traversal_subpath() {
+        let mount = NetworkMountRecord {
+            scheme: NetworkMountScheme::Smb,
+            remount_url: "smb://nas.local/share".to_string(),
+            username: Some("user".to_string()),
+            mount_root_path: "/Volumes/share".to_string(),
+            relative_path_from_mount_root: "../outside".to_string(),
+            enabled: true,
+        };
+        assert!(resolved_path_from_mount(Path::new("/Volumes/share"), &mount).is_err());
     }
 }

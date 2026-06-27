@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use reqwest::Url;
 use schemars::JsonSchema;
@@ -641,6 +641,46 @@ impl ConfigStore {
     }
 }
 
+pub(crate) fn normalize_network_mount_relative_subpath(
+    value: &str,
+) -> Result<String, ConfigStoreError> {
+    let trimmed = value.trim().trim_start_matches('/');
+    if trimmed.is_empty() {
+        return Ok(".".to_string());
+    }
+
+    let mut parts = Vec::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_os_string()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(ConfigStoreError::ValidationError {
+                    message:
+                        "Network mount relative path cannot contain parent-directory components"
+                            .to_string(),
+                });
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(ConfigStoreError::ValidationError {
+                    message: "Network mount relative path must stay below the mount root"
+                        .to_string(),
+                });
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        return Ok(".".to_string());
+    }
+
+    Ok(parts
+        .iter()
+        .collect::<PathBuf>()
+        .to_string_lossy()
+        .to_string())
+}
+
 pub fn app_support_dir_for_app(app: &tauri::AppHandle) -> Result<PathBuf, ConfigStoreError> {
     if let Some(override_dir) = override_app_support_dir() {
         return Ok(override_dir);
@@ -1086,7 +1126,8 @@ pub(crate) fn normalize_network_mount(
 
     mount.remount_url = mount.remount_url.trim().to_string();
     mount.mount_root_path = mount.mount_root_path.trim().to_string();
-    mount.relative_path_from_mount_root = mount.relative_path_from_mount_root.trim().to_string();
+    mount.relative_path_from_mount_root =
+        normalize_network_mount_relative_subpath(&mount.relative_path_from_mount_root)?;
     mount.username = normalize_trimmed_optional_string(mount.username);
 
     if mount.remount_url.is_empty() {
@@ -1099,10 +1140,6 @@ pub(crate) fn normalize_network_mount(
         return Err(ConfigStoreError::ValidationError {
             message: "Network mount root path cannot be empty".to_string(),
         });
-    }
-
-    if mount.relative_path_from_mount_root.is_empty() {
-        mount.relative_path_from_mount_root = ".".to_string();
     }
 
     let (remount_url, username) =
@@ -1605,6 +1642,28 @@ mod tests {
             relative_path_from_mount_root: ".".to_string(),
             enabled: true,
         }
+    }
+
+    #[test]
+    fn normalize_network_mount_rejects_parent_relative_subpath() {
+        let mut mount = build_network_mount("smb://nas.local/share", Some("user"));
+        mount.relative_path_from_mount_root = "../secrets".to_string();
+
+        let error = normalize_network_mount(Some(mount)).expect_err("traversal should be rejected");
+        assert!(error
+            .message()
+            .contains("cannot contain parent-directory components"));
+    }
+
+    #[test]
+    fn normalize_network_mount_collapses_dot_relative_subpath() {
+        let mut mount = build_network_mount("smb://nas.local/share", Some("user"));
+        mount.relative_path_from_mount_root = "/photos/./raw".to_string();
+
+        let normalized = normalize_network_mount(Some(mount))
+            .expect("mount should normalize")
+            .expect("mount should remain enabled");
+        assert_eq!(normalized.relative_path_from_mount_root, "photos/raw");
     }
 
     #[test]

@@ -782,6 +782,62 @@ impl ConfigStoreFileScope {
     }
 }
 
+fn path_contains_parent_component(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, Component::ParentDir))
+}
+
+fn config_store_file_scope_for_exact_path(
+    path: &Path,
+    store: &ConfigStore,
+) -> Option<ConfigStoreFileScope> {
+    if path == store.settings_file_path().as_path() {
+        return Some(ConfigStoreFileScope::Settings);
+    }
+    if path == store.tasks_file_path().as_path() {
+        return Some(ConfigStoreFileScope::SyncTasks);
+    }
+    if path == store.exclusion_sets_file_path().as_path() {
+        return Some(ConfigStoreFileScope::ExclusionSets);
+    }
+    None
+}
+
+fn validate_legacy_config_store_file_path(
+    path: &Path,
+    store: &ConfigStore,
+) -> Result<(ConfigStoreFileScope, PathBuf), String> {
+    if !path.is_absolute() {
+        return Err("Only absolute config store paths are allowed".to_string());
+    }
+    if path_contains_parent_component(path) {
+        return Err("Config store paths cannot contain parent-directory components".to_string());
+    }
+
+    let Some(scope) = config_store_file_scope_for_exact_path(path, store) else {
+        return Err("Access denied: path is not a managed config store file".to_string());
+    };
+
+    Ok((scope, path.to_path_buf()))
+}
+
+fn validate_legacy_config_store_dir_path(
+    path: &Path,
+    store: &ConfigStore,
+) -> Result<PathBuf, String> {
+    if !path.is_absolute() {
+        return Err("Only absolute config store paths are allowed".to_string());
+    }
+    if path_contains_parent_component(path) {
+        return Err("Config store paths cannot contain parent-directory components".to_string());
+    }
+    if path != store.config_dir() {
+        return Err("Access denied: path is not the managed config directory".to_string());
+    }
+
+    Ok(path.to_path_buf())
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum CloseRequestSource {
@@ -2258,14 +2314,56 @@ async fn read_current_conflict_file_info(path: &Path) -> Result<ConflictFileInfo
     })
 }
 
+async fn reject_target_symlink(path: &Path) -> Result<(), String> {
+    for component in path.components() {
+        if matches!(component, Component::ParentDir) {
+            return Err(format!(
+                "Refusing to write through parent-directory component: {}",
+                path.display()
+            ));
+        }
+    }
+
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!(
+                "Refusing to write through symlink target path: {}",
+                path.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("Failed to inspect '{}': {error}", path.display()));
+        }
+    }
+
+    Ok(())
+}
+
 async fn copy_file_preserve(source: &Path, target: &Path) -> Result<(), String> {
+    reject_target_symlink(target).await?;
+
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(|e| format!("Failed to create parent directory: {e}"))?;
     }
 
-    tokio::fs::copy(source, target)
+    reject_target_symlink(target).await?;
+
+    let mut source_file = tokio::fs::File::open(source)
+        .await
+        .map_err(|e| format!("Failed to open source file: {e}"))?;
+    let mut target_options = tokio::fs::OpenOptions::new();
+    target_options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    target_options.custom_flags(nix::fcntl::OFlag::O_NOFOLLOW.bits());
+    let mut target_file = target_options
+        .open(target)
+        .await
+        .map_err(|e| format!("Failed to open target file: {e}"))?;
+    tokio::io::copy(&mut source_file, &mut target_file)
         .await
         .map_err(|e| format!("Failed to copy file: {e}"))?;
 
@@ -2315,6 +2413,31 @@ fn preview_kind_for_path(path: &str) -> &'static str {
     } else {
         "other"
     }
+}
+
+fn allow_asset_preview_file(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
+    let path = Path::new(path);
+    app.asset_protocol_scope()
+        .allow_file(path)
+        .map_err(|error| {
+            format!(
+                "Failed to allow preview asset '{}': {error}",
+                path.display()
+            )
+        })?;
+
+    if let Ok(canonical) = path.canonicalize() {
+        app.asset_protocol_scope()
+            .allow_file(&canonical)
+            .map_err(|error| {
+                format!(
+                    "Failed to allow canonical preview asset '{}': {error}",
+                    canonical.display()
+                )
+            })?;
+    }
+
+    Ok(())
 }
 
 async fn read_text_preview(path: &str, max_bytes: usize) -> (Option<String>, bool) {
@@ -6390,7 +6513,8 @@ async fn reset_exclusion_sets(
 }
 
 #[tauri::command]
-async fn read_yaml_file(path: String) -> Result<String, String> {
+async fn read_yaml_file(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let (_, path) = validate_legacy_config_store_file_path(Path::new(&path), &state.config_store)?;
     tokio::fs::read_to_string(&path)
         .await
         .map_err(|e| e.to_string())
@@ -6403,11 +6527,12 @@ async fn write_yaml_file(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let (_, path) = validate_legacy_config_store_file_path(Path::new(&path), &state.config_store)?;
     tokio::fs::write(&path, content)
         .await
         .map_err(|e| e.to_string())?;
 
-    apply_config_write_side_effects(Path::new(&path), app, state.inner().clone()).await
+    apply_config_write_side_effects(&path, app, state.inner().clone()).await
 }
 
 #[tauri::command]
@@ -6898,19 +7023,28 @@ async fn find_orphan_files_internal(
 }
 
 #[tauri::command]
-async fn ensure_directory_exists(path: String) -> Result<(), String> {
+async fn ensure_directory_exists(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let path = validate_legacy_config_store_dir_path(Path::new(&path), &state.config_store)?;
     tokio::fs::create_dir_all(&path)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn file_exists(path: String) -> Result<bool, String> {
-    Ok(std::path::Path::new(&path).exists())
+async fn file_exists(path: String, state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let path_obj = Path::new(&path);
+    if let Ok(path) = validate_legacy_config_store_dir_path(path_obj, &state.config_store) {
+        return Ok(path.exists());
+    }
+    let (_, path) = validate_legacy_config_store_file_path(path_obj, &state.config_store)?;
+    Ok(path.exists())
 }
 
 #[tauri::command]
-async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), String> {
+async fn open_in_editor(path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     use std::path::Path;
 
     // Path validation for security
@@ -6926,19 +7060,16 @@ async fn open_in_editor(path: String, app: tauri::AppHandle) -> Result<(), Strin
         .canonicalize()
         .map_err(|e| format!("Invalid path: {e}"))?;
 
-    // Get the config directory for validation
-    let _ = app;
-    let config_dir = default_config_dir().map_err(config_store_error_to_string)?;
-
-    // Ensure config directory exists for comparison
-    let config_canonical = config_dir.canonicalize().unwrap_or(config_dir);
-
-    // Verify the path is within the config directory
-    let canonical_str = canonical.to_string_lossy();
-    let config_str = config_canonical.to_string_lossy();
-
-    if !canonical_str.as_ref().starts_with(config_str.as_ref()) {
-        return Err(format!("Access denied: Path outside config directory\nAllowed: {config_str}\nRequested: {canonical_str}"));
+    let (_, allowed_path) =
+        validate_legacy_config_store_file_path(Path::new(&path), &state.config_store)?;
+    let allowed_canonical = allowed_path
+        .canonicalize()
+        .map_err(|e| format!("Invalid config store path: {e}"))?;
+    if canonical != allowed_canonical {
+        return Err(format!(
+            "Access denied: path is not a managed config store file: {}",
+            canonical.display()
+        ));
     }
 
     // Try to open with default system editor
@@ -7601,6 +7732,7 @@ async fn get_conflict_item_preview(
     session_id: String,
     item_id: String,
     max_bytes: Option<usize>,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ConflictPreviewPayload, String> {
     let (source_path, target_path) = {
@@ -7634,6 +7766,9 @@ async fn get_conflict_item_preview(
         if source_text.is_none() || target_text.is_none() {
             kind = "other".to_string();
         }
+    } else if matches!(kind.as_str(), "image" | "video") {
+        allow_asset_preview_file(&app, &source_path)?;
+        allow_asset_preview_file(&app, &target_path)?;
     }
 
     Ok(ConflictPreviewPayload {

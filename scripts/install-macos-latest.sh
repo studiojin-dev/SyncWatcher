@@ -3,9 +3,20 @@ set -euo pipefail
 
 # SyncWatcher macOS latest installer (GitHub Releases, no browser download)
 # - Supports Apple Silicon (aarch64) and Intel (x64) Mac
+# - Verifies checksum and release-asset cosign attestation before installing
 
 REPO="studiojin-dev/SyncWatcher"
 APP_NAME="Sync Watcher.app"
+
+for bin in curl shasum cosign hdiutil; do
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "Missing required command: $bin"
+    if [ "$bin" = "cosign" ]; then
+      echo "Install Cosign first: https://docs.sigstore.dev/cosign/system_config/installation/"
+    fi
+    exit 1
+  fi
+done
 
 ARCH="$(uname -m)"
 if [ "$ARCH" = "arm64" ]; then
@@ -54,11 +65,15 @@ fi
 
 download_url="https://github.com/${REPO}/releases/download/${tag}/${dmg_name}"
 dmg_path="${tmp_dir}/${dmg_name}"
+bundle_name="attestation-${dmg_name}.bundle.json"
+bundle_url="https://github.com/${REPO}/releases/download/${tag}/${bundle_name}"
+bundle_path="${tmp_dir}/${bundle_name}"
 
 echo "아키텍처: ${SUFFIX}"
 echo "다운로드: ${dmg_name}"
 curl -fL "$download_url" -o "$dmg_path"
 curl -fL "$checksums_url" -o "$checksums_path"
+curl -fL "$bundle_url" -o "$bundle_path"
 
 expected_sha="$(awk -v file="$dmg_name" '$2 == file { print $1 }' "$checksums_path" | head -n 1)"
 if [ -z "$expected_sha" ]; then
@@ -75,6 +90,14 @@ if [ "$actual_sha" != "$expected_sha" ]; then
 fi
 
 echo "검증 완료: SHA-256 checksum 확인"
+echo "검증 중: cosign release attestation 확인"
+cosign verify-blob-attestation \
+  --bundle "$bundle_path" \
+  --type "https://syncwatcher.dev/attestation/release-asset/v1" \
+  --certificate-identity "https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/${tag}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "$dmg_path" >/dev/null
+echo "검증 완료: release attestation 확인"
 
 mkdir -p "$mount_point"
 hdiutil attach "$dmg_path" -nobrowse -mountpoint "$mount_point" -quiet

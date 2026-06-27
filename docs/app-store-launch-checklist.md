@@ -13,6 +13,9 @@
 - Treat the Mac App Store path as local/manual release work; do not submit or upload it from GitHub Actions.
 - Keep GitHub Actions as verification-only for the App Store path.
 - Keep `scripts/release/local-macos-release.sh` scoped to the GitHub DMG distribution flow.
+- Keep signing certificates, provisioning profiles, and App Store Connect API
+  private keys outside the repository checkout; release scripts MUST reject
+  repo-local credential paths.
 - Set `VITE_APP_STORE_URL` for the public App Store listing fallback even when `SYNCWATCHER_APP_STORE_APP_ID` is only injected locally for App Store builds.
 
 ## App Store Connect
