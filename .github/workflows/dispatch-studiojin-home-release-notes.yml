@@ -15,6 +15,7 @@ jobs:
   dispatch_release_notes:
     if: github.event_name != 'release' || (github.event.release.prerelease == false && github.actor != 'github-actions[bot]')
     runs-on: ubuntu-latest
+    environment: github-release
     permissions:
       contents: read
 
@@ -53,25 +54,35 @@ jobs:
 
           echo "tag_name=${tag}" >> "$GITHUB_OUTPUT"
 
+      - name: Create studiojin-home GitHub App token
+        id: studiojin_home_app_token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.STUDIOJIN_HOME_APP_ID }}
+          private-key: ${{ secrets.STUDIOJIN_HOME_APP_PRIVATE_KEY }}
+          owner: kimjj81
+          repositories: studiojin-home
+          permission-actions: write
+
       - name: Dispatch studiojin-home import workflow
         env:
-          BLOG_REPO_DISPATCH_TOKEN: ${{ secrets.BLOG_REPO_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.studiojin_home_app_token.outputs.token }}
           TAG_NAME: ${{ steps.resolve_tag.outputs.tag_name }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${BLOG_REPO_DISPATCH_TOKEN:-}" ]]; then
-            echo "Missing required secret BLOG_REPO_DISPATCH_TOKEN." >&2
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "Failed to create the studiojin-home GitHub App installation token." >&2
             exit 1
           fi
 
-          # BLOG_REPO_DISPATCH_TOKEN should be a fine-grained PAT scoped only to
-          # kimjj81/studiojin-home with Actions: write. The homepage repo writes
-          # its own content with its local GITHUB_TOKEN after this dispatch.
+          # The GitHub App installation is limited to kimjj81/studiojin-home
+          # with Actions: write. The homepage repository writes its own content
+          # with its local GITHUB_TOKEN after this dispatch.
           curl -fsSL \
             -X POST \
             -H 'Accept: application/vnd.github+json' \
-            -H "Authorization: Bearer ${BLOG_REPO_DISPATCH_TOKEN}" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
             -H 'X-GitHub-Api-Version: 2026-03-10' \
             "https://api.github.com/repos/kimjj81/studiojin-home/actions/workflows/import-syncwatcher-release-notes.yml/dispatches" \
             -d @- <<EOF

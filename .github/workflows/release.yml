@@ -16,6 +16,13 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: release-${{ inputs.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   tag_gate:
     runs-on: ubuntu-latest
@@ -28,28 +35,48 @@ jobs:
         id: check_tag
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
+          set -euo pipefail
+
           tag="${TAG_NAME}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] && \
+             { [[ "$REF_TYPE" != "tag" ]] || [[ "$REF_NAME" != "$tag" ]]; }; then
+            echo "Manual release recovery must be dispatched from the exact tag ref." >&2
+            echo "Requested tag: ${tag}; dispatch ref: ${REF_TYPE}/${REF_NAME}" >&2
+            exit 1
+          fi
+
           if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "release_channel=stable" >> "$GITHUB_OUTPUT"
+            {
+              echo "is_release=true"
+              echo "is_prerelease=false"
+              echo "release_channel=stable"
+            } >> "$GITHUB_OUTPUT"
             echo "Stable release tag detected: $tag"
           elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta(\.[0-9]+)?$ ]]; then
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "release_channel=beta" >> "$GITHUB_OUTPUT"
+            {
+              echo "is_release=true"
+              echo "is_prerelease=true"
+              echo "release_channel=beta"
+            } >> "$GITHUB_OUTPUT"
             echo "Beta pre-release tag detected: $tag"
           elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc([0-9]+|\.[0-9]+)?$ ]]; then
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "release_channel=rc" >> "$GITHUB_OUTPUT"
+            {
+              echo "is_release=true"
+              echo "is_prerelease=true"
+              echo "release_channel=rc"
+            } >> "$GITHUB_OUTPUT"
             echo "RC pre-release tag detected: $tag"
           else
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "release_channel=skip" >> "$GITHUB_OUTPUT"
+            {
+              echo "is_release=false"
+              echo "is_prerelease=false"
+              echo "release_channel=skip"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Log skip reason for non-release tag
@@ -123,31 +150,38 @@ jobs:
             echo "Created draft release ${TAG_NAME} (${release_id})."
           fi
 
-          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
-          echo "release_is_draft=${release_is_draft}" >> "$GITHUB_OUTPUT"
-          echo "reused_published_release=${reused_published_release}" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_id=${release_id}"
+            echo "release_is_draft=${release_is_draft}"
+            echo "reused_published_release=${reused_published_release}"
+          } >> "$GITHUB_OUTPUT"
 
   release_aarch64:
     needs: [tag_gate, prepare_release]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: macos-latest
+    environment: github-release
     permissions:
       contents: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.tag_name || github.ref_name }}
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: lts/*
+          package-manager-cache: false
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
@@ -177,7 +211,7 @@ jobs:
           printf "%s" "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/private_keys/AuthKey_$APPLE_API_KEY.p8"
 
       - name: Build and release Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SYNCWATCHER_LEMON_SQUEEZY_STORE_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_STORE_ID }}
@@ -201,26 +235,61 @@ jobs:
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           args: --target aarch64-apple-darwin
 
+      - name: Stage current aarch64 release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          dmg_files=(src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          bundle_files=(src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz)
+          signature_files=(src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig)
+          if [[ "${#dmg_files[@]}" -ne 1 || "${#bundle_files[@]}" -ne 1 || "${#signature_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one aarch64 DMG, updater bundle, and updater signature." >&2
+            exit 1
+          fi
+
+          mkdir -p current-release-assets
+          dmg_name="$(basename "${dmg_files[0]}" | sed -E 's/[][(){} ]/./g; s/[.][.]+/./g')"
+          bundle_base="$(basename "${bundle_files[0]}" .app.tar.gz)"
+          bundle_name="$(printf '%s_aarch64.app.tar.gz' "$bundle_base" | sed -E 's/[][(){} ]/./g; s/[.][.]+/./g')"
+          cp "${dmg_files[0]}" "current-release-assets/${dmg_name}"
+          cp "${bundle_files[0]}" "current-release-assets/${bundle_name}"
+          cp "${signature_files[0]}" "current-release-assets/${bundle_name}.sig"
+
+      - name: Upload current aarch64 release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-aarch64
+          path: current-release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
   release_x64:
     needs: [tag_gate, prepare_release, release_aarch64]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: macos-latest
+    environment: github-release
     permissions:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.tag_name || github.ref_name }}
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: lts/*
+          package-manager-cache: false
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
@@ -250,7 +319,7 @@ jobs:
           printf "%s" "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/private_keys/AuthKey_$APPLE_API_KEY.p8"
 
       - name: Build and upload x64 release assets
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SYNCWATCHER_LEMON_SQUEEZY_STORE_ID: ${{ vars.SYNCWATCHER_LEMON_SQUEEZY_STORE_ID }}
@@ -275,13 +344,51 @@ jobs:
           includeUpdaterJson: false
           args: --target x86_64-apple-darwin
 
+      - name: Stage current x64 release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          dmg_files=(src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg)
+          bundle_files=(src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz)
+          signature_files=(src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig)
+          if [[ "${#dmg_files[@]}" -ne 1 || "${#bundle_files[@]}" -ne 1 || "${#signature_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one x64 DMG, updater bundle, and updater signature." >&2
+            exit 1
+          fi
+
+          mkdir -p current-release-assets
+          dmg_name="$(basename "${dmg_files[0]}" | sed -E 's/[][(){} ]/./g; s/[.][.]+/./g')"
+          bundle_base="$(basename "${bundle_files[0]}" .app.tar.gz)"
+          bundle_name="$(printf '%s_x64.app.tar.gz' "$bundle_base" | sed -E 's/[][(){} ]/./g; s/[.][.]+/./g')"
+          cp "${dmg_files[0]}" "current-release-assets/${dmg_name}"
+          cp "${bundle_files[0]}" "current-release-assets/${bundle_name}"
+          cp "${signature_files[0]}" "current-release-assets/${bundle_name}.sig"
+
+      - name: Upload current x64 release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-x64
+          path: current-release-assets/
+          if-no-files-found: error
+          retention-days: 7
+
   merge_latest_json:
     needs: [tag_gate, prepare_release, release_aarch64, release_x64]
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     steps:
+      - name: Download current updater artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: latest-json-assets
+          merge-multiple: true
+
       - name: Rebuild updater metadata from release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -289,12 +396,6 @@ jobs:
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
           set -euo pipefail
-
-          mkdir -p latest-json-assets
-          gh release download "$TAG_NAME" \
-            --pattern "*.app.tar.gz" \
-            --pattern "*.app.tar.gz.sig" \
-            --dir latest-json-assets
 
           aarch64_bundle="$(find latest-json-assets -maxdepth 1 -type f -name '*aarch64.app.tar.gz' | head -n 1)"
           x64_bundle="$(find latest-json-assets -maxdepth 1 -type f -name '*x64.app.tar.gz' | head -n 1)"
@@ -353,6 +454,7 @@ jobs:
     if: needs.tag_gate.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
       id-token: write
     env:
@@ -364,7 +466,10 @@ jobs:
       ENABLE_COSIGN_ATTESTATION: ${{ needs.tag_gate.outputs.release_channel == 'stable' && 'true' || vars.ENABLE_COSIGN_ATTESTATION || 'false' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.tag_name || github.ref_name }}
+          persist-credentials: false
 
       - name: Resolve release attestation policy
         run: |
@@ -377,13 +482,13 @@ jobs:
           fi
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
 
       - name: Generate SBOM (CycloneDX / SPDX)
         run: |
           syft scan . \
-            -o cyclonedx-json=sbom-${TAG_NAME}.cdx.json \
-            -o spdx-json=sbom-${TAG_NAME}.spdx.json
+            -o "cyclonedx-json=sbom-${TAG_NAME}.cdx.json" \
+            -o "spdx-json=sbom-${TAG_NAME}.spdx.json"
 
       - name: Upload SBOM assets to release
         run: |
@@ -392,16 +497,30 @@ jobs:
             "sbom-${TAG_NAME}.spdx.json" \
             --clobber
 
-      - name: Download release artifacts
+      - name: Download current release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate current release artifact manifest
         id: prepare_release_assets
+        shell: bash
         run: |
-          mkdir -p release-assets
-          gh release download "$TAG_NAME" --dir release-assets
           mapfile -t artifacts < <(find release-assets -maxdepth 1 -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) | sort)
-          if [[ "${#artifacts[@]}" -eq 0 ]]; then
-            echo "No DMG or app tarball artifacts found."
+          if [[ "${#artifacts[@]}" -ne 4 ]]; then
+            echo "Expected exactly two DMGs and two app tarballs from the current workflow run; found ${#artifacts[@]}." >&2
             exit 1
           fi
+          for arch in aarch64 x64; do
+            dmg_count="$(find release-assets -maxdepth 1 -type f -name "*_${arch}.dmg" | wc -l | tr -d ' ')"
+            bundle_count="$(find release-assets -maxdepth 1 -type f -name "*_${arch}.app.tar.gz" | wc -l | tr -d ' ')"
+            if [[ "$dmg_count" -ne 1 || "$bundle_count" -ne 1 ]]; then
+              echo "Expected one DMG and one app tarball for ${arch}; found ${dmg_count} and ${bundle_count}." >&2
+              exit 1
+            fi
+          done
           printf '%s\n' "${artifacts[@]}" > release-artifacts.txt
           echo "artifact_count=${#artifacts[@]}" >> "$GITHUB_OUTPUT"
 
@@ -421,7 +540,7 @@ jobs:
 
       - name: Install Cosign
         if: env.ENABLE_COSIGN_ATTESTATION == 'true'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Generate keyless cosign attestations
         if: env.ENABLE_COSIGN_ATTESTATION == 'true'

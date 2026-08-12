@@ -5,6 +5,10 @@ Status: Accepted
 Date: 2026-04-09
 TL;DR: After a stable GitHub Release is published, explicitly dispatch a follow-up workflow in SyncWatcher that forwards the release notes to `kimjj81/studiojin-home`, so homepage sync does not depend on `release.published` events emitted by `GITHUB_TOKEN`.
 
+Superseded in part: Decision 6's fine-grained PAT authentication is superseded by
+ADR-20260812-0033-GAT. The remaining release-note synchronization decisions stay
+accepted.
+
 ## Context
 
 - SyncWatcher already publishes stable and prerelease builds through GitHub Releases, and stable releases are the direct-download channel users see first.

@@ -1,5 +1,37 @@
 [
   {
+    "id": "ADR-20260812-0034-RSH",
+    "title": "Tag-bound and run-scoped GitHub release hardening",
+    "tags": [
+      "release",
+      "github-actions",
+      "security",
+      "provenance",
+      "supply-chain",
+      "concurrency"
+    ],
+    "status": "Accepted",
+    "date": "2026-08-12",
+    "tldr": "Bind manual release recovery to the exact tag ref, serialize runs per tag, pass only current-run build artifacts to metadata and attestation jobs, and pin third-party actions to reviewed commit SHAs.",
+    "path": "docs/adr/ADR-20260812-0034-RSH-tag-bound-run-scoped-release-hardening.md"
+  },
+  {
+    "id": "ADR-20260812-0033-GAT",
+    "title": "GitHub App installation token for homepage release-note dispatch",
+    "tags": [
+      "github-actions",
+      "github-app",
+      "authentication",
+      "release",
+      "homepage",
+      "least-privilege"
+    ],
+    "status": "Accepted",
+    "date": "2026-08-12",
+    "tldr": "Replace the long-lived cross-repository PAT with a job-scoped GitHub App installation token limited to dispatching the studiojin-home import workflow.",
+    "path": "docs/adr/ADR-20260812-0033-GAT-github-app-token-for-home-release-notes.md"
+  },
+  {
     "id": "ADR-20260812-0032-CPR",
     "title": "Route external contributions through Issues instead of pull requests",
     "tags": [

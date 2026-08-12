@@ -4,6 +4,10 @@ Date: 2026-04-04
 Tags: release, ci, github-actions, tauri, updater, macos
 TL;DR: Keep tag-push releases immutable by default, allow an explicit `workflow_dispatch` recovery path that reuses an already-published release only when the operator opts in, and require GitHub-generated release notes for every release creation or recovery run.
 
+Hardened by: ADR-20260812-0034-RSH requires the manual dispatch ref to be the
+same tag as `tag_name`, serializes release runs per tag, and limits metadata and
+attestations to artifacts created by the current workflow run.
+
 ## Context
 
 - `ADR-20260325-0017-REL` made published-tag retries fail fast to preserve release immutability after the `v1.3.1` race condition.
