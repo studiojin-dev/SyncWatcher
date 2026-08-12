@@ -666,7 +666,7 @@ jobs:
           set -euo pipefail
 
           jq -n --arg tag_name "${TAG_NAME}" \
-            '{ref: "main", inputs: {tag_name: $tag_name}}' \
+            '{ref: $tag_name, inputs: {tag_name: $tag_name}}' \
             | gh api \
                 --method POST \
                 -H 'Accept: application/vnd.github+json' \

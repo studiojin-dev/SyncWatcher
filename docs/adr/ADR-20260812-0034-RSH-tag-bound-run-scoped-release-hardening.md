@@ -21,6 +21,7 @@ TL;DR: Bind manual release recovery to the exact tag ref, serialize runs per tag
 5. Updater metadata, checksums, and attestations MUST consume only those workflow artifacts from the current run. Existing GitHub Release assets are not a provenance input.
 6. The current-run manifest MUST contain exactly one DMG and one updater bundle for each supported architecture before checksums or attestations are generated.
 7. Third-party actions in the release and cross-repository dispatch workflows MUST be pinned to reviewed full commit SHAs. Human-readable major-version comments document the intended update line.
+8. The stable release-note follow-up workflow MUST be dispatched from the same release tag, rather than `main`, so its workflow revision and Environment tag policy remain aligned with the release that triggered it.
 
 ## Consequences
 
@@ -30,6 +31,7 @@ TL;DR: Bind manual release recovery to the exact tag ref, serialize runs per tag
 - Same-tag runs wait for one another rather than racing or cancelling a partially completed release.
 - Workflow artifacts temporarily duplicate the current build outputs for at most seven days, adding storage and transfer time.
 - Action upgrades require an explicit commit-SHA review instead of automatically following a mutable major tag.
+- Stable release-note dispatches use the immutable release-tag workflow revision and remain eligible for the tag-restricted `github-release` Environment.
 
 ## Alternatives Considered
 
