@@ -1,6 +1,6 @@
 [package]
 name = "syncwatcher"
-version = "1.7.0"
+version = "2.0.0-rc2"
 description = "SyncWatcher is a high-performance, native-feeling macOS file synchronization application that detects SD cards and USB drives automatically when inserted and performs real-time directory watching for instant backup."
 authors = ["Kim Jeongjin"]
 license = "Apache-2.0"
