@@ -1,4 +1,4 @@
-# SyncWatcher (Source-Available)
+# SyncWatcher
 
 [![English](https://img.shields.io/badge/README-English-111111?style=for-the-badge&logo=readme&logoColor=white)](./README.md)
 [![Korean](https://img.shields.io/badge/README-%ED%95%9C%EA%B5%AD%EC%96%B4-0F766E?style=for-the-badge&logo=readme&logoColor=white)](./README.ko.md)
@@ -20,8 +20,6 @@ It is built for people who move files constantly and want a backup flow that fee
 
 ### Main Dashboard
 
-![SyncWatcher dashboard](./manual/SCR-20260324-1.png)
-
 The main dashboard keeps task state, progress, and quick actions visible so backup jobs stay easy to understand.
 
 ### Create A SyncTask
@@ -31,8 +29,6 @@ The main dashboard keeps task state, progress, and quick actions visible so back
 Choose a Source, pick a Target, and shape the task around your workflow instead of repeating the same copy setup every time.
 
 ### Automate Backup Behavior
-
-![SyncTask automation demo](./manual/synctask-automation.gif)
 
 SyncWatcher supports removable storage targets, automatic watching, verification options, and exclusion rules so the task can match the way you actually work.
 
@@ -83,9 +79,9 @@ Detailed walkthroughs:
 3. Move `SyncWatcher.app` to `Applications`.
 4. Launch the app.
 
-Optional license support purchases run through Lemon Squeezy, but app downloads and in-app updates continue to use GitHub Releases.
+Optional supporter purchases run through Lemon Squeezy, but app downloads and in-app updates continue to use GitHub Releases.
 
-After purchase, Lemon Squeezy sends the license key by receipt email and exposes it on the customer order page. In SyncWatcher, open the license dialog from the sidebar or Settings and paste the key there.
+After purchase, Lemon Squeezy sends a supporter key by receipt email and exposes it on the customer order page. In SyncWatcher, open the supporter dialog from the sidebar or Settings and paste the key there. A supporter purchase does not add or restrict rights under Apache-2.0 and does not unlock extra features.
 
 ### Latest Installer Script
 
@@ -116,17 +112,19 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 ## License
 
-This project is **Source-Available** software.
+SyncWatcher source code is licensed under the [Apache License 2.0](./LICENSE). Commercial use, modification, redistribution, and forks are permitted under Apache-2.0.
 
-| Component | License |
-| --- | --- |
-| [Source Code](./LICENSE) | [Polyform Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) |
-| Binary Distribution | Proprietary EULA (Free Use, Optional Support License) |
+The SyncWatcher name, logo, application icon, and StudioJin branding are not licensed under Apache-2.0. Modified distributions must use their own name and application icon. See [TRADEMARKS.md](./TRADEMARKS.md) and [BRAND_ASSETS.md](./BRAND_ASSETS.md).
 
-The official app is free to use, including commercial and internal company use. Buying a license is optional and works as project support.
+[GitHub Releases](https://github.com/studiojin-dev/SyncWatcher/releases) and the Mac App Store are StudioJin's official distribution channels. This designation does not limit anyone's Apache-2.0 rights to build or redistribute the software under different branding.
+
+## Feedback and Security
+
+SyncWatcher does not currently accept external pull requests. Report bugs and request features through [GitHub Issues](https://github.com/studiojin-dev/SyncWatcher/issues), following [CONTRIBUTING.md](./CONTRIBUTING.md). Report security vulnerabilities privately as described in [SECURITY.md](./SECURITY.md), not in a public issue.
 
 ## Support
-- License support purchase: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
+
+- Optional supporter purchase: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
 - Additional tip: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
 - Support email: [support@studiojin.dev](mailto:support@studiojin.dev)
 - Terms & Conditions: [TERMS.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.md)

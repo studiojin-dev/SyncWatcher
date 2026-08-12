@@ -42,14 +42,15 @@ vi.mock('react-i18next', () => ({
         'about.title': 'About',
         'about.developer': 'Developer',
         'about.license': 'License',
-        'about.licenseType': 'Polyform NC 1.0.0',
+        'about.licenseType': 'Apache-2.0',
         'about.viewOnGithub': 'View on GitHub',
         'about.supportStatus': 'Support Status',
-        'about.unregistered': 'Free Use (Personal & Commercial)',
+        'about.unregistered': 'Not a supporter',
         'about.openSourceLibraries': 'Open Source Libraries',
         'about.openSourceDescription': 'SyncWatcher includes open source libraries. Use the button below to view their license information.',
         'about.viewLicenses': 'View Licenses',
         'about.licenses': 'Open Source Licenses',
+        'about.licenseDetails': 'License and notice text',
         'common.loading': 'Loading...',
         'common.close': 'Close',
       };
@@ -73,7 +74,7 @@ describe('AboutView', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([
-        { name: 'test-lib', version: '1.0.0', license: 'MIT' }
+        { name: 'test-lib', version: '1.0.0', license: 'MIT', licenseText: 'MIT license body' }
       ]),
     });
   });
@@ -134,6 +135,8 @@ describe('AboutView', () => {
 
     expect(await screen.findByText('Open Source Licenses')).toBeInTheDocument();
     expect(await screen.findByText('test-lib')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('License and notice text'));
+    expect(screen.getByText('MIT license body')).toBeInTheDocument();
   });
 
   it('should handle fetch errors gracefully', async () => {

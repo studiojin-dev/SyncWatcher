@@ -1,4 +1,4 @@
-# SyncWatcher (Source-Available)
+# SyncWatcher
 
 [![English](https://img.shields.io/badge/README-English-111111?style=for-the-badge&logo=readme&logoColor=white)](./README.md)
 [![한국어](https://img.shields.io/badge/README-%ED%95%9C%EA%B5%AD%EC%96%B4-0F766E?style=for-the-badge&logo=readme&logoColor=white)](./README.ko.md)
@@ -20,8 +20,6 @@ SyncWatcher는 SD 카드, USB 드라이브, 작업 폴더 백업을 반복 수�
 
 ### 메인 대시보드
 
-![SyncWatcher dashboard](./manual/SCR-20260324-1.png)
-
 메인 대시보드에서 작업 상태, 진행 상황, 빠른 실행 버튼을 바로 확인할 수 있어 현재 백업 상태를 쉽게 파악할 수 있습니다.
 
 ### SyncTask 만들기
@@ -31,8 +29,6 @@ SyncWatcher는 SD 카드, USB 드라이브, 작업 폴더 백업을 반복 수�
 Source와 Target을 고르고, 반복되는 백업 흐름에 맞게 태스크를 저장해 두면 같은 설정을 다시 만들 필요가 없습니다.
 
 ### 백업 동작 자동화
-
-![SyncTask automation demo](./manual/synctask-automation.gif)
 
 이동식 저장장치 대상, 자동 감시, 검증 옵션, 제외 규칙을 조합해서 실제 작업 방식에 맞는 백업 흐름을 구성할 수 있습니다.
 
@@ -100,9 +96,9 @@ pnpm tauri build
 3. `SyncWatcher.app`을 `Applications`로 이동합니다.
 4. 앱을 실행합니다.
 
-선택 후원 라이선스 구매는 Lemon Squeezy에서 처리하지만, 앱 다운로드와 앱 내 자동업데이트 원본은 계속 GitHub Releases를 사용합니다.
+선택형 후원 구매는 Lemon Squeezy에서 처리하지만, 앱 다운로드와 앱 내 자동업데이트 원본은 계속 GitHub Releases를 사용합니다.
 
-구매 후에는 Lemon Squeezy 영수증 메일과 주문 페이지에서 라이선스 키를 확인할 수 있습니다. SyncWatcher에서는 사이드바나 Settings의 라이선스 관리 화면에서 키를 붙여 넣으면 됩니다.
+구매 후에는 Lemon Squeezy 영수증 메일과 주문 페이지에서 후원 키를 확인할 수 있습니다. SyncWatcher에서는 사이드바나 Settings의 후원 관리 화면에서 키를 붙여 넣으면 됩니다. 후원 구매는 Apache-2.0 권리를 추가하거나 제한하지 않으며 추가 기능을 잠금 해제하지 않습니다.
 
 ### 최신 설치 스크립트
 
@@ -133,18 +129,19 @@ cd src-tauri && cargo build --release --bin sync-cli
 
 ## 라이선스
 
-이 프로젝트는 **Source-Available** 소프트웨어입니다.
+SyncWatcher 소스 코드는 [Apache License 2.0](./LICENSE)으로 제공됩니다. Apache-2.0 조건에 따라 상업적 사용, 수정, 재배포, 포크가 허용됩니다.
 
-| 구성 요소 | 라이선스 |
-| --- | --- |
-| [소스 코드](./LICENSE) | [Polyform Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) |
-| 바이너리 배포 | Proprietary EULA (무료 사용, 선택적 후원 라이선스) |
+SyncWatcher 이름, 로고, 앱 아이콘 및 StudioJin 브랜딩은 Apache-2.0 적용 대상이 아닙니다. 수정 배포판은 자체 이름과 앱 아이콘을 사용해야 합니다. 자세한 내용은 [TRADEMARKS.ko.md](./TRADEMARKS.ko.md)와 [BRAND_ASSETS.ko.md](./BRAND_ASSETS.ko.md)를 참고하세요.
 
-공식 앱은 상업적 사용과 사내 사용을 포함해 무료로 사용할 수 있습니다. 라이선스 구매는 선택 사항이며 프로젝트 후원 성격입니다.
+[GitHub Releases](https://github.com/studiojin-dev/SyncWatcher/releases)와 Mac App Store는 StudioJin의 공식 배포 채널입니다. 이 표시는 다른 사람이 별도 브랜딩으로 소프트웨어를 빌드하고 재배포할 Apache-2.0 권리를 제한하지 않습니다.
+
+## 피드백과 보안
+
+SyncWatcher는 현재 외부 pull request를 받지 않습니다. 버그 제보와 기능 제안은 [CONTRIBUTING.md](./CONTRIBUTING.md)의 안내에 따라 [GitHub Issues](https://github.com/studiojin-dev/SyncWatcher/issues)를 이용해 주세요. 보안 취약점은 공개 이슈가 아니라 [SECURITY.md](./SECURITY.md)에 안내된 비공개 채널로 제보해 주세요.
 
 ## 후원
 
-- 라이선스 후원 구매: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
+- 선택형 후원 구매: [Lemon Squeezy checkout](https://store.studiojin.dev/checkout/buy/f3bcbe48-e9c8-473a-a5fa-64493ac75b97)
 - 추가 후원: [Buy Me a Coffee](https://buymeacoffee.com/studiojin_dev)
 - 지원 이메일: [support@studiojin.dev](mailto:support@studiojin.dev)
 - 이용약관: [TERMS.md](https://github.com/studiojin-dev/SyncWatcher/blob/main/TERMS.md)

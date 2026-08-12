@@ -1,10 +1,6 @@
 {
   "translation": {
     "appName": "SyncWatcher",
-    "common": {
-      "expandDirectory": "{{name}} 펼치기",
-      "collapseDirectory": "{{name}} 접기"
-    },
     "app": {
       "quitConfirmTitle": "종료 확인",
       "quitConfirmMessage": "Watch Mode가 켜진 작업 또는 동기화 중인 작업이 있습니다. 정말 종료하시겠습니까?",
@@ -45,9 +41,6 @@
       "deviceStatus": "장치 상태",
       "connected": "연결됨",
       "disconnected": "연결 끊김",
-      "success": "성공",
-      "warning": "경고",
-      "refresh": "새로고침",
       "bytesPerSecond": "바이트/초",
       "analyzing": "분석중...",
       "capacityUnavailable": "N/A",
@@ -108,7 +101,13 @@
       "savedUuidSourceHint": "이 작업은 저장된 UUID 소스를 유지합니다. 볼륨 내부를 탐색하려면 미디어를 다시 마운트하거나 다른 볼륨을 선택하세요.",
       "subPath": "하위 경로",
       "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathOutsideVolume": "하위 경로는 선택한 볼륨 안에 있어야 합니다.",
       "volumeNotMounted": "볼륨이 마운트되지 않음",
+      "smbAutoMountEnabled": "이 SMB 공유를 자동으로 마운트",
+      "smbUsernamePlaceholder": "SMB 사용자 이름",
+      "smbPasswordPlaceholder": "SMB 비밀번호",
+      "unmountSuccess": "볼륨을 마운트 해제했습니다.",
+      "unmountFailed": "볼륨 마운트 해제에 실패했습니다.",
       "targetDirectoryWillBeCreated": "대상 디렉터리가 아직 없어 실제 동기화 시 생성됩니다: {{path}}",
       "targetDirectoryCreated": "대상 디렉터리를 생성한 뒤 동기화를 진행했습니다: {{path}}",
       "uuidCopied": "UUID가 클립보드에 복사되었습니다",
@@ -116,7 +115,13 @@
         "sourceEqualsTarget": "원본과 대상 경로는 겹칠 수 없습니다.",
         "targetIsSubdirOfSource": "대상은 원본 경로 내부에 둘 수 없습니다.",
         "duplicateTarget": "다른 작업과 대상 경로가 충돌합니다.",
-        "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다."
+        "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다.",
+        "watchCycle": "감시 작업은 순환 구조를 만들 수 없습니다.",
+        "invalidInput": "작업 입력값이 올바르지 않습니다."
+      },
+      "validationModal": {
+        "title": "동기화 작업 검증", "affectedTasks": "영향받는 작업", "source": "원본", "target": "대상", "close": "닫기",
+        "ruleDescriptions": { "sourceTargetOverlap": "원본과 대상 경로는 겹칠 수 없습니다.", "duplicateTarget": "각 작업은 고유한 대상을 사용해야 합니다.", "targetSubdirConflict": "작업 대상끼리 상위·하위 경로가 될 수 없습니다.", "watchCycle": "감시 작업은 순환 구조를 만들 수 없습니다.", "invalidInput": "올바르지 않은 작업 입력값을 수정하세요." }
       },
       "warnings": {
         "targetInWatchedSource": "순환이 없는 watch chain은 허용되지만, 겹치는 쓰기 작업이 성공적으로 끝난 뒤에만 downstream watch sync가 시작됩니다."
@@ -284,6 +289,7 @@
       "deleteFailed": "삭제 후보 파일 삭제에 실패했습니다."
     },
     "conflict": {
+      "windowTitle": "충돌 검토",
       "queueTitle": "확인이 필요한 목록",
       "queueEmpty": "대기 중인 충돌 세션이 없습니다.",
       "queueCount": "{{count}}개 세션",
@@ -300,6 +306,8 @@
       "previewTitle": "원본 / 타겟 미리보기 (Diff)",
       "previewEmpty": "아래 목록에서 파일을 선택하세요.",
       "previewUnsupported": "이 파일 형식은 앱 내 미리보기를 지원하지 않습니다. OS 미리보기를 사용하세요.",
+      "previewLoadFailed": "미리보기를 불러오지 못했습니다.",
+      "previewOpenHint": "시스템 뷰어로 파일을 열어 확인하세요.",
       "listTitle": "확인이 필요한 파일 목록",
       "listEmpty": "표시할 항목이 없습니다.",
       "confirmForceCopy": "강제 복사는 되돌릴 수 없습니다. 계속할까요?",
@@ -338,7 +346,7 @@
       "sectionDisplay": "화면",
       "sectionSystem": "시스템",
       "sectionBehavior": "동작",
-      "sectionLicense": "라이선스 후원",
+      "sectionLicense": "후원",
       "sectionLegal": "법률",
       "stateLocation": "상태 저장 위치",
       "stateLocationPlaceholder": "기본값: Tauri AppData",
@@ -524,23 +532,30 @@
       "openSourceLibraries": "오픈 소스 라이브러리",
       "openSourceDescription": "SyncWatcher는 여러 오픈 소스 라이브러리를 사용합니다. 아래 버튼에서 라이선스 정보를 확인할 수 있습니다.",
       "viewLicenses": "라이선스 보기",
+      "licenses": "오픈 소스 라이선스",
+      "licenseDetails": "라이선스 및 고지 원문",
       "viewOnGithub": "GitHub에서 보기",
       "openAppStore": "App Store에서 열기",
-      "unregistered": "무료 사용 (개인/상용)",
-      "registered": "라이선스 후원자",
+      "unregistered": "후원 전",
+      "registered": "후원자",
       "thankYou": "개발자 밥값을 지켜주셔서 감사합니다!",
       "supportTitle": "한푼만... 가능하실까요?",
-      "supportHint": "상용 사용도 무료입니다. 라이선스 구매는 완전 선택이며 개발자 후원 성격입니다.",
+      "supportHint": "SyncWatcher는 Apache-2.0으로 무료 제공됩니다. 선택형 후원은 소프트웨어 권리나 기능을 바꾸지 않습니다.",
       "supportButton": "한푼 줍쇼",
       "supportModalTitle": "굽실굽실 동전컵 모드",
-      "supportModalMessage": "이미 라이선스 구매로 프로젝트를 크게 도와주셨습니다. 한 번 더 거들어주신다면 Buy Me a Coffee 후원도 열려 있습니다.",
+      "supportModalMessage": "이미 프로젝트를 크게 도와주셨습니다. 한 번 더 거들어주신다면 Buy Me a Coffee 후원도 열려 있습니다.",
       "supportModalConfirm": "Buy Me a Coffee로 후원",
       "supportModalCancel": "다음에 굽실할게요",
-      "purchaseLicense": "선택 후원: 라이선스 구매",
+      "purchaseLicense": "후원자 되기",
       "supportStatus": "후원 상태",
-      "licenseType": "Polyform NC 1.0.0"
+      "licenseType": "Apache-2.0"
     },
     "common": {
+      "expandDirectory": "{{name}} 펼치기",
+      "collapseDirectory": "{{name}} 접기",
+      "open": "열기",
+      "refresh": "새로 고침",
+      "retry": "다시 시도",
       "confirm": "확인",
       "yes": "예",
       "no": "아니요",
@@ -598,7 +613,9 @@
       "openAppStore": "App Store 열기"
     },
     "license": {
-      "title": "라이선스 활성화",
+      "title": "후원 상태 활성화",
+      "loadFailed": "후원 상태를 불러오지 못했습니다.",
+      "activationFailed": "후원 상태를 활성화하지 못했습니다.",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "개발 후원을 위한 선택형 1회 인앱 구매입니다. 추가 기능은 열리지 않습니다.",
       "appStoreSupportStatus": "후원",
@@ -609,23 +626,26 @@
       "appStoreRestored": "App Store 구매가 복원되었습니다.",
       "appStoreRestoring": "복원 중...",
       "appStorePurchaseFailed": "App Store 구매를 완료하지 못했습니다.",
+      "appStorePurchaseUnavailable": "이 빌드에서는 인앱 구매를 사용할 수 없습니다.",
+      "appStoreRestoreUnavailable": "이 빌드에서는 구매 복원을 사용할 수 없습니다.",
       "appStorePending": "App Store 구매가 아직 승인 대기 중입니다.",
       "appStoreSupporterActive": "후원 활성화됨",
-      "enterKeyDescription": "구매 시 받은 라이선스 키를 입력하세요.",
-      "keyPlaceholder": "라이선스 키 입력",
-      "activate": "활성화",
-      "activating": "활성화 중...",
-      "activated": "라이선스가 활성화되었습니다!",
-      "invalid": "유효하지 않은 라이선스 키입니다.",
-      "enterLicense": "라이선스 입력",
-      "manage": "라이선스 관리",
-      "manageDescription": "이 기기에는 이미 후원 라이선스가 활성화되어 있습니다. 다른 기기로 옮기기 전에 여기서 제거할 수 있습니다.",
-      "currentKey": "현재 키",
-      "remove": "라이선스 제거",
+      "enterKeyDescription": "구매 시 받은 후원 키를 입력하세요.",
+      "keyPlaceholder": "후원 키 입력",
+      "activate": "후원 활성화",
+      "activating": "후원 활성화 중...",
+      "activated": "후원 상태가 활성화되었습니다!",
+      "invalid": "유효하지 않은 후원 키입니다.",
+      "enterLicense": "후원 키 입력",
+      "manage": "후원 상태 관리",
+      "manageDescription": "이 기기에는 이미 후원 상태가 활성화되어 있습니다. 다른 기기로 키를 옮기기 전에 여기서 제거할 수 있습니다.",
+      "currentKey": "후원 키",
+      "remove": "후원 키 제거",
       "restore": "구매 복원",
       "removing": "제거 중...",
-      "removed": "라이선스가 제거되었습니다.",
-      "removeFailed": "라이선스 제거에 실패했습니다."
+      "removed": "후원 키가 제거되었습니다.",
+      "removeFailed": "후원 키 제거에 실패했습니다.",
+      "supporterKeysUnavailable": "이 빌드에서는 후원 키를 사용할 수 없습니다."
     }
   }
 }

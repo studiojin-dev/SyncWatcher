@@ -5,7 +5,7 @@
     "type": "git",
     "url": "https://github.com/studiojin-dev/SyncWatcher.git"
   },
-  "license": "Source-Available",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -18,7 +18,8 @@
     "lint:check": "eslint . --ext .ts,.tsx",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage --run"
+    "test:coverage": "vitest --coverage --run",
+    "licenses:rust": "cd src-tauri && cargo about generate --locked --fail about.hbs > THIRD_PARTY_LICENSES.html"
   },
   "dependencies": {
     "@tabler/icons-react": "^3.46.0",

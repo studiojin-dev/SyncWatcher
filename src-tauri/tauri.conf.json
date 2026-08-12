@@ -31,6 +31,16 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "copyright": "Copyright 2026 StudioJin",
+    "license": "Apache-2.0",
+    "licenseFile": "../LICENSE",
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../NOTICE": "NOTICE",
+      "../TRADEMARKS.md": "TRADEMARKS.md",
+      "../BRAND_ASSETS.md": "BRAND_ASSETS.md",
+      "THIRD_PARTY_LICENSES.html": "THIRD_PARTY_LICENSES.html"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

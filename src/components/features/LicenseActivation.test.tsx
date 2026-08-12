@@ -37,46 +37,53 @@ const {
 });
 const invokeMock = vi.mocked(invoke);
 
+const translate = (key: string) => {
+  const translations: Record<string, string> = {
+    'license.title': 'Supporter status',
+    'license.enterKeyDescription': 'Enter your key.',
+    'license.keyPlaceholder': 'Supporter key',
+    'license.activate': 'Activate',
+    'license.activating': 'Activating...',
+    'license.activated': 'Activated!',
+    'license.invalid': 'Invalid supporter key.',
+    'license.enterLicense': 'Enter Supporter Key',
+    'license.manage': 'Manage Supporter Status',
+    'license.manageDescription': 'Manage your supporter status.',
+    'license.currentKey': 'Supporter Key',
+    'license.remove': 'Remove Supporter Key',
+    'license.removing': 'Removing...',
+    'license.removed': 'Supporter key removed.',
+    'license.removeFailed': 'Failed to remove supporter key.',
+    'license.loadFailed': 'Failed to load supporter status.',
+    'license.activationFailed': 'Failed to activate supporter status.',
+    'license.supporterKeysUnavailable': 'Supporter keys are unavailable.',
+    'license.appStoreTitle': 'App Store Support',
+    'license.appStoreDescription': 'Support SyncWatcher in the App Store.',
+    'license.appStoreSupportStatus': 'Support status',
+    'license.appStoreSupporterActive': 'Support active',
+    'license.appStorePurchase': 'Purchase Supporter',
+    'license.appStorePurchasing': 'Purchasing...',
+    'license.appStorePurchased': 'Purchased!',
+    'license.appStorePurchaseFailed': 'Purchase failed.',
+    'license.appStorePurchaseUnavailable': 'Purchase unavailable.',
+    'license.appStorePending': 'Purchase pending.',
+    'license.appStoreRestored': 'Restored!',
+    'license.appStoreRestoreFailed': 'Restore failed.',
+    'license.appStoreRestoreUnavailable': 'Restore unavailable.',
+    'license.appStoreRestoring': 'Restoring...',
+    'license.restore': 'Restore',
+    'about.registered': 'Supporter',
+    'about.unregistered': 'Not a supporter',
+    'common.cancel': 'Cancel',
+    'common.ok': 'OK',
+    'common.loading': 'Loading...',
+  };
+  return translations[key] ?? key;
+};
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
-      const translations: Record<string, string> = {
-        'license.title': 'License',
-        'license.enterKeyDescription': 'Enter your key.',
-        'license.keyPlaceholder': 'License key',
-        'license.activate': 'Activate',
-        'license.activating': 'Activating...',
-        'license.activated': 'Activated!',
-        'license.invalid': 'Invalid license key.',
-        'license.enterLicense': 'Enter License',
-        'license.manage': 'Manage License',
-        'license.manageDescription': 'Manage your supporter license.',
-        'license.currentKey': 'Current Key',
-        'license.remove': 'Remove License',
-        'license.removing': 'Removing...',
-        'license.removed': 'License removed.',
-        'license.removeFailed': 'Failed to remove license.',
-        'license.appStoreTitle': 'App Store Support',
-        'license.appStoreDescription': 'Support SyncWatcher in the App Store.',
-        'license.appStoreSupportStatus': 'Support status',
-        'license.appStoreSupporterActive': 'Support active',
-        'license.appStorePurchase': 'Purchase Supporter',
-        'license.appStorePurchasing': 'Purchasing...',
-        'license.appStorePurchased': 'Purchased!',
-        'license.appStorePurchaseFailed': 'Purchase failed.',
-        'license.appStorePending': 'Purchase pending.',
-        'license.appStoreRestored': 'Restored!',
-        'license.appStoreRestoreFailed': 'Restore failed.',
-        'license.appStoreRestoring': 'Restoring...',
-        'license.restore': 'Restore',
-        'about.registered': 'Registered',
-        'about.unregistered': 'Unregistered',
-        'common.cancel': 'Cancel',
-        'common.ok': 'OK',
-        'common.loading': 'Loading...',
-      };
-      return translations[key] ?? key;
-    },
+    t: translate,
   }),
 }));
 
@@ -119,7 +126,7 @@ describe('LicenseActivation', () => {
     render(<LicenseActivation open onClose={vi.fn()} />);
 
     expect(await screen.findByText('Enter your key.')).toBeInTheDocument();
-    await userEvent.type(screen.getByPlaceholderText('License key'), 'abcd-1234');
+    await userEvent.type(screen.getByPlaceholderText('Supporter key'), 'abcd-1234');
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }));
 
     await waitFor(() => {
@@ -149,16 +156,16 @@ describe('LicenseActivation', () => {
 
     render(<LicenseActivation open onClose={vi.fn()} />);
 
-    expect(await screen.findByText('Manage your supporter license.')).toBeInTheDocument();
+    expect(await screen.findByText('Manage your supporter status.')).toBeInTheDocument();
     expect(screen.getByText('abcd…1234')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove License' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Supporter Key' }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('deactivate_license_key');
     });
     await waitFor(() => {
-      expect(screen.getByText('License removed.')).toBeInTheDocument();
+      expect(screen.getByText('Supporter key removed.')).toBeInTheDocument();
     });
     expect(updateSettingsMock).toHaveBeenCalledWith({ isRegistered: false });
   });
@@ -177,13 +184,13 @@ describe('LicenseActivation', () => {
 
     const { rerender } = render(<LicenseActivation open onClose={vi.fn()} />);
 
-    expect(await screen.findByText('Manage your supporter license.')).toBeInTheDocument();
+    expect(await screen.findByText('Manage your supporter status.')).toBeInTheDocument();
     expect(screen.getByText('abcd…1234')).toBeInTheDocument();
 
     rerender(<LicenseActivation open={false} onClose={vi.fn()} />);
     rerender(<LicenseActivation open onClose={vi.fn()} />);
 
-    expect(await screen.findByText('Manage your supporter license.')).toBeInTheDocument();
+    expect(await screen.findByText('Manage your supporter status.')).toBeInTheDocument();
     expect(screen.getByText('abcd…1234')).toBeInTheDocument();
     expect(
       invokeMock.mock.calls.filter(([command]) => command === 'get_license_status'),
@@ -211,7 +218,7 @@ describe('LicenseActivation', () => {
     render(<LicenseActivation open onClose={vi.fn()} />);
 
     expect(await screen.findByText('Support SyncWatcher in the App Store.')).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('License key')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Supporter key')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restore' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Purchase Supporter' })).toBeInTheDocument();
@@ -238,7 +245,7 @@ describe('LicenseActivation', () => {
 
     render(<LicenseActivation open onClose={vi.fn()} />);
 
-    expect(await screen.findByText('Registered')).toBeInTheDocument();
+    expect(await screen.findByText('Supporter')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restore' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Purchase Supporter' })).not.toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith('get_license_status');

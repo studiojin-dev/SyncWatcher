@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible SyncWatcher problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private paths, personal files, or unredacted logs.
+  - type: input
+    id: version
+    attributes:
+      label: SyncWatcher version
+      placeholder: 1.7.0
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Distribution channel
+      options:
+        - GitHub release
+        - Mac App Store
+        - Source build
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and hardware
+      placeholder: macOS 15.6, Apple Silicon
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use temporary example paths and non-sensitive data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, personal information, and private file contents.
+          required: true

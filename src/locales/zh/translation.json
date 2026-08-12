@@ -1,10 +1,6 @@
 {
   "translation": {
     "appName": "SyncWatcher",
-    "common": {
-      "expandDirectory": "展开 {{name}}",
-      "collapseDirectory": "折叠 {{name}}"
-    },
     "app": {
       "quitConfirmTitle": "确认退出",
       "quitConfirmMessage": "存在已启用 Watch Mode 的任务或正在同步的任务。确定要退出吗？",
@@ -45,9 +41,6 @@
       "deviceStatus": "设备状态",
       "connected": "已连接",
       "disconnected": "已断开",
-      "success": "成功",
-      "warning": "警告",
-      "refresh": "刷新",
       "bytesPerSecond": "字节/秒",
       "analyzing": "分析中...",
       "capacityUnavailable": "N/A",
@@ -108,7 +101,10 @@
       "savedUuidSourceHint": "该任务保留已保存的 UUID 源。若要浏览其中内容，请重新挂载该介质或选择其他卷。",
       "subPath": "子路径",
       "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathOutsideVolume": "子路径必须位于所选卷内。",
       "volumeNotMounted": "卷未挂载",
+      "smbAutoMountEnabled": "自动挂载此 SMB 共享", "smbUsernamePlaceholder": "SMB 用户名", "smbPasswordPlaceholder": "SMB 密码",
+      "unmountSuccess": "卷已卸载。", "unmountFailed": "无法卸载卷。",
       "targetDirectoryWillBeCreated": "目标目录尚不存在，将在同步时创建：{{path}}",
       "targetDirectoryCreated": "已先创建目标目录再执行同步：{{path}}",
       "uuidCopied": "UUID 已复制到剪贴板",
@@ -116,8 +112,9 @@
         "sourceEqualsTarget": "源路径与目标路径不能重叠。",
         "targetIsSubdirOfSource": "目标不能位于源目录内部。",
         "duplicateTarget": "目标与其他任务目标路径冲突。",
-        "targetSubdirConflict": "目标不能成为其他任务目标的父/子路径。"
+        "targetSubdirConflict": "目标不能成为其他任务目标的父/子路径。", "watchCycle": "监视任务不能形成循环。", "invalidInput": "任务包含无效输入。"
       },
+      "validationModal": { "title": "同步任务验证", "affectedTasks": "受影响的任务", "source": "源", "target": "目标", "close": "关闭", "ruleDescriptions": { "sourceTargetOverlap": "源与目标路径不能重叠。", "duplicateTarget": "每个任务必须使用唯一目标。", "targetSubdirConflict": "任务目标不能互相包含。", "watchCycle": "监视任务不能形成循环。", "invalidInput": "请修正无效输入。" } },
       "warnings": {
         "targetInWatchedSource": "允许无环的 watch 链路，但 downstream watch sync 会等待重叠写入成功完成后再开始。"
       },
@@ -284,6 +281,7 @@
       "deleteFailed": "删除所选孤立文件失败。"
     },
     "conflict": {
+      "windowTitle": "冲突审查",
       "queueTitle": "Needs Review",
       "queueEmpty": "No pending conflict sessions.",
       "queueCount": "{{count}} session(s)",
@@ -300,6 +298,7 @@
       "previewTitle": "Source / Target Preview (Diff)",
       "previewEmpty": "Select a file from the list below.",
       "previewUnsupported": "Inline preview is unavailable for this file type. Open with OS preview.",
+      "previewLoadFailed": "无法加载预览。", "previewOpenHint": "请用系统查看器打开文件。",
       "listTitle": "Needs Review File List",
       "listEmpty": "No items to display.",
       "confirmForceCopy": "Force copy cannot be undone. Continue?",
@@ -338,7 +337,7 @@
       "sectionDisplay": "显示",
       "sectionSystem": "系统",
       "sectionBehavior": "行为",
-      "sectionLicense": "许可支持",
+      "sectionLicense": "支持",
       "sectionLegal": "法律",
       "stateLocation": "状态存储位置",
       "stateLocationPlaceholder": "默认: Tauri AppData",
@@ -524,23 +523,30 @@
       "openSourceLibraries": "开源库",
       "openSourceDescription": "SyncWatcher 使用了多个开源库。你可以通过下方按钮查看它们的许可证信息。",
       "viewLicenses": "查看开源许可证",
+      "licenses": "开源许可证",
+      "licenseDetails": "许可证与声明原文",
       "viewOnGithub": "在 GitHub 上查看",
       "openAppStore": "在 App Store 中打开",
-      "unregistered": "免费使用（个人/商用）",
-      "registered": "许可证赞助者",
+      "unregistered": "尚未支持",
+      "registered": "支持者",
       "thankYou": "感谢你给开发者续命！",
       "supportTitle": "能赏一枚硬币吗？",
-      "supportHint": "商用使用也免费。购买许可证完全自愿，主要是支持开发者。",
+      "supportHint": "SyncWatcher 以 Apache-2.0 免费提供。可选支持不会改变你的软件权利或功能。",
       "supportButton": "卑微求赏",
       "supportModalTitle": "鞠躬求赏模式",
-      "supportModalMessage": "你已经通过购买许可证支持了这个项目。如果还想再帮一把，也可以在 Buy Me a Coffee 再打赏一次。",
+      "supportModalMessage": "你已经支持了这个项目。如果还想再帮一把，也可以在 Buy Me a Coffee 再打赏一次。",
       "supportModalConfirm": "去 Buy Me a Coffee 打赏",
       "supportModalCancel": "下次一定",
-      "purchaseLicense": "可选支持：购买许可证",
+      "purchaseLicense": "成为支持者",
       "supportStatus": "支持状态",
-      "licenseType": "Polyform NC 1.0.0"
+      "licenseType": "Apache-2.0"
     },
     "common": {
+      "expandDirectory": "展开 {{name}}",
+      "collapseDirectory": "折叠 {{name}}",
+      "open": "打开",
+      "refresh": "刷新",
+      "retry": "重试",
       "confirm": "确认",
       "yes": "是",
       "no": "否",
@@ -598,21 +604,23 @@
       "openAppStore": "打开 App Store"
     },
     "license": {
-      "title": "激活许可证",
-      "enterKeyDescription": "请输入购买时收到的许可证密钥。",
-      "keyPlaceholder": "输入许可证密钥",
-      "activate": "激活",
-      "activating": "激活中...",
-      "activated": "许可证已激活！",
-      "invalid": "无效的许可证密钥。",
-      "enterLicense": "输入许可证",
-      "manage": "管理许可证",
-      "manageDescription": "此设备已启用支持者许可证。迁移到另一台设备前，可以先在这里移除。",
-      "currentKey": "当前密钥",
-      "remove": "移除许可证",
+      "title": "激活支持者状态",
+      "loadFailed": "无法加载支持者状态。",
+      "activationFailed": "无法激活支持者状态。",
+      "enterKeyDescription": "请输入购买时收到的支持者密钥。",
+      "keyPlaceholder": "输入支持者密钥",
+      "activate": "激活支持",
+      "activating": "正在激活支持...",
+      "activated": "支持者状态已激活！",
+      "invalid": "无效的支持者密钥。",
+      "enterLicense": "输入支持者密钥",
+      "manage": "管理支持者状态",
+      "manageDescription": "此设备已启用支持者状态。将密钥迁移到另一台设备前，可以先在这里移除。",
+      "currentKey": "支持者密钥",
+      "remove": "移除支持者密钥",
       "removing": "移除中...",
-      "removed": "许可证已移除。",
-      "removeFailed": "移除许可证失败。",
+      "removed": "支持者密钥已移除。",
+      "removeFailed": "移除支持者密钥失败。",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "这是用于支持开发的一次性可选应用内购买，不会解锁额外功能。",
       "appStoreSupportStatus": "支持",
@@ -623,9 +631,12 @@
       "appStoreRestored": "已恢复 App Store 购买。",
       "appStoreRestoring": "恢复中...",
       "appStorePurchaseFailed": "无法完成 App Store 购买。",
+      "appStorePurchaseUnavailable": "此构建版本不支持应用内购买。",
+      "appStoreRestoreUnavailable": "此构建版本不支持恢复购买。",
       "appStorePending": "App Store 购买仍在等待批准。",
       "appStoreSupporterActive": "支持已激活",
-      "restore": "恢复购买"
+      "restore": "恢复购买",
+      "supporterKeysUnavailable": "此构建版本不支持使用支持者密钥。"
     }
   }
 }

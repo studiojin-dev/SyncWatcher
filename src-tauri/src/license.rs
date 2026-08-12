@@ -4,33 +4,16 @@ use tauri::Manager;
 pub async fn generate_licenses_report(app: tauri::AppHandle) -> Result<String, String> {
     let report = r#"# Open Source Licenses
 
-## Backend (Rust)
-- Tauri 2.10.3 - https://github.com/tauri-apps/tauri (MIT/Apache-2.0)
-- Tokio 1.40.0 - https://tokio.rs (MIT)
-- serde 1.0.215 - https://serde.rs (MIT/Apache-2.0)
-- serde_yaml 0.9.34 - https://github.com/dtolnay/serde-yaml (MIT/Apache-2.0)
-- xxHash 1.6.0 - https://github.com/Cyan4973/xxHash (BSD-2)
-- notify 8.2.0 - https://github.com/notify-rs/notify (MIT)
+SyncWatcher source code is licensed under Apache-2.0. Third-party packages keep
+their own copyright notices and license terms.
 
-## Frontend (TypeScript/React)
-- React 19.2.4 - https://react.dev (MIT)
-- Mantine 8.3.18 - https://mantine.dev (MIT)
-- Tabler Icons 3.22.0 - https://tabler-icons.io (MIT)
-- i18next 25.10.4 - https://www.i18next.com (MIT)
-- Framer Motion 12.38.0 - https://www.framer.com/motion (MIT)
-- js-yaml 4.1.1 - https://github.com/nodeca/js-yaml (MIT)
+The application bundle contains the complete Rust dependency inventory and
+license texts in `THIRD_PARTY_LICENSES.html`. The frontend inventory and its
+license/notice texts are available from About > Open Source Licenses and in the
+production-build artifact `oss-licenses.json`.
 
-## Development Tools
-- TypeScript 5.9.3 - https://www.typescriptlang.org (Apache-2.0)
-- Vite 8.0.1 - https://vite.dev (MIT)
-- Tailwind CSS 4.2.2 - https://tailwindcss.com (MIT)
-
-## License Summary
-
-This project uses open-source software licensed under permissive terms (MIT, Apache-2.0, BSD-2).
-All libraries are free to use, modify, and distribute.
-
-For detailed license information, please see the project repository.
+Project-level notices are bundled as `LICENSE`, `NOTICE`, `TRADEMARKS.md`, and
+`BRAND_ASSETS.md`.
 "#;
 
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;

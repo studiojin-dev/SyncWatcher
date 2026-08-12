@@ -91,9 +91,9 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             setStatus({ isRegistered: false, licenseKey: null, provider: distribution.purchaseProvider });
             updateSettings({ isRegistered: false });
             setState('error');
-            setErrorMessage(String(err));
+            setErrorMessage(t('license.loadFailed'));
         }
-    }, [distribution.purchaseProvider, resolvePolicy, updateSettings]);
+    }, [distribution.purchaseProvider, resolvePolicy, t, updateSettings]);
 
     useEffect(() => {
         if (!open) {
@@ -110,7 +110,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             const policy = await resolvePolicy();
             if (!policy.supportsLicenseKeys) {
                 setState('error');
-                setErrorMessage('License keys are not available on this build.');
+                setErrorMessage(t('license.supporterKeysUnavailable'));
                 return;
             }
             setState('activating');
@@ -128,12 +128,15 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
                 updateSettings({ isRegistered: true });
             } else {
                 setState('error');
-                setErrorMessage(result.error ?? t('license.invalid'));
+                if (result.error) {
+                    console.warn('[LicenseActivation] Provider rejected supporter key:', result.error);
+                }
+                setErrorMessage(t('license.invalid'));
             }
         } catch (err) {
             console.error('[LicenseActivation] Activation failed:', err);
             setState('error');
-            setErrorMessage(String(err));
+            setErrorMessage(t('license.activationFailed'));
         }
     }, [licenseKey, loadStatus, resolvePolicy, t, updateSettings]);
 
@@ -142,7 +145,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             const policy = await resolvePolicy();
             if (!policy.supportsLicenseKeys) {
                 setState('error');
-                setErrorMessage('License keys are not available on this build.');
+                setErrorMessage(t('license.supporterKeysUnavailable'));
                 return;
             }
             setState('deactivating');
@@ -158,12 +161,15 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
                 updateSettings({ isRegistered: false });
             } else {
                 setState('error');
-                setErrorMessage(result.error ?? t('license.removeFailed'));
+                if (result.error) {
+                    console.warn('[LicenseActivation] Provider failed to remove supporter key:', result.error);
+                }
+                setErrorMessage(t('license.removeFailed'));
             }
         } catch (err) {
             console.error('[LicenseActivation] Deactivation failed:', err);
             setState('error');
-            setErrorMessage(String(err));
+            setErrorMessage(t('license.removeFailed'));
         }
     }, [resolvePolicy, t, updateSettings]);
 
@@ -172,7 +178,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             const policy = await resolvePolicy();
             if (!policy.supportsStoreKitPurchase) {
                 setState('error');
-                setErrorMessage('In-app purchase is not available on this build.');
+                setErrorMessage(t('license.appStorePurchaseUnavailable'));
                 return;
             }
             setState('activating');
@@ -200,11 +206,14 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             }
 
             setState('error');
-            setErrorMessage(result.error ?? t('license.appStorePurchaseFailed'));
+            if (result.error) {
+                console.warn('[LicenseActivation] StoreKit purchase failed:', result.error);
+            }
+            setErrorMessage(t('license.appStorePurchaseFailed'));
         } catch (err) {
             console.error('[LicenseActivation] Purchase failed:', err);
             setState('error');
-            setErrorMessage(String(err));
+            setErrorMessage(t('license.appStorePurchaseFailed'));
         }
     }, [loadStatus, resolvePolicy, t, updateSettings]);
 
@@ -213,7 +222,7 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             const policy = await resolvePolicy();
             if (!policy.supportsStoreKitRestore) {
                 setState('error');
-                setErrorMessage('Restore is not available on this build.');
+                setErrorMessage(t('license.appStoreRestoreUnavailable'));
                 return;
             }
             setState('restoring');
@@ -230,11 +239,14 @@ function LicenseActivation({ open, onClose }: { open: boolean; onClose: () => vo
             }
 
             setState('error');
-            setErrorMessage(result.error ?? t('license.appStoreRestoreFailed'));
+            if (result.error) {
+                console.warn('[LicenseActivation] StoreKit restore failed:', result.error);
+            }
+            setErrorMessage(t('license.appStoreRestoreFailed'));
         } catch (err) {
             console.error('[LicenseActivation] Restore failed:', err);
             setState('error');
-            setErrorMessage(String(err));
+            setErrorMessage(t('license.appStoreRestoreFailed'));
         }
     }, [loadStatus, resolvePolicy, t, updateSettings]);
 

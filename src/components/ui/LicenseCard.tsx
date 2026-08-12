@@ -7,13 +7,16 @@ export interface LicenseData {
     repository?: string | { url: string };
     url?: string;
     author?: string;
+    licenseText?: string;
+    noticeText?: string;
 }
 
 interface LicenseCardProps {
     data: LicenseData;
+    detailsLabel: string;
 }
 
-export function LicenseCard({ data }: LicenseCardProps) {
+export function LicenseCard({ data, detailsLabel }: LicenseCardProps) {
     const repoUrl = data.url || (typeof data.repository === 'string' ? data.repository : data.repository?.url);
     const hasUrl = !!repoUrl;
 
@@ -55,6 +58,24 @@ export function LicenseCard({ data }: LicenseCardProps) {
                     </a>
                 )}
             </div>
+
+            {(data.licenseText || data.noticeText) && (
+                <details className="mt-4 border-t-2 border-dashed border-[var(--border-main)] pt-3">
+                    <summary className="cursor-pointer text-sm font-bold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-main)]">
+                        {detailsLabel}
+                    </summary>
+                    {data.licenseText && (
+                        <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3 text-xs leading-relaxed">
+                            {data.licenseText}
+                        </pre>
+                    )}
+                    {data.noticeText && (
+                        <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3 text-xs leading-relaxed">
+                            {data.noticeText}
+                        </pre>
+                    )}
+                </details>
+            )}
         </div>
     );
 }

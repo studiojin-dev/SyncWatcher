@@ -1,10 +1,6 @@
 {
   "translation": {
     "appName": "SyncWatcher",
-    "common": {
-      "expandDirectory": "Expandir {{name}}",
-      "collapseDirectory": "Contraer {{name}}"
-    },
     "app": {
       "quitConfirmTitle": "Confirmar salida",
       "quitConfirmMessage": "Hay tareas con Watch Mode activo o sincronizaciones en curso. ¿Seguro que quieres salir?",
@@ -45,9 +41,6 @@
       "deviceStatus": "Estado del Dispositivo",
       "connected": "Conectado",
       "disconnected": "Desconectado",
-      "success": "Éxito",
-      "warning": "Advertencia",
-      "refresh": "Actualizar",
       "bytesPerSecond": "bytes/s",
       "analyzing": "Analizando...",
       "capacityUnavailable": "N/A",
@@ -108,7 +101,11 @@
       "savedUuidSourceHint": "Esta tarea conserva su origen UUID guardado. Vuelva a montar el medio para explorarlo o elija otro volumen.",
       "subPath": "Subruta",
       "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathOutsideVolume": "La subruta debe permanecer dentro del volumen seleccionado.",
       "volumeNotMounted": "Volumen no montado",
+      "smbAutoMountEnabled": "Montar automáticamente este recurso SMB",
+      "smbUsernamePlaceholder": "Usuario SMB", "smbPasswordPlaceholder": "Contraseña SMB",
+      "unmountSuccess": "Volumen desmontado.", "unmountFailed": "No se pudo desmontar el volumen.",
       "targetDirectoryWillBeCreated": "El directorio de destino aún no existe y se creará durante la sincronización: {{path}}",
       "targetDirectoryCreated": "Se creó el directorio de destino antes de sincronizar: {{path}}",
       "uuidCopied": "UUID copiado al portapapeles",
@@ -116,8 +113,9 @@
         "sourceEqualsTarget": "La ruta de origen y destino no pueden superponerse.",
         "targetIsSubdirOfSource": "El destino no puede estar dentro del origen.",
         "duplicateTarget": "El destino entra en conflicto con otro destino de tarea.",
-        "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea."
+        "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea.", "watchCycle": "Las tareas vigiladas no pueden formar un ciclo.", "invalidInput": "La tarea contiene datos no válidos."
       },
+      "validationModal": { "title": "Validación de tarea", "affectedTasks": "Tareas afectadas", "source": "Origen", "target": "Destino", "close": "Cerrar", "ruleDescriptions": { "sourceTargetOverlap": "Origen y destino no pueden superponerse.", "duplicateTarget": "Cada tarea debe usar un destino único.", "targetSubdirConflict": "Los destinos no pueden contenerse entre sí.", "watchCycle": "Las tareas vigiladas no pueden formar un ciclo.", "invalidInput": "Corrija los datos no válidos." } },
       "warnings": {
         "targetInWatchedSource": "Se permiten las cadenas watch acíclicas, pero el downstream watch sync espera a que las escrituras superpuestas terminen correctamente."
       },
@@ -284,6 +282,7 @@
       "deleteFailed": "No se pudieron eliminar los archivos huérfanos seleccionados."
     },
     "conflict": {
+      "windowTitle": "Revisión de conflictos",
       "queueTitle": "Needs Review",
       "queueEmpty": "No pending conflict sessions.",
       "queueCount": "{{count}} session(s)",
@@ -300,6 +299,7 @@
       "previewTitle": "Source / Target Preview (Diff)",
       "previewEmpty": "Select a file from the list below.",
       "previewUnsupported": "Inline preview is unavailable for this file type. Open with OS preview.",
+      "previewLoadFailed": "No se pudo cargar la vista previa.", "previewOpenHint": "Abra el archivo con el visor del sistema.",
       "listTitle": "Needs Review File List",
       "listEmpty": "No items to display.",
       "confirmForceCopy": "Force copy cannot be undone. Continue?",
@@ -338,7 +338,7 @@
       "sectionDisplay": "Pantalla",
       "sectionSystem": "Sistema",
       "sectionBehavior": "Comportamiento",
-      "sectionLicense": "Soporte de licencia",
+      "sectionLicense": "Apoyo",
       "sectionLegal": "Legal",
       "stateLocation": "Ubicación del estado",
       "stateLocationPlaceholder": "Predeterminado: Tauri AppData",
@@ -524,23 +524,30 @@
       "openSourceLibraries": "Bibliotecas de Código Abierto",
       "openSourceDescription": "SyncWatcher usa varias bibliotecas de código abierto. Puedes ver la información de sus licencias con el botón de abajo.",
       "viewLicenses": "Ver licencias de código abierto",
+      "licenses": "Licencias de código abierto",
+      "licenseDetails": "Texto de la licencia y los avisos",
       "viewOnGithub": "Ver en GitHub",
       "openAppStore": "Abrir en App Store",
-      "unregistered": "Uso gratis (personal y comercial)",
-      "registered": "Patrocinador con licencia",
+      "unregistered": "Aún no eres patrocinador",
+      "registered": "Patrocinador",
       "thankYou": "¡Gracias por mantener vivo este proyecto!",
       "supportTitle": "¿Me regalas una monedita?",
-      "supportHint": "El uso comercial también es gratis. Comprar licencia es completamente opcional y sirve para apoyar al desarrollador.",
+      "supportHint": "SyncWatcher es gratuito bajo Apache-2.0. El apoyo opcional no cambia tus derechos ni las funciones.",
       "supportButton": "\"Una monedita\"",
       "supportModalTitle": "Modo Súplica Humilde",
-      "supportModalMessage": "Ya apoyaste este proyecto comprando una licencia. Si quieres ayudar una vez más, también puedes dejar propina en Buy Me a Coffee.",
+      "supportModalMessage": "Ya apoyaste este proyecto. Si quieres ayudar una vez más, también puedes dejar propina en Buy Me a Coffee.",
       "supportModalConfirm": "Dar propina en Buy Me a Coffee",
       "supportModalCancel": "Quizá luego",
-      "purchaseLicense": "Apoyo opcional: comprar licencia",
+      "purchaseLicense": "Hazte patrocinador",
       "supportStatus": "Estado del apoyo",
-      "licenseType": "Polyform NC 1.0.0"
+      "licenseType": "Apache-2.0"
     },
     "common": {
+      "expandDirectory": "Expandir {{name}}",
+      "collapseDirectory": "Contraer {{name}}",
+      "open": "Abrir",
+      "refresh": "Actualizar",
+      "retry": "Reintentar",
       "confirm": "Confirmar",
       "yes": "Sí",
       "no": "No",
@@ -598,21 +605,23 @@
       "openAppStore": "Abrir App Store"
     },
     "license": {
-      "title": "Activar licencia",
-      "enterKeyDescription": "Introduzca la clave de licencia de su compra.",
-      "keyPlaceholder": "Introducir clave de licencia",
-      "activate": "Activar",
-      "activating": "Activando...",
-      "activated": "¡Licencia activada!",
-      "invalid": "Clave de licencia no válida.",
-      "enterLicense": "Introducir licencia",
-      "manage": "Gestionar licencia",
-      "manageDescription": "Este dispositivo ya tiene una licencia de apoyo activa. Puedes quitarla aquí antes de moverla a otra máquina.",
-      "currentKey": "Clave actual",
-      "remove": "Quitar licencia",
+      "title": "Activar estado de patrocinador",
+      "loadFailed": "No se pudo cargar el estado de patrocinador.",
+      "activationFailed": "No se pudo activar el estado de patrocinador.",
+      "enterKeyDescription": "Introduce la clave de patrocinador de tu compra.",
+      "keyPlaceholder": "Introducir clave de patrocinador",
+      "activate": "Activar apoyo",
+      "activating": "Activando apoyo...",
+      "activated": "¡Estado de patrocinador activado!",
+      "invalid": "Clave de patrocinador no válida.",
+      "enterLicense": "Introducir clave de patrocinador",
+      "manage": "Gestionar estado de patrocinador",
+      "manageDescription": "Este dispositivo ya tiene el estado de patrocinador activo. Puedes quitar la clave antes de moverla a otra máquina.",
+      "currentKey": "Clave de patrocinador",
+      "remove": "Quitar clave de patrocinador",
       "removing": "Quitando...",
-      "removed": "Licencia eliminada.",
-      "removeFailed": "No se pudo eliminar la licencia.",
+      "removed": "Clave de patrocinador eliminada.",
+      "removeFailed": "No se pudo eliminar la clave de patrocinador.",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "Esta es una compra única opcional dentro de la app para apoyar el desarrollo. No desbloquea funciones extra.",
       "appStoreSupportStatus": "Apoyo",
@@ -623,9 +632,12 @@
       "appStoreRestored": "Compra de App Store restaurada.",
       "appStoreRestoring": "Restaurando...",
       "appStorePurchaseFailed": "No se pudo completar la compra en App Store.",
+      "appStorePurchaseUnavailable": "Las compras dentro de la app no están disponibles en esta compilación.",
+      "appStoreRestoreUnavailable": "La restauración de compras no está disponible en esta compilación.",
       "appStorePending": "La compra de App Store sigue pendiente de aprobación.",
       "appStoreSupporterActive": "Apoyo activo",
-      "restore": "Restaurar compra"
+      "restore": "Restaurar compra",
+      "supporterKeysUnavailable": "Las claves de patrocinador no están disponibles en esta compilación."
     }
   }
 }

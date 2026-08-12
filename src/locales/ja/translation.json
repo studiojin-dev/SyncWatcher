@@ -1,10 +1,6 @@
 {
   "translation": {
     "appName": "SyncWatcher",
-    "common": {
-      "expandDirectory": "{{name}} を展開",
-      "collapseDirectory": "{{name}} を折りたたむ"
-    },
     "app": {
       "quitConfirmTitle": "終了の確認",
       "quitConfirmMessage": "Watch Mode が有効なタスク、または同期中のタスクがあります。終了してもよろしいですか？",
@@ -46,9 +42,6 @@
       "connected": "接続済み",
       "disconnected": "切断",
       "bytesPerSecond": "バイト/秒",
-      "success": "成功",
-      "warning": "警告",
-      "refresh": "更新",
       "analyzing": "分析中...",
       "capacityUnavailable": "N/A",
       "networkCapacityUnavailable": "N/A - ネットワーク接続"
@@ -108,7 +101,10 @@
       "savedUuidSourceHint": "このタスクは保存済みの UUID ソースを保持します。内部を参照するにはメディアを再マウントするか、別のボリュームを選択してください。",
       "subPath": "サブパス",
       "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathOutsideVolume": "サブパスは選択したボリューム内に設定してください。",
       "volumeNotMounted": "ボリュームがマウントされていません",
+      "smbAutoMountEnabled": "この SMB 共有を自動マウント", "smbUsernamePlaceholder": "SMB ユーザー名", "smbPasswordPlaceholder": "SMB パスワード",
+      "unmountSuccess": "ボリュームをアンマウントしました。", "unmountFailed": "ボリュームをアンマウントできませんでした。",
       "targetDirectoryWillBeCreated": "同期時に作成される対象ディレクトリがまだ存在しません: {{path}}",
       "targetDirectoryCreated": "同期前に対象ディレクトリを作成しました: {{path}}",
       "uuidCopied": "UUIDをクリップボードにコピーしました",
@@ -116,8 +112,9 @@
         "sourceEqualsTarget": "ソースとターゲットのパスは重複できません。",
         "targetIsSubdirOfSource": "ターゲットをソース配下に設定できません。",
         "duplicateTarget": "ターゲットが他のタスクのターゲットと競合しています。",
-        "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。"
+        "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。", "watchCycle": "監視タスクは循環できません。", "invalidInput": "タスクの入力が無効です。"
       },
+      "validationModal": { "title": "同期タスクの検証", "affectedTasks": "影響するタスク", "source": "ソース", "target": "ターゲット", "close": "閉じる", "ruleDescriptions": { "sourceTargetOverlap": "ソースとターゲットは重複できません。", "duplicateTarget": "各タスクには固有のターゲットが必要です。", "targetSubdirConflict": "タスクのターゲット同士を内包できません。", "watchCycle": "監視タスクは循環できません。", "invalidInput": "無効な入力を修正してください。" } },
       "warnings": {
         "targetInWatchedSource": "循環しない watch チェーンは許可されますが、重複する書き込みが正常完了するまで downstream watch sync は待機します。"
       },
@@ -284,6 +281,7 @@
       "deleteFailed": "選択した孤立ファイルの削除に失敗しました。"
     },
     "conflict": {
+      "windowTitle": "競合の確認",
       "queueTitle": "Needs Review",
       "queueEmpty": "No pending conflict sessions.",
       "queueCount": "{{count}} session(s)",
@@ -300,6 +298,7 @@
       "previewTitle": "Source / Target Preview (Diff)",
       "previewEmpty": "Select a file from the list below.",
       "previewUnsupported": "Inline preview is unavailable for this file type. Open with OS preview.",
+      "previewLoadFailed": "プレビューを読み込めませんでした。", "previewOpenHint": "システムビューアーでファイルを開いてください。",
       "listTitle": "Needs Review File List",
       "listEmpty": "No items to display.",
       "confirmForceCopy": "Force copy cannot be undone. Continue?",
@@ -338,7 +337,7 @@
       "sectionDisplay": "表示",
       "sectionSystem": "システム",
       "sectionBehavior": "動作",
-      "sectionLicense": "ライセンス支援",
+      "sectionLicense": "支援",
       "sectionLegal": "法務",
       "stateLocation": "状態保存先",
       "stateLocationPlaceholder": "既定: Tauri AppData",
@@ -524,23 +523,30 @@
       "openSourceLibraries": "オープンソースライブラリ",
       "openSourceDescription": "SyncWatcher は複数のオープンソースライブラリを利用しています。ライセンス情報は下のボタンから確認できます。",
       "viewLicenses": "オープンソースライセンスを表示",
+      "licenses": "オープンソースライセンス",
+      "licenseDetails": "ライセンスと告知の原文",
       "viewOnGithub": "GitHub で表示",
       "openAppStore": "App Store で開く",
-      "unregistered": "無料利用（個人・商用）",
-      "registered": "ライセンス支援者",
+      "unregistered": "サポーターではありません",
+      "registered": "サポーター",
       "thankYou": "開発者の命綱をありがとうございます！",
       "supportTitle": "一枚だけ…お願いできますか？",
-      "supportHint": "商用利用も無料です。ライセンス購入は完全に任意で、開発支援になります。",
+      "supportHint": "SyncWatcher は Apache-2.0 で無料提供されます。任意の支援でソフトウェアの権利や機能は変わりません。",
       "supportButton": "土下座コイン",
       "supportModalTitle": "平身低頭コインカップモード",
-      "supportModalMessage": "すでにライセンス購入でこのプロジェクトを支えていただいています。さらに応援いただけるなら、Buy Me a Coffee でのチップも歓迎です。",
+      "supportModalMessage": "すでにこのプロジェクトを支えていただいています。さらに応援いただけるなら、Buy Me a Coffee でのチップも歓迎です。",
       "supportModalConfirm": "Buy Me a Coffee で支援",
       "supportModalCancel": "また今度",
-      "purchaseLicense": "任意支援: ライセンス購入",
+      "purchaseLicense": "サポーターになる",
       "supportStatus": "支援ステータス",
-      "licenseType": "Polyform NC 1.0.0"
+      "licenseType": "Apache-2.0"
     },
     "common": {
+      "expandDirectory": "{{name}} を展開",
+      "collapseDirectory": "{{name}} を折りたたむ",
+      "open": "開く",
+      "refresh": "更新",
+      "retry": "再試行",
       "confirm": "確認",
       "yes": "はい",
       "no": "いいえ",
@@ -598,21 +604,23 @@
       "openAppStore": "App Store を開く"
     },
     "license": {
-      "title": "ライセンスのアクティベーション",
-      "enterKeyDescription": "購入時に受け取ったライセンスキーを入力してください。",
-      "keyPlaceholder": "ライセンスキーを入力",
-      "activate": "アクティベート",
-      "activating": "アクティベート中...",
-      "activated": "ライセンスがアクティベートされました！",
-      "invalid": "無効なライセンスキーです。",
-      "enterLicense": "ライセンス入力",
-      "manage": "ライセンス管理",
-      "manageDescription": "このデバイスではすでに支援ライセンスが有効です。別のマシンへ移す前にここで解除できます。",
-      "currentKey": "現在のキー",
-      "remove": "ライセンスを解除",
+      "title": "サポーター状態を有効化",
+      "loadFailed": "サポーター状態を読み込めませんでした。",
+      "activationFailed": "サポーター状態を有効化できませんでした。",
+      "enterKeyDescription": "購入時に受け取ったサポーターキーを入力してください。",
+      "keyPlaceholder": "サポーターキーを入力",
+      "activate": "支援を有効化",
+      "activating": "支援を有効化中...",
+      "activated": "サポーター状態が有効になりました！",
+      "invalid": "無効なサポーターキーです。",
+      "enterLicense": "サポーターキーを入力",
+      "manage": "サポーター状態を管理",
+      "manageDescription": "このデバイスではすでにサポーター状態が有効です。別のマシンへキーを移す前にここで解除できます。",
+      "currentKey": "サポーターキー",
+      "remove": "サポーターキーを解除",
       "removing": "解除中...",
-      "removed": "ライセンスを解除しました。",
-      "removeFailed": "ライセンスを解除できませんでした。",
+      "removed": "サポーターキーを解除しました。",
+      "removeFailed": "サポーターキーを解除できませんでした。",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "開発支援のための任意の一回限りのアプリ内課金です。追加機能はアンロックされません。",
       "appStoreSupportStatus": "支援",
@@ -623,9 +631,12 @@
       "appStoreRestored": "App Store 購入を復元しました。",
       "appStoreRestoring": "復元中...",
       "appStorePurchaseFailed": "App Store 購入を完了できませんでした。",
+      "appStorePurchaseUnavailable": "このビルドではアプリ内購入を利用できません。",
+      "appStoreRestoreUnavailable": "このビルドでは購入を復元できません。",
       "appStorePending": "App Store 購入はまだ承認待ちです。",
       "appStoreSupporterActive": "支援が有効です",
-      "restore": "購入を復元"
+      "restore": "購入を復元",
+      "supporterKeysUnavailable": "このビルドではサポーターキーを利用できません。"
     }
   }
 }

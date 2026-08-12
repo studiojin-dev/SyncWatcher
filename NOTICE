@@ -1,0 +1,7 @@
+SyncWatcher
+Copyright 2026 StudioJin
+
+This product includes cfg_aliases, Copyright (c) 2020 Katharos Technology,
+licensed under the MIT License. The cfg_aliases macro incorporates code from
+tectonic_cfg_support::target_cfg!, also licensed under the MIT License.
+See https://github.com/tectonic-typesetting/tectonic/blob/f2439b936470ad27bdf92882064bc4702ee01899/cfg_support/src/lib.rs#L166

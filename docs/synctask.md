@@ -4,8 +4,6 @@ SyncTask is the reusable backup unit inside SyncWatcher. It stores a Source, a T
 
 ## Dashboard
 
-![SyncTask dashboard](../manual/SCR-20260324-1.png)
-
 The dashboard is the first screen users see. It shows task state, progress, and quick controls in one view.
 
 ## Add Or Edit A Task
@@ -14,13 +12,9 @@ The dashboard is the first screen users see. It shows task state, progress, and 
 
 Create a new SyncTask or edit an existing one by choosing the Source, Target, and task options.
 
-![SyncTask editor detail](../manual/SCR-20260324-synctask-1.png)
-
 The task editor keeps the main controls close together so a recurring workflow can be adjusted quickly.
 
 ## Removable Storage Targets
-
-![External storage selection](../manual/SCR-20260324-synctask-2-external-storage.png)
 
 You can choose removable storage such as an SD card as the Target. Combined with `watchmode`, this can also fit workflows that copy automatically and unmount after sync.
 
@@ -43,8 +37,6 @@ When `watchmode` is enabled, SyncWatcher watches the Source folder and starts a 
 Choose file types that should be excluded from copying. Additional patterns can be added in `Settings`.
 
 ## Task Card Controls
-
-![SyncTask card guide](../manual/SCR-20260324-synctask-card.png)
 
 1. Checksum mode indicator
 2. `watchmode` enabled indicator

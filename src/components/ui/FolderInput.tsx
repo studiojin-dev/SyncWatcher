@@ -54,7 +54,7 @@ function FolderInput({ value, onChange, name, label }: FolderInputProps) {
           type="button"
           onClick={handleBrowse}
           className="btn-ghost"
-          title={t('syncTasks.browse')}
+          title={t('common.browse')}
         >
           📁
         </button>

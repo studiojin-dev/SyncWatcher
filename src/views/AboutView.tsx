@@ -148,7 +148,11 @@ function AboutView() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[600px] overflow-y-auto pr-2">
               {licenseData.map((license, index) => (
-                <LicenseCard key={`${license.name}-${index}`} data={license} />
+                <LicenseCard
+                  key={`${license.name}-${index}`}
+                  data={license}
+                  detailsLabel={t('about.licenseDetails')}
+                />
               ))}
             </div>
           </div>

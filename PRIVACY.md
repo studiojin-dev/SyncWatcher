@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 2026-04-01
+Last updated: 2026-08-12
 
 This Privacy Policy explains how StudioJin ("we", "us", or "our") handles information related to SyncWatcher ("SyncWatcher", "the App", or "the Service").
 
@@ -35,7 +35,7 @@ SyncWatcher primarily works with your files and folders on your own device. Info
 
 This local information is not sent to us unless you separately choose to share it with us for support.
 
-### 2.2 GitHub DMG purchases and Lemon Squeezy licensing
+### 2.2 GitHub DMG purchases and Lemon Squeezy supporter keys
 
 If you obtain SyncWatcher outside the Mac App Store and choose to make an optional support purchase, Lemon Squeezy acts as the merchant of record and may process:
 
@@ -43,16 +43,16 @@ If you obtain SyncWatcher outside the Mac App Store and choose to make an option
 - your email address;
 - order and transaction details;
 - tax and billing information required for the transaction; and
-- license-related records connected to the purchase.
+- supporter-key records connected to the purchase (called license records by Lemon Squeezy's API).
 
-When you activate or validate a Lemon Squeezy license, the App may transmit:
+When you activate or validate a Lemon Squeezy supporter key, the App may transmit:
 
-- the license key you enter;
+- the supporter key you enter;
 - a generated instance identifier assigned during activation;
-- your device hostname, used as the instance name for licensing purposes; and
+- your device hostname, used as the provider instance name; and
 - product, store, and variant metadata returned by Lemon Squeezy.
 
-The App may also store local Lemon Squeezy license state on your device, such as the last known validation status and activation metadata.
+The App may also store local Lemon Squeezy supporter state on your device, such as the last known validation status and activation metadata.
 
 ### 2.3 Mac App Store purchases
 
@@ -106,7 +106,7 @@ We do not sell your personal information.
 
 We may share information only in limited cases, such as:
 
-- with Lemon Squeezy, for GitHub DMG checkout, receipts, taxes, and license-key operations;
+- with Lemon Squeezy, for GitHub DMG checkout, receipts, taxes, and supporter-key operations;
 - with Apple, through StoreKit and App Store purchase flows for the Mac App Store build;
 - with service providers only where reasonably necessary to operate the business;
 - with legal or regulatory authorities where required by law; and
@@ -118,7 +118,7 @@ If you contact us through GitHub, your information is also subject to GitHub's p
 
 We retain personal information only for as long as reasonably necessary for the purposes described in this policy, including:
 
-- purchase and license records, for accounting, tax, fraud prevention, and customer support purposes;
+- purchase and supporter-key records, for accounting, tax, fraud prevention, and customer support purposes;
 - support communications, for follow-up and service history; and
 - local application data, until you remove it, uninstall the App, or it is overwritten during normal use.
 
@@ -152,7 +152,7 @@ SyncWatcher is not directed to children under 13, and we do not knowingly collec
 
 Third-party services used in connection with SyncWatcher may include:
 
-- Lemon Squeezy, for checkout and license-key operations on non-App-Store builds;
+- Lemon Squeezy, for checkout and supporter-key operations on non-App-Store builds (called license-key operations by Lemon Squeezy's API);
 - Apple App Store and StoreKit, for Mac App Store distribution and in-app purchases;
 - GitHub, for source code distribution, releases, issues, and discussions; and
 - Buy Me a Coffee or similar support links on non-App-Store builds.

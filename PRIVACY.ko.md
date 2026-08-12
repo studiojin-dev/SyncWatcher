@@ -1,6 +1,6 @@
 # 개인정보 처리방침
 
-최종 업데이트: 2026-04-01
+최종 업데이트: 2026-08-12
 
 본 개인정보 처리방침은 StudioJin("당사", "우리")이 SyncWatcher("SyncWatcher", "앱", 또는 "서비스")와 관련하여 정보를 어떻게 처리하는지 설명합니다.
 
@@ -35,7 +35,7 @@ SyncWatcher는 주로 사용자의 기기 내 파일 및 폴더를 로컬에서 
 
 이러한 로컬 정보는 사용자가 별도로 지원 목적으로 제공하지 않는 한 당사에 전송되지 않습니다.
 
-### 2.2 GitHub DMG 구매 및 Lemon Squeezy 라이선싱
+### 2.2 GitHub DMG 구매 및 Lemon Squeezy 후원 키
 
 사용자가 Mac App Store 외 채널에서 SyncWatcher를 받고 선택형 후원을 구매하는 경우, Lemon Squeezy는 merchant of record로서 다음 정보를 처리할 수 있습니다.
 
@@ -43,16 +43,16 @@ SyncWatcher는 주로 사용자의 기기 내 파일 및 폴더를 로컬에서 
 - 이메일 주소
 - 주문 및 거래 정보
 - 거래 처리에 필요한 세금 및 청구 정보
-- 구매와 연결된 라이선스 관련 기록
+- 구매와 연결된 후원 키 기록(Lemon Squeezy API에서는 license record로 지칭)
 
-사용자가 Lemon Squeezy 라이선스를 활성화하거나 검증할 때 앱은 다음 정보를 전송할 수 있습니다.
+사용자가 Lemon Squeezy 후원 키를 활성화하거나 검증할 때 앱은 다음 정보를 전송할 수 있습니다.
 
-- 사용자가 입력한 라이선스 키
+- 사용자가 입력한 후원 키
 - 활성화 과정에서 할당되는 인스턴스 식별자
-- 라이선스 인스턴스 이름으로 사용되는 기기 호스트명
+- provider 인스턴스 이름으로 사용되는 기기 호스트명
 - Lemon Squeezy가 반환하는 상품, 스토어, variant 메타데이터
 
-앱은 마지막 검증 상태나 활성화 메타데이터 등 Lemon Squeezy 관련 로컬 라이선스 상태를 사용자 기기에 저장할 수 있습니다.
+앱은 마지막 검증 상태나 활성화 메타데이터 등 Lemon Squeezy 관련 로컬 후원 상태를 사용자 기기에 저장할 수 있습니다.
 
 ### 2.3 Mac App Store 구매
 
@@ -106,7 +106,7 @@ Mac App Store 빌드에서 SyncWatcher는 StoreKit의 온디바이스 거래 확
 
 당사는 다음과 같은 제한된 경우에만 정보를 공유할 수 있습니다.
 
-- GitHub DMG 체크아웃, 영수증, 세금 처리, 라이선스 키 운영을 위한 Lemon Squeezy와의 공유
+- GitHub DMG 체크아웃, 영수증, 세금 처리, 후원 키 운영을 위한 Lemon Squeezy와의 공유
 - Mac App Store 빌드의 StoreKit 및 App Store 구매 흐름을 위한 Apple과의 공유
 - 사업 운영에 합리적으로 필요한 범위의 서비스 제공업체와의 공유
 - 법률 또는 규제기관의 요구가 있는 경우
@@ -118,7 +118,7 @@ Mac App Store 빌드에서 SyncWatcher는 StoreKit의 온디바이스 거래 확
 
 당사는 본 방침에서 설명한 목적 달성에 필요한 기간 동안에 한해 개인정보를 보유합니다. 예를 들면:
 
-- 구매 및 라이선스 기록: 회계, 세무, 부정 사용 방지, 고객 지원 목적
+- 구매 및 후원 키 기록: 회계, 세무, 부정 사용 방지, 고객 지원 목적
 - 지원 커뮤니케이션: 후속 대응 및 지원 이력 관리 목적
 - 로컬 앱 데이터: 사용자가 삭제하거나 앱을 제거하거나, 정상 동작 과정에서 덮어쓰기 전까지
 
@@ -152,7 +152,7 @@ SyncWatcher는 만 13세 미만 아동을 대상으로 하지 않으며, 당사�
 
 SyncWatcher와 관련하여 사용될 수 있는 제3자 서비스는 다음을 포함합니다.
 
-- 비 App Store 빌드의 체크아웃 및 라이선스 키 운영을 위한 Lemon Squeezy
+- 비 App Store 빌드의 체크아웃 및 후원 키 운영을 위한 Lemon Squeezy(Lemon Squeezy API에서는 라이선스 키 운영으로 지칭)
 - Mac App Store 배포 및 인앱 구매를 위한 Apple App Store 및 StoreKit
 - 소스 코드 배포, 릴리스, 이슈, 토론을 위한 GitHub
 - 비 App Store 빌드의 후원 링크를 위한 Buy Me a Coffee 또는 유사 서비스

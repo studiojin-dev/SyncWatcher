@@ -6,7 +6,7 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
 
 ## Context
 
-- SyncWatcher already ships through GitHub Releases with a Tauri updater and Lemon Squeezy supporter-license flow.
+- SyncWatcher already ships through GitHub Releases with a Tauri updater and Lemon Squeezy supporter-key flow.
 - The Mac App Store imposes different rules for updater delivery, copy-protection UX, sandbox access, and in-app purchases.
 - The 2026 App Review rejection for Guideline 2.4.5(vii) confirmed that any
   non-App-Store updater surface in the Mac App Store build is a release blocker.

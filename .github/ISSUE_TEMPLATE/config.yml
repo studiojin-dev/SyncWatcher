@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/studiojin-dev/SyncWatcher/discussions
+    about: Use GitHub Discussions for support questions and early ideas.
+  - name: Private security report
+    url: https://github.com/studiojin-dev/SyncWatcher/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue.

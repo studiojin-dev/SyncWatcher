@@ -1,13 +1,15 @@
-# ADR-20260324-0016-LIC: Lemon Squeezy handles supporter licensing while GitHub Releases remain the distribution origin for v1
+# ADR-20260324-0016-LIC: Lemon Squeezy handles supporter purchases while GitHub Releases remain the distribution origin for v1
 Status: Accepted
 Date: 2026-03-24
 Tags: licensing, release, distribution, updater, lemonsqueezy, github
-TL;DR: Use Lemon Squeezy for optional supporter purchases and license-key lifecycle, but keep GitHub Releases as the source of install files and Tauri updater metadata in v1.
+TL;DR: Use Lemon Squeezy for optional supporter purchases and provider-key lifecycle, but keep GitHub Releases as the source of install files and Tauri updater metadata in v1.
+
+> Licensing characterization and user-facing terminology are superseded by ADR-20260812-0031-OSS. The distribution and provider-integration decisions below remain in force.
 
 ## Context
 
 - SyncWatcher already ships macOS artifacts and Tauri updater metadata through GitHub Releases.
-- The product policy remains "free to use, optional supporter license" instead of gating core functionality behind a purchase.
+- The product policy remains "free to use, optional supporter purchase" instead of gating core functionality behind a purchase.
 - The app already includes Lemon Squeezy activation and validation primitives, but product identifiers were hard-coded and there was no local deactivation flow for moving a license between machines.
 - Lemon Squeezy customer flows can issue license keys and link customers to downloads, but v1 does not require Lemon-hosted build artifacts.
 
@@ -19,9 +21,9 @@ TL;DR: Use Lemon Squeezy for optional supporter purchases and license-key lifecy
    - release automation and signing
 2. Use Lemon Squeezy only for:
    - checkout and receipts
-   - customer-facing license key issuance
+   - customer-facing supporter key issuance through Lemon Squeezy's license-key API
    - runtime license activation, validation, and instance deactivation
-3. Treat the supporter license as an identity/support signal only in v1:
+3. Treat supporter status as an identity/support signal only in v1:
    - update `isRegistered` UI state
    - do not gate core backup features
 4. Move Lemon Squeezy product identifiers out of Rust source constants and into build/runtime configuration:
@@ -34,7 +36,7 @@ TL;DR: Use Lemon Squeezy for optional supporter purchases and license-key lifecy
 
 ## Consequences
 
-- Users continue to download and auto-update from GitHub Releases regardless of whether they bought an optional supporter license.
+- Users continue to download and auto-update from GitHub Releases regardless of whether they made an optional supporter purchase.
 - Supporter purchases remain simple: purchase in Lemon Squeezy, receive the key, paste it into the app, and optionally remove it before moving to another machine.
 - Release automation stays close to the current pipeline and avoids introducing a custom update server in v1.
 - If future requirements demand customer-only file delivery from Lemon Squeezy, SyncWatcher will need a second-phase design for asset synchronization and likely a dynamic update service.
@@ -45,5 +47,5 @@ TL;DR: Use Lemon Squeezy for optional supporter purchases and license-key lifecy
    - Rejected: unnecessary for the optional-support model and would complicate updater integration.
 2. Keep hard-coded Lemon Squeezy IDs in source
    - Rejected: makes per-environment configuration brittle and requires code changes for storefront changes.
-3. Gate core app functionality behind the supporter license in v1
+3. Gate core app functionality behind supporter status in v1
    - Rejected: conflicts with the current free-use product policy and would expand scope into entitlement enforcement.

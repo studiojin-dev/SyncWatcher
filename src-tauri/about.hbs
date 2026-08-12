@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SyncWatcher Rust dependency licenses</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    body { margin: 0; padding: 2rem; line-height: 1.5; }
+    main { max-width: 72rem; margin: 0 auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .5rem; border-bottom: 1px solid currentColor; text-align: left; vertical-align: top; }
+    pre { max-height: 28rem; overflow: auto; padding: 1rem; border: 1px solid currentColor; white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>SyncWatcher Rust dependency licenses</h1>
+  <p>Generated from <code>Cargo.lock</code> with <code>cargo-about</code>. Each component keeps its own copyright and license terms.</p>
+  <h2>Components</h2>
+  <table>
+    <thead><tr><th>Component</th><th>Version</th><th>License</th></tr></thead>
+    <tbody>
+    {{#each crates}}
+      <tr>
+        <td><a href="{{#if package.repository}}{{package.repository}}{{else}}https://crates.io/crates/{{package.name}}{{/if}}">{{package.name}}</a></td>
+        <td>{{package.version}}</td>
+        <td>{{license}}</td>
+      </tr>
+    {{/each}}
+    </tbody>
+  </table>
+  <h2>License and notice texts</h2>
+  {{#each licenses}}
+    <section>
+      <h3 id="{{id}}">{{name}}</h3>
+      <p>Used by:</p>
+      <ul>
+      {{#each used_by}}
+        <li>{{crate.name}} {{crate.version}}</li>
+      {{/each}}
+      </ul>
+      <pre>{{text}}</pre>
+    </section>
+  {{/each}}
+</main>
+</body>
+</html>

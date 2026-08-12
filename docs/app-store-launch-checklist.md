@@ -5,8 +5,8 @@
 - Confirm the App Store build uses bundle identifier `dev.studiojin.syncwatcher.appstore`.
 - Confirm the GitHub DMG build keeps bundle identifier `dev.studiojin.syncwatcher`.
 - Confirm the App Store build disables the GitHub updater and only offers `Open App Store`.
-- Confirm the App Store build hides Lemon Squeezy checkout, license-key entry, and Buy Me a Coffee links.
-- Confirm the GitHub DMG build keeps Lemon Squeezy checkout, license activation, and GitHub update flow.
+- Confirm the App Store build hides Lemon Squeezy checkout, supporter-key entry, and Buy Me a Coffee links.
+- Confirm the GitHub DMG build keeps Lemon Squeezy checkout, supporter-key activation, and GitHub update flow.
 
 ## Release Path
 
@@ -91,7 +91,7 @@ Use review notes that clearly state the following:
 
 ## Manual Verification
 
-- Verify GitHub DMG still supports Lemon Squeezy purchase, license activation, and GitHub updater.
+- Verify GitHub DMG still supports Lemon Squeezy purchase, supporter-key activation, and GitHub updater.
 - Verify the Mac App Store build shows StoreKit purchase and restore only.
 - Verify the Mac App Store build can re-open source, target, and state-location bookmarks after relaunch.
 - Verify removable-volume reinsert flows work with refreshed sandbox access.
@@ -99,6 +99,8 @@ Use review notes that clearly state the following:
 - Verify the Mac App Store menu bar does not show `Check for Updates...`.
 - Verify the first-run legacy import copies settings, sync tasks, and exclusion sets without copying Lemon license state.
 - Verify Terms and Privacy links are reachable from Settings and About.
+- Verify the packaged app contains `LICENSE`, `NOTICE`, `TRADEMARKS.md`, `BRAND_ASSETS.md`, and the generated `THIRD_PARTY_LICENSES.html`.
+- Regenerate Rust dependency notices with `npm run licenses:rust` after any `Cargo.lock` change and confirm frontend `dist/oss-licenses.json` has no dependency without `licenseText`.
 - Verify App Store metadata, screenshots, previews, privacy answers, support
   URL, and review notes match the submitted binary and mention non-obvious
   App Store channel behavior.

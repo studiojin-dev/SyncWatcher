@@ -1,10 +1,6 @@
 {
   "translation": {
     "appName": "SyncWatcher",
-    "common": {
-      "expandDirectory": "Expand {{name}}",
-      "collapseDirectory": "Collapse {{name}}"
-    },
     "app": {
       "quitConfirmTitle": "Confirm Quit",
       "quitConfirmMessage": "There are tasks with Watch Mode enabled or currently syncing. Are you sure you want to quit?",
@@ -105,7 +101,13 @@
       "savedUuidSourceHint": "This task keeps its saved UUID source. Mount the media again to browse inside it or pick a different volume.",
       "subPath": "Sub Path",
       "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathOutsideVolume": "The sub path must stay inside the selected volume.",
       "volumeNotMounted": "Volume not mounted",
+      "smbAutoMountEnabled": "Mount this SMB share automatically",
+      "smbUsernamePlaceholder": "SMB username",
+      "smbPasswordPlaceholder": "SMB password",
+      "unmountSuccess": "Volume unmounted.",
+      "unmountFailed": "Failed to unmount the volume.",
       "targetDirectoryWillBeCreated": "Target directory does not exist yet and will be created during sync: {{path}}",
       "targetDirectoryCreated": "Created the target directory before sync: {{path}}",
       "uuidCopied": "UUID copied to clipboard",
@@ -113,7 +115,13 @@
         "sourceEqualsTarget": "Source and target cannot overlap.",
         "targetIsSubdirOfSource": "Target cannot be inside source.",
         "duplicateTarget": "Target conflicts with another task target.",
-        "targetSubdirConflict": "Target cannot be parent/child of another task target."
+        "targetSubdirConflict": "Target cannot be parent/child of another task target.",
+        "watchCycle": "Watch-enabled tasks cannot form a cycle.",
+        "invalidInput": "The task contains invalid input."
+      },
+      "validationModal": {
+        "title": "Sync Task Validation", "affectedTasks": "Affected tasks", "source": "Source", "target": "Target", "close": "Close",
+        "ruleDescriptions": { "sourceTargetOverlap": "Source and target paths cannot overlap.", "duplicateTarget": "Each task must use a unique target.", "targetSubdirConflict": "Task targets cannot contain one another.", "watchCycle": "Watch-enabled tasks cannot form a cycle.", "invalidInput": "Correct the invalid task input." }
       },
       "warnings": {
         "targetInWatchedSource": "Acyclic watch chains are allowed, but downstream watch sync waits until overlapping writes complete successfully."
@@ -281,6 +289,7 @@
       "deleteFailed": "Failed to delete selected orphan files."
     },
     "conflict": {
+      "windowTitle": "Conflict Review",
       "queueTitle": "Needs Review",
       "queueEmpty": "No pending conflict sessions.",
       "queueCount": "{{count}} session(s)",
@@ -297,6 +306,8 @@
       "previewTitle": "Source / Target Preview (Diff)",
       "previewEmpty": "Select a file from the list below.",
       "previewUnsupported": "Inline preview is unavailable for this file type. Open with OS preview.",
+      "previewLoadFailed": "Failed to load the preview.",
+      "previewOpenHint": "Open the file with the system viewer to inspect it.",
       "listTitle": "Needs Review File List",
       "listEmpty": "No items to display.",
       "confirmForceCopy": "Force copy cannot be undone. Continue?",
@@ -335,7 +346,7 @@
       "sectionDisplay": "Display",
       "sectionSystem": "System",
       "sectionBehavior": "Behavior",
-      "sectionLicense": "License Support",
+      "sectionLicense": "Support",
       "sectionLegal": "Legal",
       "stateLocation": "State Location",
       "stateLocationPlaceholder": "Default: Tauri AppData",
@@ -521,23 +532,30 @@
       "openSourceLibraries": "Open Source Libraries",
       "openSourceDescription": "SyncWatcher includes open source libraries. Use the button below to view their license information.",
       "viewLicenses": "View Licenses",
+      "licenses": "Open Source Licenses",
+      "licenseDetails": "License and notice text",
       "viewOnGithub": "View on GitHub",
       "openAppStore": "Open in App Store",
-      "unregistered": "Free Use (Personal & Commercial)",
-      "registered": "License Supporter",
+      "unregistered": "Not a supporter",
+      "registered": "Supporter",
       "thankYou": "Thanks for keeping this project alive!",
       "supportTitle": "Spare a tiny coin?",
-      "supportHint": "Commercial use is also free. Buying a license is optional and simply helps this developer keep building.",
+      "supportHint": "SyncWatcher is free under Apache-2.0. Optional support does not change your software rights or features.",
       "supportButton": "Bow-and-Beg",
       "supportModalTitle": "Humble Coin Cup Mode",
-      "supportModalMessage": "You already supported this project through a license purchase. If you want to help one more time, you can also tip on Buy Me a Coffee.",
+      "supportModalMessage": "You already support this project. If you want to help one more time, you can also tip on Buy Me a Coffee.",
       "supportModalConfirm": "Tip on Buy Me a Coffee",
       "supportModalCancel": "Maybe Next Time",
-      "purchaseLicense": "Optional License Support",
+      "purchaseLicense": "Become a Supporter",
       "supportStatus": "Support Status",
-      "licenseType": "Polyform NC 1.0.0"
+      "licenseType": "Apache-2.0"
     },
     "common": {
+      "expandDirectory": "Expand {{name}}",
+      "collapseDirectory": "Collapse {{name}}",
+      "open": "Open",
+      "refresh": "Refresh",
+      "retry": "Retry",
       "confirm": "Confirm",
       "yes": "Yes",
       "no": "No",
@@ -595,7 +613,9 @@
       "openAppStore": "Open App Store"
     },
     "license": {
-      "title": "Activate License",
+      "title": "Activate Supporter Status",
+      "loadFailed": "Failed to load supporter status.",
+      "activationFailed": "Failed to activate supporter status.",
       "appStoreTitle": "Lifetime Supporter",
       "appStoreDescription": "This is an optional one-time in-app purchase for supporting development. It does not unlock extra features.",
       "appStoreSupportStatus": "Support",
@@ -606,23 +626,26 @@
       "appStoreRestored": "App Store purchase restored.",
       "appStoreRestoring": "Restoring...",
       "appStorePurchaseFailed": "Failed to complete the App Store purchase.",
+      "appStorePurchaseUnavailable": "In-app purchases are not available in this build.",
+      "appStoreRestoreUnavailable": "Purchase restore is not available in this build.",
       "appStorePending": "The App Store purchase is still pending approval.",
       "appStoreSupporterActive": "Support active",
-      "enterKeyDescription": "Enter the license key from your purchase.",
-      "keyPlaceholder": "Enter license key",
-      "activate": "Activate",
-      "activating": "Activating...",
-      "activated": "License activated!",
-      "invalid": "Invalid license key.",
-      "enterLicense": "Enter License",
-      "manage": "Manage License",
-      "manageDescription": "This device already has an active supporter license. You can remove it here before moving to another machine.",
-      "currentKey": "Current Key",
-      "remove": "Remove License",
+      "enterKeyDescription": "Enter the supporter key from your purchase.",
+      "keyPlaceholder": "Enter supporter key",
+      "activate": "Activate Support",
+      "activating": "Activating support...",
+      "activated": "Supporter status activated!",
+      "invalid": "Invalid supporter key.",
+      "enterLicense": "Enter Supporter Key",
+      "manage": "Manage Supporter Status",
+      "manageDescription": "This device already has active supporter status. You can remove it here before moving the key to another machine.",
+      "currentKey": "Supporter Key",
+      "remove": "Remove Supporter Key",
       "restore": "Restore Purchase",
       "removing": "Removing...",
-      "removed": "License removed.",
-      "removeFailed": "Failed to remove license."
+      "removed": "Supporter key removed.",
+      "removeFailed": "Failed to remove supporter key.",
+      "supporterKeysUnavailable": "Supporter keys are not available in this build."
     }
   }
 }

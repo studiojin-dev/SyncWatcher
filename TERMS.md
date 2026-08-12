@@ -1,168 +1,129 @@
 # Terms and Conditions
 
-Last updated: 2026-04-01
+Last updated: 2026-08-12
 
-These Terms and Conditions ("Terms") govern your use of SyncWatcher ("SyncWatcher", "the App", or "the Service") provided by StudioJin ("we", "us", or "our").
+These Terms and Conditions ("Terms") govern StudioJin's official distribution of SyncWatcher, optional supporter purchases, support, and related services. They do not replace or narrow the rights granted by the Apache License 2.0.
 
-By downloading, installing, accessing, or using SyncWatcher, or by purchasing optional support through Lemon Squeezy or the Apple App Store, you agree to these Terms.
+By obtaining an official StudioJin distribution or using StudioJin's purchase or support services, you agree to these Terms where applicable.
 
 ## Language Notice
 
-These Terms may be provided in multiple languages. In the event of any inconsistency or conflict between the English version and the Korean version, the Korean version will prevail.
+These Terms may be provided in multiple languages. If the English and Korean versions conflict, the Korean version will prevail.
 
 ## 1. What SyncWatcher Is
 
-SyncWatcher is a macOS application for one-way sync, backup, removable media workflows, and related file-copy automation.
+SyncWatcher is a macOS application for one-way sync, backup, removable-media workflows, and related file-copy automation. You are responsible for how you configure and use it, including how you manage files, devices, destinations, and backups.
 
-SyncWatcher is provided as software. You are responsible for how you configure and use it, including how you manage your files, devices, destinations, and backups.
+## 2. Open-Source License
 
-## 2. Eligibility
+The SyncWatcher source code and Object-form distributions made from that Work are available under the [Apache License 2.0](./LICENSE). Apache-2.0 permits use, commercial use, modification, sublicensing, and redistribution subject to its conditions.
 
-You may use SyncWatcher only if you are legally able to enter into these Terms and comply with applicable law.
+Nothing in these Terms revokes, reduces, or adds conditions to rights granted under Apache-2.0. If these Terms conflict with Apache-2.0 about the licensed Work or a Derivative Work, Apache-2.0 controls.
 
-If you use SyncWatcher on behalf of an organization, you represent that you have authority to bind that organization to these Terms.
+## 3. Official StudioJin Distributions
 
-## 3. License Grant
+StudioJin currently provides official SyncWatcher distributions through GitHub Releases and the Apple Mac App Store. Platform policy, sandboxing, payment rules, and update rules may cause the channels to behave differently.
 
-Subject to these Terms, we grant you a limited, non-exclusive, non-transferable, non-sublicensable right to download, install, and use the SyncWatcher binary application for your own internal or personal use.
+Calling those distributions "official" identifies their publisher and support relationship. It does not prevent anyone from building or redistributing the Apache-2.0 Work under compliant, non-misleading branding.
 
-This grant does not transfer ownership of the App or any intellectual property rights.
+## 4. Trademarks and Brand Assets
 
-## 4. Source Code and Separate License Terms
-
-The SyncWatcher source code is made available separately under the license terms published in the repository's `LICENSE` file.
-
-These Terms govern the binary application, optional support purchases, and the commercial relationship around SyncWatcher unless a separate written agreement says otherwise.
-
-If there is a conflict between these Terms and the repository source-code license with respect to the source code, the source-code license controls for the source code only.
+Apache-2.0 does not grant rights to the SyncWatcher or StudioJin names, logos, application icon, or other brand identity beyond reasonable references to the Work's origin. Modified and independently redistributed builds must not imply StudioJin sponsorship, endorsement, or official status. See [TRADEMARKS.md](./TRADEMARKS.md) and [BRAND_ASSETS.md](./BRAND_ASSETS.md).
 
 ## 5. Distribution Channels
 
-SyncWatcher may be distributed through more than one channel, including:
+The GitHub build may use GitHub Releases for downloads and updates and Lemon Squeezy for optional supporter purchases. The Mac App Store build uses the App Store for distribution and updates and StoreKit for its optional `Lifetime Supporter` purchase.
 
-- GitHub Releases and direct `.dmg` downloads; and
-- the Apple Mac App Store.
-
-Features may be implemented differently when required by platform policy, sandboxing, payment rules, or update rules. However, the product policy remains that SyncWatcher is free to use and optional support purchases do not unlock separate core backup functionality.
+Both purchases are optional support. They do not unlock a separate core feature tier and do not grant or restrict Apache-2.0 rights.
 
 ## 6. Purchases, Merchant of Record, and Taxes
 
-### 6.1 GitHub DMG builds
+### 6.1 GitHub builds
 
-If you obtain SyncWatcher outside the Mac App Store and choose to make an optional support purchase, payment is processed by Lemon Squeezy. Lemon Squeezy acts as the merchant of record for that transaction and may collect payment, billing, tax, and receipt information directly from you under its own terms and policies.
+Lemon Squeezy processes optional supporter purchases for official non-App-Store builds and acts as merchant of record under its own terms and policies.
 
 ### 6.2 Mac App Store builds
 
-If you obtain SyncWatcher through the Apple Mac App Store and choose to make the optional in-app purchase named `Lifetime Supporter`, Apple acts as the merchant of record for that transaction under Apple's own terms, billing policies, and refund rules.
+Apple processes the optional `Lifetime Supporter` in-app purchase and acts as merchant of record under Apple's terms, billing policies, and refund rules.
 
 ### 6.3 General
 
-Prices, currency conversion, taxes, invoicing, payment processing, and receipt delivery may be handled by the relevant merchant of record for the channel you use.
+The relevant merchant of record may handle prices, currency conversion, taxes, invoices, payment processing, and receipts.
 
-## 7. Optional Support Purchases
+## 7. Supporter Status
 
-SyncWatcher's support purchase is optional. The current product policy is:
+The GitHub build may use a Lemon Squeezy supporter key to activate and validate local supporter status. The Mac App Store build may use StoreKit transaction state and purchase restoration.
 
-- the app remains free to use;
-- the `Lifetime Supporter` purchase is intended as developer support; and
-- the purchase does not promise a separate feature tier, service level, or hosted account system.
+Supporter status is a recognition and support signal only. It is not a software-use license or a condition for using, modifying, or redistributing the Apache-2.0 Work.
 
-For GitHub DMG builds, supporter state may depend on Lemon Squeezy license-key activation and validation.
+You are responsible for protecting purchase credentials, Apple ID access, and supporter keys associated with official StudioJin purchase services.
 
-For Mac App Store builds, supporter state may depend on Apple's in-app purchase transaction state and restore flow.
+## 8. Acceptable Use of Official Services
 
-You are responsible for keeping purchase credentials, Apple ID access, and any applicable license key secure.
+When using StudioJin-operated purchase, update, or support services, you must not:
 
-## 8. Acceptable Use
+- violate applicable law or the rights of others;
+- fraudulently obtain or abuse supporter status, refunds, or service access;
+- interfere with the security or operation of those services; or
+- use the services to damage systems, data, or other users.
 
-You must not:
-
-- use SyncWatcher in violation of applicable law;
-- interfere with or circumvent licensing, validation, App Store purchase, or security mechanisms;
-- use SyncWatcher to infringe the rights of others;
-- redistribute, sell, rent, lease, or sublicense the binary App except where we expressly permit it; or
-- use the App in a way that is intended to damage systems, data, or other users.
+This section does not prohibit modification or redistribution allowed by Apache-2.0, including removing or replacing supporter integrations in a Derivative Work.
 
 ## 9. Updates and Changes
 
-We may release updates, fixes, improvements, or changes to SyncWatcher at any time.
+Official GitHub builds may receive updates through GitHub Releases or a compatible in-app updater. Official Mac App Store builds receive updates through the Mac App Store and may only direct users to the App Store to install them.
 
-If you use a GitHub DMG build, updates may be offered through GitHub Releases or a compatible in-app updater flow.
-
-If you use a Mac App Store build, updates are provided through the Mac App Store. SyncWatcher may show a best-effort notice that a newer App Store version exists, but installation and delivery remain managed by Apple.
-
-We do not guarantee that any particular feature, integration, or version will remain available indefinitely.
+StudioJin does not guarantee that any official distribution channel, integration, support offering, or version will remain available indefinitely. This does not affect existing Apache-2.0 rights in released versions.
 
 ## 10. Third-Party Services
 
-SyncWatcher may rely on or link to third-party services, including:
-
-- Lemon Squeezy for checkout and license-key operations on non-App-Store builds;
-- Apple App Store and StoreKit for App Store distribution, billing, purchase restoration, and transaction handling;
-- GitHub for software distribution, releases, issues, and discussions; and
-- Buy Me a Coffee or similar support links on non-App-Store builds.
-
-Those third-party services are governed by their own terms and policies, and we are not responsible for their independent acts or omissions.
+SyncWatcher may rely on or link to Lemon Squeezy, Apple App Store and StoreKit, GitHub, and Buy Me a Coffee. Those services are governed by their own terms and policies, and StudioJin is not responsible for their independent acts or omissions.
 
 ## 11. Refunds
 
-For GitHub DMG purchases handled by Lemon Squeezy, purchases are generally final and non-refundable except where required by applicable law or the relevant merchant-of-record policy.
+Lemon Squeezy supporter purchases are generally final and non-refundable except where applicable law or the merchant-of-record policy requires otherwise. Apple handles Mac App Store billing support and refunds under its policies and applicable law.
 
-For Mac App Store purchases, Apple handles billing support, refunds, and any mandatory consumer rights according to Apple's policies and applicable law.
-
-Because SyncWatcher can be evaluated and used before any optional support purchase, you should assess whether it fits your needs before purchasing.
+Because supporter purchases do not change SyncWatcher's features or license rights, consider the purchase a voluntary contribution to development.
 
 ## 12. No Warranty
 
-SYNCWATCHER IS PROVIDED "AS IS" AND "AS AVAILABLE" TO THE MAXIMUM EXTENT PERMITTED BY LAW.
+SYNCWATCHER AND OFFICIAL STUDIOJIN DISTRIBUTIONS ARE PROVIDED "AS IS" AND "AS AVAILABLE" TO THE MAXIMUM EXTENT PERMITTED BY LAW.
 
-WE DISCLAIM ALL WARRANTIES, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE, INCLUDING ANY IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
-
-We do not warrant that SyncWatcher will be uninterrupted, error-free, secure, or suitable for your particular workflow, hardware, filesystem, or backup needs.
+StudioJin disclaims warranties, whether express, implied, statutory, or otherwise, including merchantability, fitness for a particular purpose, title, and non-infringement. StudioJin does not warrant that SyncWatcher will be uninterrupted, error-free, secure, or suitable for a particular workflow, device, filesystem, or backup need. The Apache-2.0 warranty disclaimer also applies to the licensed Work.
 
 ## 13. Backup Responsibility
 
-You acknowledge that file synchronization and backup operations can overwrite, delete, duplicate, or fail to copy files if configured incorrectly, interrupted, or affected by hardware, operating system, filesystem, sandbox permissions, or user error.
+File synchronization and backup operations can overwrite, delete, duplicate, or fail to copy files because of configuration, interruption, hardware, operating-system, filesystem, sandbox, or user error.
 
-You are solely responsible for:
-
-- verifying your configuration before running copy jobs;
-- maintaining independent backups of important data; and
-- confirming that SyncWatcher behaves as expected in your environment.
+You are responsible for verifying configurations, maintaining independent backups of important data, and confirming expected behavior in your environment.
 
 ## 14. Limitation of Liability
 
-To the maximum extent permitted by law, StudioJin and its affiliates, licensors, and suppliers will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for any loss of profits, revenue, goodwill, data, or business interruption, arising out of or related to SyncWatcher or these Terms.
+To the maximum extent permitted by law, StudioJin and its affiliates, licensors, and suppliers will not be liable for indirect, incidental, special, consequential, exemplary, or punitive damages, or for lost profits, revenue, goodwill, data, or business interruption arising from SyncWatcher, official services, or these Terms.
 
-To the maximum extent permitted by law, our total aggregate liability arising out of or related to SyncWatcher or these Terms will not exceed the amount you paid for the relevant optional support purchase in the 12 months before the event giving rise to the claim, or KRW 50,000 if you did not pay anything.
+To the maximum extent permitted by law, StudioJin's total aggregate liability related to an optional supporter transaction or official service will not exceed the amount you paid for the relevant purchase during the 12 months before the event giving rise to the claim, or KRW 50,000 if you paid nothing. Some jurisdictions do not allow certain limitations, so part of this section may not apply to you. Apache-2.0 separately governs liability for the licensed Work.
 
-Some jurisdictions do not allow certain limitations, so some of the above may not apply to you.
+## 15. Termination of Official Services
 
-## 15. Termination
+You may stop using official StudioJin services at any time. StudioJin may suspend supporter status or related service access if a purchase or status was obtained fraudulently or the service was abused.
 
-You may stop using SyncWatcher at any time.
-
-We may suspend or terminate access to optional support-related status if we reasonably believe a purchase or license state was obtained fraudulently, used abusively, or used in violation of these Terms.
-
-Sections that by their nature should survive termination will survive, including sections relating to ownership, disclaimers, liability limits, payments already due, and dispute-related terms.
+Termination under these Terms does not terminate Apache-2.0 rights. Rights under Apache-2.0 end only as provided by Apache-2.0 itself.
 
 ## 16. Governing Law
 
-These Terms are governed by the laws of the Republic of Korea, excluding its conflict of laws principles, unless otherwise required by applicable consumer protection law.
-
-Any dispute arising out of or relating to SyncWatcher or these Terms will be submitted to the courts of the Republic of Korea, and the parties consent to the jurisdiction and venue of those courts.
+These Terms are governed by the laws of the Republic of Korea, excluding conflict-of-laws principles, unless applicable consumer law requires otherwise. Disputes concerning these Terms or official StudioJin services will be submitted to courts in the Republic of Korea where legally permitted.
 
 ## 17. Apple Standard EULA
 
-When SyncWatcher is distributed through the Apple App Store, Apple's standard end-user license agreement may also apply as required by Apple platform rules.
+Apple's standard end-user license agreement may also apply to the official Mac App Store distribution as required by Apple. To the extent it applies, it does not replace, supersede, or restrict rights granted under Apache-2.0 for the licensed Work, including source code and Object-form distributions, whether distributed through the Mac App Store or independently. If Apple's standard end-user license agreement conflicts with Apache-2.0 concerning the licensed Work or a Derivative Work, Apache-2.0 controls.
 
 ## 18. Changes to These Terms
 
-We may update these Terms from time to time. If we do, we will update the "Last updated" date and publish the revised version.
+StudioJin may update these Terms and will publish the revised version with a new "Last updated" date. A Terms update does not retroactively reduce rights already granted under Apache-2.0.
 
 ## 19. Contact
 
-For questions about these Terms or SyncWatcher purchases, contact StudioJin through:
+For questions about these Terms, official distributions, or supporter purchases:
 
 - Email: support@studiojin.dev
 - GitHub Issues: https://github.com/studiojin-dev/SyncWatcher/issues

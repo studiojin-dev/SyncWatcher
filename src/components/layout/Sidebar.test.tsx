@@ -36,11 +36,11 @@ const mockState = vi.hoisted(() => ({
     'nav.settings': 'Settings',
     'nav.help': 'Help',
     'nav.about': 'About',
-    'about.unregistered': 'Free Use (Personal & Commercial)',
-    'about.registered': 'License Supporter',
+    'about.unregistered': 'Not a supporter',
+    'about.registered': 'Supporter',
     'about.purchaseLicense': 'Optional License Support',
-    'license.enterLicense': 'Enter License',
-    'license.manage': 'Manage License',
+    'license.enterLicense': 'Enter Supporter Key',
+    'license.manage': 'Manage Supporter Status',
     'license.appStorePurchase': 'Purchase Supporter',
     'license.appStoreSupporterActive': 'Support active',
     'license.restore': 'Restore',
@@ -103,7 +103,7 @@ describe('Sidebar', () => {
     expect(purchaseLink).toHaveAttribute('target', '_blank');
     expect(purchaseLink).toHaveAttribute('rel', 'noopener noreferrer');
 
-    const enterLicenseButton = screen.getByRole('button', { name: 'Enter License' });
+    const enterLicenseButton = screen.getByRole('button', { name: 'Enter Supporter Key' });
     fireEvent.click(enterLicenseButton);
     expect(screen.getByTestId('license-activation-modal')).toBeInTheDocument();
   });
@@ -113,7 +113,7 @@ describe('Sidebar', () => {
     render(<Sidebar activeTab="sync-tasks" onTabChange={vi.fn()} />);
     await screen.findByText('v1.2.0-beta');
 
-    expect(screen.getByRole('button', { name: 'Manage License' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage Supporter Status' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Optional License Support' })).not.toBeInTheDocument();
   });
 
