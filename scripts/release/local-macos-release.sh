@@ -182,7 +182,7 @@ case "${ARCH_SUFFIX}" in
 esac
 
 echo "Building signed/stapled app bundle for ${PRODUCT_NAME} ${VERSION} (${ARCH_SUFFIX})"
-pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked
 
 APP_BUNDLE="${REPO_ROOT}/src-tauri/target/release/bundle/macos/${PRODUCT_NAME}.app"
 DMG_SCRIPT="${REPO_ROOT}/src-tauri/target/release/bundle/dmg/bundle_dmg.sh"

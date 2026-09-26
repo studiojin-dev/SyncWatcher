@@ -1,5 +1,21 @@
 [
   {
+    "id": "ADR-20260927-0036-LCK",
+    "title": "Commit Rust lockfile and lock release builds",
+    "tags": [
+      "release",
+      "rust",
+      "dependencies",
+      "supply-chain",
+      "reproducibility",
+      "app-store"
+    ],
+    "status": "Accepted",
+    "date": "2026-09-27",
+    "tldr": "Commit the Rust dependency resolution and make GitHub and local distribution builds fail if the lockfile would change.",
+    "path": "docs/adr/ADR-20260927-0036-LCK-commit-rust-lockfile-and-lock-release-builds.md"
+  },
+  {
     "id": "ADR-20260927-0035-BAD",
     "title": "Use an organization-owned GitHub App for direct download-badge updates",
     "tags": [

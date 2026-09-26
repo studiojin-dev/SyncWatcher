@@ -233,7 +233,7 @@ jobs:
           tagName: ${{ inputs.tag_name || github.ref_name }}
           releaseDraft: ${{ needs.prepare_release.outputs.release_is_draft == 'true' }}
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
-          args: --target aarch64-apple-darwin
+          args: --target aarch64-apple-darwin -- --locked
 
       - name: Stage current aarch64 release assets
         shell: bash
@@ -342,7 +342,7 @@ jobs:
           releaseDraft: ${{ needs.prepare_release.outputs.release_is_draft == 'true' }}
           prerelease: ${{ needs.tag_gate.outputs.is_prerelease == 'true' }}
           includeUpdaterJson: false
-          args: --target x86_64-apple-darwin
+          args: --target x86_64-apple-darwin -- --locked
 
       - name: Stage current x64 release assets
         shell: bash
