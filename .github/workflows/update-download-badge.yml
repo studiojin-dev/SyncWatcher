@@ -12,14 +12,25 @@ jobs:
   update_download_badge:
     if: github.event_name != 'release' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    permissions: {}
 
     steps:
+      - name: Create badge writer token
+        id: badge_app_token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.BADGE_APP_ID }}
+          private-key: ${{ secrets.BADGE_APP_PRIVATE_KEY }}
+          owner: studiojin-dev
+          repositories: SyncWatcher
+          permission-contents: write
+
       - name: Checkout main
         uses: actions/checkout@v5
         with:
           ref: main
+          token: ${{ steps.badge_app_token.outputs.token }}
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -29,19 +40,23 @@ jobs:
 
       - name: Build installer download badge
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.badge_app_token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         run: node scripts/metrics/build-installer-download-badge.mjs
 
       - name: Commit badge update
+        env:
+          GH_TOKEN: ${{ steps.badge_app_token.outputs.token }}
+          BADGE_APP_SLUG: syncwatcher-download-badge-writer
         run: |
           if git diff --quiet -- docs/badges/installer-downloads.json; then
             echo "No badge changes to commit."
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BADGE_APP_USER_ID="$(gh api "/users/${BADGE_APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${BADGE_APP_SLUG}[bot]"
+          git config user.email "${BADGE_APP_USER_ID}+${BADGE_APP_SLUG}[bot]@users.noreply.github.com"
           git add docs/badges/installer-downloads.json
           git commit -m "chore: update installer download badge"
           git push origin HEAD:main
