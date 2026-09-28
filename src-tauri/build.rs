@@ -42,6 +42,9 @@ fn build_macos_bridge() {
     };
 
     let output_library = out_dir.join("libsyncwatcher_macos_bridge.a");
+    let swift_module_cache = out_dir.join("swift-module-cache");
+    std::fs::create_dir_all(&swift_module_cache)
+        .expect("failed to create Swift module cache directory");
     let status = Command::new("xcrun")
         .args(["swiftc", "-parse-as-library"])
         .arg(&swift_file)
@@ -55,6 +58,8 @@ fn build_macos_bridge() {
             "-sdk",
         ])
         .arg(&sdk_path)
+        .arg("-module-cache-path")
+        .arg(&swift_module_cache)
         .arg("-o")
         .arg(&output_library)
         .status()

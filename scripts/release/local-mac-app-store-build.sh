@@ -13,7 +13,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release/local-mac-app-store-build.sh [options]
 
-Builds the Mac App Store flavor locally, signs the .app with the App Store
+Builds the universal Mac App Store flavor locally, signs the .app with the App Store
 application identity, embeds the provisioning profile, and creates a signed
 submission .pkg with the App Store installer identity.
 
@@ -56,7 +56,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-for bin in pnpm xcrun codesign pkgutil security node plutil python3; do
+for bin in pnpm xcrun codesign pkgutil security node plutil python3 lipo; do
   if ! command -v "$bin" >/dev/null 2>&1; then
     echo "Missing required command: $bin" >&2
     exit 1
@@ -188,14 +188,14 @@ files["embedded.provisionprofile"] = sys.argv[2]
 print(json.dumps(config, separators=(",", ":")))
 PY
 )"
-APP_BUNDLE="${REPO_ROOT}/src-tauri/target/release/bundle/macos/${PRODUCT_NAME}.app"
+APP_BUNDLE="${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release/bundle/macos/${PRODUCT_NAME}.app"
 OUTPUT_DIR="${REPO_ROOT}/dist-appstore"
 OUTPUT_PKG="${OUTPUT_DIR}/SyncWatcher-${VERSION}-b${APP_STORE_BUILD_NUMBER}-mac-app-store.pkg"
 INFO_PLIST="${APP_BUNDLE}/Contents/Info.plist"
 MACOS_BIN_DIR="${APP_BUNDLE}/Contents/MacOS"
 ENTITLEMENTS_PATH="${REPO_ROOT}/src-tauri/Entitlements.plist"
 
-echo "Building Mac App Store app bundle for ${PRODUCT_NAME} ${VERSION} (build ${APP_STORE_BUILD_NUMBER})"
+echo "Building universal Mac App Store app bundle for ${PRODUCT_NAME} ${VERSION} (build ${APP_STORE_BUILD_NUMBER})"
 ORIGINAL_APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
 ORIGINAL_APPLE_API_KEY="${APPLE_API_KEY:-}"
 ORIGINAL_APPLE_API_ISSUER="${APPLE_API_ISSUER:-}"
@@ -207,7 +207,20 @@ ORIGINAL_APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
 export APPLE_SIGNING_IDENTITY="${APPLE_APP_STORE_SIGNING_IDENTITY}"
 unset APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
 
-pnpm tauri build --bundles app --config "${APPSTORE_BUILD_CONFIG}" -- --locked
+pnpm tauri build --no-bundle --target universal-apple-darwin --config "${APPSTORE_BUILD_CONFIG}" -- --locked
+
+UNIVERSAL_BIN_DIR="${REPO_ROOT}/src-tauri/target/universal-apple-darwin/release"
+ARM_CLI="${REPO_ROOT}/src-tauri/target/aarch64-apple-darwin/release/sync-cli"
+INTEL_CLI="${REPO_ROOT}/src-tauri/target/x86_64-apple-darwin/release/sync-cli"
+for cli_binary in "${ARM_CLI}" "${INTEL_CLI}"; do
+  if [[ ! -f "${cli_binary}" ]]; then
+    echo "Expected architecture-specific CLI binary not found: ${cli_binary}" >&2
+    exit 1
+  fi
+done
+lipo -create "${ARM_CLI}" "${INTEL_CLI}" -output "${UNIVERSAL_BIN_DIR}/sync-cli"
+
+pnpm tauri bundle --bundles app --target universal-apple-darwin --config "${APPSTORE_BUILD_CONFIG}"
 
 if [[ -n "${ORIGINAL_APPLE_SIGNING_IDENTITY}" ]]; then
   export APPLE_SIGNING_IDENTITY="${ORIGINAL_APPLE_SIGNING_IDENTITY}"
