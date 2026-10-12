@@ -1,6 +1,6 @@
 # 개인정보 처리방침
 
-최종 업데이트: 2026-08-12
+최종 업데이트: 2026-10-12
 
 본 개인정보 처리방침은 StudioJin("당사", "우리")이 SyncWatcher("SyncWatcher", "앱", 또는 "서비스")와 관련하여 정보를 어떻게 처리하는지 설명합니다.
 
@@ -53,6 +53,8 @@ SyncWatcher는 주로 사용자의 기기 내 파일 및 폴더를 로컬에서 
 - Lemon Squeezy가 반환하는 상품, 스토어, variant 메타데이터
 
 앱은 마지막 검증 상태나 활성화 메타데이터 등 Lemon Squeezy 관련 로컬 후원 상태를 사용자 기기에 저장할 수 있습니다.
+
+Lemon Squeezy 주문이 완료되거나 환불되면 Lemon Squeezy가 당사 웹사이트(`studiojin.dev`)에 이를 알리며, 당사는 상품, 금액, 주문 번호, 그리고 확인 가능한 경우 결제를 시작한 페이지나 버튼을 웹사이트 분석 서비스(PostHog)에 기록합니다. 이름과 이메일 주소는 PostHog에 보내지 않으며, 이 기록은 사용자 프로필과 연결되지 않습니다. 다만 결제를 시작하기 전에 `studiojin.dev`에서 분석을 허용한 경우에는 이전 웹사이트 방문 기록과 연결됩니다. 앱 자체는 PostHog에 아무것도 보내지 않습니다.
 
 ### 2.3 Mac App Store 구매
 
@@ -107,6 +109,7 @@ Mac App Store 빌드에서 SyncWatcher는 StoreKit의 온디바이스 거래 확
 당사는 다음과 같은 제한된 경우에만 정보를 공유할 수 있습니다.
 
 - GitHub DMG 체크아웃, 영수증, 세금 처리, 후원 키 운영을 위한 Lemon Squeezy와의 공유
+- 제2.2조에 설명한 웹사이트 구매 기록(이름·이메일 주소 제외)을 위한 PostHog와의 공유
 - Mac App Store 빌드의 StoreKit 및 App Store 구매 흐름을 위한 Apple과의 공유
 - 사업 운영에 합리적으로 필요한 범위의 서비스 제공업체와의 공유
 - 법률 또는 규제기관의 요구가 있는 경우
@@ -126,7 +129,7 @@ Mac App Store 빌드에서 SyncWatcher는 StoreKit의 온디바이스 거래 확
 
 ## 8. 국외 이전
 
-사용자의 정보는 Lemon Squeezy, Apple, GitHub 및 기타 제3자 제공업체를 통해 사용자 국가 외 지역에서 처리될 수 있습니다. 해당되는 경우, 당사는 법률이 요구하는 적절한 보호조치를 따릅니다.
+사용자의 정보는 Lemon Squeezy, PostHog, Apple, GitHub 및 기타 제3자 제공업체를 통해 사용자 국가 외 지역에서 처리될 수 있습니다. 해당되는 경우, 당사는 법률이 요구하는 적절한 보호조치를 따릅니다.
 
 ## 9. 보안
 
@@ -153,6 +156,7 @@ SyncWatcher는 만 13세 미만 아동을 대상으로 하지 않으며, 당사�
 SyncWatcher와 관련하여 사용될 수 있는 제3자 서비스는 다음을 포함합니다.
 
 - 비 App Store 빌드의 체크아웃 및 후원 키 운영을 위한 Lemon Squeezy(Lemon Squeezy API에서는 라이선스 키 운영으로 지칭)
+- 완료·환불된 Lemon Squeezy 주문 기록을 포함한 `studiojin.dev` 분석을 위한 PostHog
 - Mac App Store 배포 및 인앱 구매를 위한 Apple App Store 및 StoreKit
 - 소스 코드 배포, 릴리스, 이슈, 토론을 위한 GitHub
 - 비 App Store 빌드의 후원 링크를 위한 Buy Me a Coffee 또는 유사 서비스

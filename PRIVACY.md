@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 2026-08-12
+Last updated: 2026-10-12
 
 This Privacy Policy explains how StudioJin ("we", "us", or "our") handles information related to SyncWatcher ("SyncWatcher", "the App", or "the Service").
 
@@ -53,6 +53,8 @@ When you activate or validate a Lemon Squeezy supporter key, the App may transmi
 - product, store, and variant metadata returned by Lemon Squeezy.
 
 The App may also store local Lemon Squeezy supporter state on your device, such as the last known validation status and activation metadata.
+
+When a Lemon Squeezy order is completed or refunded, Lemon Squeezy notifies our website (`studiojin.dev`), and we record the order in our website analytics service (PostHog) with the product, the amount, the order number, and, where available, which page or button the checkout started from. We do not send your name or email address to PostHog, and the record is not linked to a profile of you, unless you allowed analytics on `studiojin.dev` before starting the checkout, in which case it is linked to your earlier visits to the website. The App itself does not send anything to PostHog.
 
 ### 2.3 Mac App Store purchases
 
@@ -107,6 +109,7 @@ We do not sell your personal information.
 We may share information only in limited cases, such as:
 
 - with Lemon Squeezy, for GitHub DMG checkout, receipts, taxes, and supporter-key operations;
+- with PostHog, for the website purchase records described in Section 2.2, which contain no name or email address;
 - with Apple, through StoreKit and App Store purchase flows for the Mac App Store build;
 - with service providers only where reasonably necessary to operate the business;
 - with legal or regulatory authorities where required by law; and
@@ -126,7 +129,7 @@ Retention periods may be longer where required by law.
 
 ## 8. International Transfers
 
-Your information may be processed in countries other than your own, including through Lemon Squeezy, Apple, GitHub, and other third-party providers. Where applicable, we rely on appropriate safeguards required by law.
+Your information may be processed in countries other than your own, including through Lemon Squeezy, PostHog, Apple, GitHub, and other third-party providers. Where applicable, we rely on appropriate safeguards required by law.
 
 ## 9. Security
 
@@ -153,6 +156,7 @@ SyncWatcher is not directed to children under 13, and we do not knowingly collec
 Third-party services used in connection with SyncWatcher may include:
 
 - Lemon Squeezy, for checkout and supporter-key operations on non-App-Store builds (called license-key operations by Lemon Squeezy's API);
+- PostHog, for analytics on `studiojin.dev`, including records of completed and refunded Lemon Squeezy orders;
 - Apple App Store and StoreKit, for Mac App Store distribution and in-app purchases;
 - GitHub, for source code distribution, releases, issues, and discussions; and
 - Buy Me a Coffee or similar support links on non-App-Store builds.
