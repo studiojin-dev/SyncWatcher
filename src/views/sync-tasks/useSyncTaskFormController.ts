@@ -17,10 +17,12 @@ import {
   buildUuidOptionValue,
   buildUuidSourceOptions,
   inferUuidTypeFromVolumes,
+  isSourceUuidType,
   normalizeUuidSubPath,
   parseUuidOptionValue,
   parseUuidSourceToken,
   toUuidSubPath,
+  uuidTypeLabel,
   type SourceUuidType,
   type UuidTokenType,
   type UuidSourceOption,
@@ -116,8 +118,13 @@ export function useSyncTaskFormController({
   );
 
   const mountedUuidSourceOptions = useMemo(
-    () => buildUuidSourceOptions(volumes, formatVolumeSize),
-    [formatVolumeSize, volumes],
+    () =>
+      buildUuidSourceOptions(volumes, formatVolumeSize, {
+        sdCardLabel: t('syncTasks.sdCardSerial', {
+          defaultValue: 'SD Card Serial',
+        }),
+      }),
+    [formatVolumeSize, t, volumes],
   );
   const selectedUuidOptionValue =
     sourceUuid && sourceTokenType
@@ -140,7 +147,11 @@ export function useSyncTaskFormController({
       value: buildUuidOptionValue(sourceTokenType, sourceUuid),
       label: `${t('syncTasks.savedUuidSourceLabel', {
         defaultValue: 'Saved UUID source (not mounted)',
-      })} [${sourceTokenType.toUpperCase()} UUID: ${sourceUuid}]`,
+      })} [${uuidTypeLabel(sourceTokenType, {
+        sdCardLabel: t('syncTasks.sdCardSerial', {
+          defaultValue: 'SD Card Serial',
+        }),
+      })}: ${sourceUuid}]`,
       uuidType: sourceTokenType,
       uuid: sourceUuid,
       mountPoint: null,
@@ -188,11 +199,9 @@ export function useSyncTaskFormController({
   useEffect(() => {
     if (editingTask) {
       const parsedSourceToken = parseUuidSourceToken(editingTask.source || '');
-      const tokenUuidType =
-        parsedSourceToken?.tokenType === 'disk' ||
-        parsedSourceToken?.tokenType === 'volume'
-          ? parsedSourceToken.tokenType
-          : '';
+      const tokenUuidType = isSourceUuidType(parsedSourceToken?.tokenType)
+        ? parsedSourceToken.tokenType
+        : '';
       const tokenType = parsedSourceToken?.tokenType || '';
       const resolvedSourceType: 'path' | 'uuid' =
         editingTask.sourceType || (parsedSourceToken ? 'uuid' : 'path');

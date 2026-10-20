@@ -96,6 +96,7 @@
       "sourceType": "ソースのタイプ",
       "sourceTypePath": "ディレクトリパス",
       "sourceTypeUuid": "ボリューム UUID",
+      "sdCardSerial": "SDカードシリアル",
       "selectVolume": "ボリュームを選択",
       "savedUuidSourceLabel": "保存済み UUID ソース（未マウント）",
       "savedUuidSourceHint": "このタスクは保存済みの UUID ソースを保持します。内部を参照するにはメディアを再マウントするか、別のボリュームを選択してください。",

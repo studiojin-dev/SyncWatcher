@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
     buildUuidSourceOptions,
     buildUuidSourceToken,
+    buildUuidOptionValue,
     inferUuidTypeFromVolumes,
+    isSourceUuidType,
     normalizeUuidSubPath,
+    parseUuidOptionValue,
     parseUuidSourceToken,
     toUuidSubPath,
 } from './syncTaskUuid';
@@ -125,6 +128,56 @@ describe('SyncTasksView UUID helpers', () => {
         expect(inferUuidTypeFromVolumes('shared-uuid', volumes)).toBe('disk');
         expect(inferUuidTypeFromVolumes('volume-only', volumes)).toBe('volume');
         expect(inferUuidTypeFromVolumes('missing', volumes)).toBeNull();
+    });
+
+    it('offers an SD card serial option only for volumes with a CID', () => {
+        const options = buildUuidSourceOptions(
+            [
+                {
+                    name: 'Untitled',
+                    mount_point: '/Volumes/Untitled',
+                    volume_uuid: 'volume-sd',
+                    sd_card_cid: '39:MTG2c:17826466',
+                },
+                {
+                    name: 'USB-Reader',
+                    mount_point: '/Volumes/USB-Reader',
+                    volume_uuid: 'volume-usb',
+                },
+            ],
+            () => '256 GB',
+            { sdCardLabel: 'SD Card Serial' }
+        );
+
+        expect(options.map((option) => option.value)).toEqual([
+            'sdcard::39:MTG2c:17826466',
+            'volume::volume-sd',
+            'volume::volume-usb',
+        ]);
+        expect(options[0].uuidType).toBe('sdcard');
+        expect(options[0].label).toContain('SD Card Serial: 39:MTG2c:17826466');
+    });
+
+    it('round-trips SD card CID tokens and option values', () => {
+        expect(buildUuidSourceToken('sdcard', '39:MTG2c:17826466', 'DCIM')).toBe(
+            '[SD_CARD_CID:39:MTG2c:17826466]/DCIM'
+        );
+        expect(parseUuidSourceToken('[SD_CARD_CID:39:MTG2c:17826466]/DCIM')).toEqual({
+            tokenType: 'sdcard',
+            uuid: '39:MTG2c:17826466',
+            subPath: '/DCIM',
+        });
+        expect(parseUuidOptionValue(buildUuidOptionValue('sdcard', '39:MTG2c:17826466'))).toEqual({
+            uuidType: 'sdcard',
+            uuid: '39:MTG2c:17826466',
+        });
+        expect(
+            inferUuidTypeFromVolumes('39:MTG2c:17826466', [
+                { name: 'Untitled', mount_point: '/Volumes/Untitled', sd_card_cid: '39:MTG2c:17826466' },
+            ])
+        ).toBe('sdcard');
+        expect(isSourceUuidType('sdcard')).toBe(true);
+        expect(isSourceUuidType('legacy')).toBe(false);
     });
 
     it('converts selected directory path to UUID sub path', () => {

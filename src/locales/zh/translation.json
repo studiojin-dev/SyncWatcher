@@ -96,6 +96,7 @@
       "sourceType": "源类型",
       "sourceTypePath": "目录路径",
       "sourceTypeUuid": "卷 UUID",
+      "sdCardSerial": "SD 卡序列号",
       "selectVolume": "选择卷",
       "savedUuidSourceLabel": "已保存的 UUID 源（未挂载）",
       "savedUuidSourceHint": "该任务保留已保存的 UUID 源。若要浏览其中内容，请重新挂载该介质或选择其他卷。",

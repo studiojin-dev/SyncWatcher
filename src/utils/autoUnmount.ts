@@ -5,7 +5,7 @@ export interface AutoUnmountTaskLike {
     autoUnmount?: boolean;
 }
 
-const UUID_SOURCE_PREFIXES = ['[DISK_UUID:', '[VOLUME_UUID:', '[UUID:'] as const;
+const UUID_SOURCE_PREFIXES = ['[DISK_UUID:', '[VOLUME_UUID:', '[SD_CARD_CID:', '[UUID:'] as const;
 
 export function isUuidSource(source: string | null | undefined, sourceType?: 'path' | 'uuid'): boolean {
     if (typeof source !== 'string' || source.length === 0) {

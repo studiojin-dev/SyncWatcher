@@ -4,6 +4,7 @@ import type { FormEventHandler } from 'react';
 import { CardAnimation } from '../../components/ui/Animations';
 import type { SyncTask } from '../../hooks/useSyncTasks';
 import type { TranslateFn } from './helpers';
+import { uuidTypeLabel } from '../syncTaskUuid';
 import type { SyncTaskFormController } from './useSyncTaskFormController';
 
 interface SyncTaskFormModalProps {
@@ -201,11 +202,11 @@ function SyncTaskFormModal({
                 {form.sourceUuid ? (
                   <div className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-secondary)] p-2 border-2 border-dashed border-[var(--border-main)]">
                     <span className="font-bold">
-                      {form.sourceTokenType === 'volume'
-                        ? 'Volume UUID'
-                        : form.sourceTokenType === 'legacy'
-                          ? 'Legacy UUID'
-                        : 'Disk UUID'}
+                      {uuidTypeLabel(form.sourceTokenType || 'disk', {
+                        sdCardLabel: t('syncTasks.sdCardSerial', {
+                          defaultValue: 'SD Card Serial',
+                        }),
+                      })}
                       :
                     </span>{' '}
                     {form.sourceUuid}

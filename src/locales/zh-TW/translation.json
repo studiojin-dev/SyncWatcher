@@ -96,6 +96,7 @@
       "sourceType": "來源類型",
       "sourceTypePath": "目錄路徑",
       "sourceTypeUuid": "磁碟區 UUID",
+      "sdCardSerial": "SD 卡序號",
       "selectVolume": "選擇磁碟區",
       "savedUuidSourceLabel": "已保存的 UUID 來源（未掛載）",
       "savedUuidSourceHint": "此任務會保留已保存的 UUID 來源。若要瀏覽其中內容，請重新掛載該媒體或選擇其他磁碟區。",

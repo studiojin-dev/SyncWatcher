@@ -96,6 +96,7 @@
       "sourceType": "Tipo de Origen",
       "sourceTypePath": "Ruta de Directorio",
       "sourceTypeUuid": "UUID de Volumen",
+      "sdCardSerial": "Número de serie de la tarjeta SD",
       "selectVolume": "Seleccionar Volumen",
       "savedUuidSourceLabel": "Origen UUID guardado (sin montar)",
       "savedUuidSourceHint": "Esta tarea conserva su origen UUID guardado. Vuelva a montar el medio para explorarlo o elija otro volumen.",

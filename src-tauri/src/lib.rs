@@ -2486,6 +2486,7 @@ async fn read_text_preview(path: &str, max_bytes: usize) -> (Option<String>, boo
 enum UuidTokenType {
     Disk,
     Volume,
+    SdCard,
     Legacy,
 }
 
@@ -2500,6 +2501,8 @@ fn parse_uuid_source_path(path_str: &str) -> Option<ParsedUuidSourcePath<'_>> {
         Some(("[DISK_UUID:", UuidTokenType::Disk))
     } else if path_str.starts_with("[VOLUME_UUID:") {
         Some(("[VOLUME_UUID:", UuidTokenType::Volume))
+    } else if path_str.starts_with("[SD_CARD_CID:") {
+        Some(("[SD_CARD_CID:", UuidTokenType::SdCard))
     } else if path_str.starts_with("[UUID:") {
         Some(("[UUID:", UuidTokenType::Legacy))
     } else {
@@ -2519,6 +2522,7 @@ fn parse_uuid_source_path(path_str: &str) -> Option<ParsedUuidSourcePath<'_>> {
 fn has_uuid_source_prefix(path_str: &str) -> bool {
     path_str.starts_with("[DISK_UUID:")
         || path_str.starts_with("[VOLUME_UUID:")
+        || path_str.starts_with("[SD_CARD_CID:")
         || path_str.starts_with("[UUID:")
 }
 
@@ -2526,6 +2530,7 @@ fn uuid_token_label(token_type: UuidTokenType) -> &'static str {
     match token_type {
         UuidTokenType::Disk => "DISK_UUID",
         UuidTokenType::Volume => "VOLUME_UUID",
+        UuidTokenType::SdCard => "SD_CARD_CID",
         UuidTokenType::Legacy => "UUID",
     }
 }
@@ -2534,6 +2539,7 @@ fn uuid_token_prefix(token_type: UuidTokenType) -> &'static str {
     match token_type {
         UuidTokenType::Disk => "[DISK_UUID:",
         UuidTokenType::Volume => "[VOLUME_UUID:",
+        UuidTokenType::SdCard => "[SD_CARD_CID:",
         UuidTokenType::Legacy => "[UUID:",
     }
 }
@@ -2606,26 +2612,7 @@ fn resolve_path_with_uuid_outcome(path_str: &str) -> Result<ResolvePathWithUuidO
     let monitor = DiskMonitor::new();
     let volumes = monitor.list_volumes().map_err(|e| e.to_string())?;
 
-    let volume = match parsed.token_type {
-        UuidTokenType::Disk => volumes
-            .iter()
-            .find(|v| v.disk_uuid.as_deref() == Some(parsed.uuid))
-            .cloned(),
-        UuidTokenType::Volume => volumes
-            .iter()
-            .find(|v| v.volume_uuid.as_deref() == Some(parsed.uuid))
-            .cloned(),
-        UuidTokenType::Legacy => volumes
-            .iter()
-            .find(|v| v.disk_uuid.as_deref() == Some(parsed.uuid))
-            .cloned()
-            .or_else(|| {
-                volumes
-                    .iter()
-                    .find(|v| v.volume_uuid.as_deref() == Some(parsed.uuid))
-                    .cloned()
-            }),
-    };
+    let volume = select_volume_for_task(parsed.token_type, parsed.uuid, &volumes).cloned();
 
     let Some(volume) = volume else {
         return Ok(ResolvePathWithUuidOutcome::UuidNotMounted {
@@ -2756,6 +2743,7 @@ struct SyncTaskSourceRecommendationsEnvelope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecommendationConfidence {
+    SdCardCid,
     DeviceSerial,
     DeviceGuid,
     MediaUuid,
@@ -2769,7 +2757,8 @@ impl RecommendationConfidence {
             RecommendationConfidence::Composite if has_transport_serial => "medium",
             RecommendationConfidence::Composite => "fallback",
             RecommendationConfidence::LastSeenUuid => "medium",
-            RecommendationConfidence::DeviceSerial
+            RecommendationConfidence::SdCardCid
+            | RecommendationConfidence::DeviceSerial
             | RecommendationConfidence::DeviceGuid
             | RecommendationConfidence::MediaUuid => "high",
         }
@@ -2794,6 +2783,7 @@ fn task_uuid_descriptor(
         let token_type = match uuid_type {
             config_store::SourceUuidType::Disk => UuidTokenType::Disk,
             config_store::SourceUuidType::Volume => UuidTokenType::Volume,
+            config_store::SourceUuidType::SdCard => UuidTokenType::SdCard,
         };
         return Some((token_type, uuid_type.clone(), uuid.clone()));
     }
@@ -2802,6 +2792,7 @@ fn task_uuid_descriptor(
     let preferred_type = match parsed.token_type {
         UuidTokenType::Disk => config_store::SourceUuidType::Disk,
         UuidTokenType::Volume => config_store::SourceUuidType::Volume,
+        UuidTokenType::SdCard => config_store::SourceUuidType::SdCard,
         UuidTokenType::Legacy => config_store::SourceUuidType::Disk,
     };
     Some((parsed.token_type, preferred_type, parsed.uuid.to_string()))
@@ -2820,7 +2811,10 @@ fn effective_source_identity(task: &SyncTaskRecord) -> SourceIdentitySnapshot {
             && (preferred_type == config_store::SourceUuidType::Volume
                 || token_type == UuidTokenType::Volume)
         {
-            identity.last_seen_volume_uuid = Some(uuid);
+            identity.last_seen_volume_uuid = Some(uuid.clone());
+        }
+        if identity.sd_card_cid.is_none() && token_type == UuidTokenType::SdCard {
+            identity.sd_card_cid = Some(uuid);
         }
     }
     identity
@@ -2838,6 +2832,9 @@ fn select_volume_for_task<'a>(
         UuidTokenType::Volume => volumes
             .iter()
             .find(|volume| volume.volume_uuid.as_deref() == Some(uuid)),
+        UuidTokenType::SdCard => volumes
+            .iter()
+            .find(|volume| volume.sd_card_cid.as_deref() == Some(uuid)),
         UuidTokenType::Legacy => volumes
             .iter()
             .find(|volume| volume.disk_uuid.as_deref() == Some(uuid))
@@ -2866,6 +2863,7 @@ fn build_source_identity_snapshot(
         volume_name: trim_to_option(Some(volume.name.clone())),
         last_seen_disk_uuid: trim_to_option(volume.disk_uuid.clone()),
         last_seen_volume_uuid: trim_to_option(volume.volume_uuid.clone()),
+        sd_card_cid: trim_to_option(volume.sd_card_cid.clone()),
     })
 }
 
@@ -2961,6 +2959,10 @@ fn resolve_recommended_uuid(
     preferred_type: config_store::SourceUuidType,
     volume: &system_integration::VolumeInfo,
 ) -> Option<(config_store::SourceUuidType, String)> {
+    // 내장 SD 슬롯 카드는 포맷에도 유지되는 CID를 우선 제안한다.
+    if let Some(cid) = trim_to_option(volume.sd_card_cid.clone()) {
+        return Some((config_store::SourceUuidType::SdCard, cid));
+    }
     match preferred_type {
         config_store::SourceUuidType::Disk => volume
             .disk_uuid
@@ -2972,7 +2974,7 @@ fn resolve_recommended_uuid(
                     .clone()
                     .map(|uuid| (config_store::SourceUuidType::Volume, uuid))
             }),
-        config_store::SourceUuidType::Volume => volume
+        config_store::SourceUuidType::Volume | config_store::SourceUuidType::SdCard => volume
             .volume_uuid
             .clone()
             .map(|uuid| (config_store::SourceUuidType::Volume, uuid))
@@ -2998,19 +3000,17 @@ fn build_recommendation(
     let token_label = match current_token_type {
         UuidTokenType::Disk => "disk",
         UuidTokenType::Volume => "volume",
+        UuidTokenType::SdCard => "sdcard",
         UuidTokenType::Legacy => "legacy",
     };
-    let proposed_type_label = match proposed_uuid_type {
-        config_store::SourceUuidType::Disk => "disk",
-        config_store::SourceUuidType::Volume => "volume",
+    let (proposed_type_label, proposed_token_type) = match proposed_uuid_type {
+        config_store::SourceUuidType::Disk => ("disk", UuidTokenType::Disk),
+        config_store::SourceUuidType::Volume => ("volume", UuidTokenType::Volume),
+        config_store::SourceUuidType::SdCard => ("sdcard", UuidTokenType::SdCard),
     };
     let suggested_source = format!(
         "{}{}]{}",
-        if proposed_uuid_type == config_store::SourceUuidType::Disk {
-            "[DISK_UUID:"
-        } else {
-            "[VOLUME_UUID:"
-        },
+        uuid_token_prefix(proposed_token_type),
         proposed_uuid,
         normalized_uuid_sub_path_for_task(task)?
     );
@@ -3046,12 +3046,20 @@ fn find_task_source_recommendation(
 
     let exact_checks = [
         (
+            RecommendationConfidence::SdCardCid,
+            identity.sd_card_cid.clone(),
+            "SD card CID matched".to_string(),
+            Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
+                volume.sd_card_cid.as_deref() == Some(value)
+            }) as Box<dyn Fn(&system_integration::VolumeInfo, &str) -> bool>,
+        ),
+        (
             RecommendationConfidence::DeviceSerial,
             identity.device_serial.clone(),
             "device serial matched".to_string(),
             Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
                 volume.device_serial.as_deref() == Some(value)
-            }) as Box<dyn Fn(&system_integration::VolumeInfo, &str) -> bool>,
+            }),
         ),
         (
             RecommendationConfidence::DeviceGuid,

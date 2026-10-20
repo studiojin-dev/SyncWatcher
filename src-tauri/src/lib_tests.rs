@@ -286,6 +286,7 @@ mod integration_tests {
         let token = match source_uuid_type {
             SourceUuidType::Disk => "DISK_UUID",
             SourceUuidType::Volume => "VOLUME_UUID",
+            SourceUuidType::SdCard => "SD_CARD_CID",
         };
         SyncTaskRecord {
             id: id.to_string(),
@@ -330,6 +331,7 @@ mod integration_tests {
             transport_serial: None,
             bus_protocol: None,
             filesystem_name: None,
+            sd_card_cid: None,
         }
     }
 
@@ -2998,6 +3000,11 @@ mod integration_tests {
         let legacy = legacy.unwrap();
         assert_eq!(legacy.uuid, "legacy-a");
         assert_eq!(legacy.sub_path, "/RAW");
+
+        let sd_card = parse_uuid_source_path("[SD_CARD_CID:39:MTG2c:17826466]/DCIM");
+        let sd_card = sd_card.expect("SD card CID token should parse");
+        assert_eq!(sd_card.uuid, "39:MTG2c:17826466");
+        assert_eq!(sd_card.sub_path, "/DCIM");
     }
 
     #[test]
@@ -3477,6 +3484,73 @@ mod integration_tests {
         );
 
         assert_eq!(selection.candidate_task_id.as_deref(), Some("watch-a"));
+    }
+
+    #[test]
+    fn test_sd_card_task_with_mounted_card_needs_no_recommendation() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::SdCard,
+            "39:MTG2c:17826466",
+            "/DCIM",
+            None,
+        );
+        // 카메라 포맷으로 디스크/볼륨 UUID가 바뀌어도 CID가 같으면 소스를 찾는다.
+        let mut card = build_volume("Untitled", "/Volumes/Untitled");
+        card.disk_uuid = Some("disk-after-format".to_string());
+        card.volume_uuid = Some("volume-after-format".to_string());
+        card.sd_card_cid = Some("39:MTG2c:17826466".to_string());
+
+        assert!(find_task_source_recommendation(&task, &[card]).is_none());
+    }
+
+    #[test]
+    fn test_source_recommendation_proposes_sd_card_cid_after_format() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "volume-before-format",
+            "/DCIM",
+            Some(SourceIdentitySnapshot {
+                sd_card_cid: Some("39:MTG2c:17826466".to_string()),
+                ..SourceIdentitySnapshot::default()
+            }),
+        );
+        let mut card = build_volume("Untitled", "/Volumes/Untitled");
+        card.disk_uuid = Some("disk-after-format".to_string());
+        card.volume_uuid = Some("volume-after-format".to_string());
+        card.sd_card_cid = Some("39:MTG2c:17826466".to_string());
+        let mut other = build_volume("Other", "/Volumes/Other");
+        other.volume_uuid = Some("other-volume".to_string());
+        other.sd_card_cid = Some("27:SMI00:1".to_string());
+
+        let recommendation = find_task_source_recommendation(&task, &[other, card]).unwrap();
+        assert_eq!(recommendation.proposed_uuid, "39:MTG2c:17826466");
+        assert_eq!(recommendation.proposed_uuid_type, "sdcard");
+        assert_eq!(
+            recommendation.suggested_source,
+            "[SD_CARD_CID:39:MTG2c:17826466]/DCIM"
+        );
+        assert_eq!(recommendation.confidence_label, "high");
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "SD card CID matched"));
+    }
+
+    #[test]
+    fn test_refresh_uuid_source_identity_captures_sd_card_cid() {
+        let mut task = build_uuid_task("task-1", SourceUuidType::Disk, "disk-a", "/", None);
+        let mut card = build_volume("Untitled", "/Volumes/Untitled");
+        card.disk_uuid = Some("disk-a".to_string());
+        card.sd_card_cid = Some("39:MTG2c:17826466".to_string());
+
+        refresh_uuid_source_identity(&mut task, &[card]);
+        assert_eq!(
+            task.source_identity
+                .and_then(|identity| identity.sd_card_cid),
+            Some("39:MTG2c:17826466".to_string())
+        );
     }
 
     #[test]

@@ -29,7 +29,7 @@ export interface SyncTask {
     /** UUID 기반 소스일 때 사용할 Disk UUID */
     sourceUuid?: string;
     /** UUID 기반 소스일 때 UUID 타입 */
-    sourceUuidType?: 'disk' | 'volume';
+    sourceUuidType?: 'disk' | 'volume' | 'sdcard';
     /** UUID 볼륨 내 하위 경로 (예: /DCIM/100MSDCF) */
     sourceSubPath?: string;
     /** UUID 소스 재식별을 위한 보조 스냅샷 */
@@ -44,6 +44,7 @@ export interface SyncTask {
         volumeName?: string;
         lastSeenDiskUuid?: string;
         lastSeenVolumeUuid?: string;
+        sdCardCid?: string;
     };
     recurringSchedules?: RecurringSchedule[];
 }

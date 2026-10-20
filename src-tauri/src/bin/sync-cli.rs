@@ -67,6 +67,9 @@ async fn main() -> anyhow::Result<()> {
                         "{:<20} {:<15} {:<15} {:<15}",
                         vol.name, total_label, avail_label, type_str
                     );
+                    if let Some(cid) = vol.sd_card_cid.as_deref() {
+                        println!("  SD Card CID: {cid}");
+                    }
                 }
             }
             Err(e) => anyhow::bail!("Failed to list volumes: {e}"),

@@ -96,6 +96,7 @@
       "sourceType": "Source Type",
       "sourceTypePath": "Directory Path",
       "sourceTypeUuid": "Volume UUID",
+      "sdCardSerial": "SD Card Serial",
       "selectVolume": "Select Volume",
       "savedUuidSourceLabel": "Saved UUID source (not mounted)",
       "savedUuidSourceHint": "This task keeps its saved UUID source. Mount the media again to browse inside it or pick a different volume.",

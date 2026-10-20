@@ -17,6 +17,8 @@ export interface VolumeInfo {
     transport_serial?: string;
     bus_protocol?: string;
     filesystem_name?: string;
+    /** 내장 SD 슬롯 카드 CID ("MID:PNM:PSN") */
+    sd_card_cid?: string;
 }
 
 /**

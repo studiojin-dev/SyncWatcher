@@ -42,6 +42,9 @@ pub struct VolumeInfo {
     pub transport_serial: Option<String>,
     pub bus_protocol: Option<String>,
     pub filesystem_name: Option<String>,
+    /// 내장 SD 슬롯 카드의 CID 식별자 ("MID:PNM:PSN"). 포맷해도 변하지 않는다.
+    #[serde(default)]
+    pub sd_card_cid: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -54,6 +57,7 @@ struct VolumeMetadata {
     transport_serial: Option<String>,
     bus_protocol: Option<String>,
     filesystem_name: Option<String>,
+    sd_card_cid: Option<String>,
     volume_name: Option<String>,
     device_identifier: Option<String>,
     parent_whole_disk: Option<String>,
@@ -124,6 +128,7 @@ impl DiskMonitor {
                 .or_else(|| plist_nested_string(dict, &["USB Device Info", "USB Serial Number"])),
             bus_protocol: plist_string(dict, "BusProtocol"),
             filesystem_name: plist_string(dict, "FilesystemName"),
+            sd_card_cid: None,
             volume_name: plist_string(dict, "VolumeName"),
             device_identifier: plist_string(dict, "DeviceIdentifier"),
             parent_whole_disk: plist_string(dict, "ParentWholeDisk"),
@@ -141,6 +146,7 @@ impl DiskMonitor {
         let mount_entries = list_mount_entries()?;
         let io_registry_identities = load_io_registry_identities();
         let usb_mass_storage_identities = load_usb_mass_storage_identities();
+        let sd_card_cids = load_sd_card_cids();
         let mut volumes = Vec::new();
 
         for entry in mount_entries {
@@ -158,6 +164,7 @@ impl DiskMonitor {
                         metadata,
                         &io_registry_identities,
                         &usb_mass_storage_identities,
+                        &sd_card_cids,
                     )
                 })
             };
@@ -171,6 +178,7 @@ impl DiskMonitor {
                 transport_serial,
                 bus_protocol,
                 filesystem_name,
+                sd_card_cid,
             ) = metadata
                 .as_ref()
                 .map(|m| {
@@ -183,9 +191,10 @@ impl DiskMonitor {
                         m.transport_serial.clone(),
                         m.bus_protocol.clone(),
                         m.filesystem_name.clone(),
+                        m.sd_card_cid.clone(),
                     )
                 })
-                .unwrap_or((None, None, None, None, None, None, None, None));
+                .unwrap_or((None, None, None, None, None, None, None, None, None));
 
             volumes.push(volume_info_from_mount(
                 &entry,
@@ -199,6 +208,7 @@ impl DiskMonitor {
                 transport_serial,
                 bus_protocol,
                 filesystem_name,
+                sd_card_cid,
             ));
         }
 
@@ -519,10 +529,102 @@ fn load_usb_mass_storage_identities() -> HashMap<String, UsbMassStorageIdentity>
     identities
 }
 
+/// plist 값이 정수 또는 문자열일 때 문자열로 정규화한다.
+fn plist_int_or_string(dict: &plist::Dictionary, key: &str) -> Option<String> {
+    let value = dict.get(key)?;
+    if let Some(unsigned) = value.as_unsigned_integer() {
+        return Some(unsigned.to_string());
+    }
+    if let Some(signed) = value.as_signed_integer() {
+        return Some(signed.to_string());
+    }
+    normalize_optional_string(value.as_string().map(|value| value.to_string()))
+}
+
+/// SD 카드 CID 필드(Manufacturer ID, Product Name, Serial Number)로 "MID:PNM:PSN"을 만든다.
+/// 세 값이 모두 있어야 식별자로 인정한다.
+fn sd_card_cid_from_dict(dict: &plist::Dictionary) -> Option<String> {
+    let manufacturer_id = plist_int_or_string(dict, "Manufacturer ID")?;
+    let product_name = plist_int_or_string(dict, "Product Name")?;
+    let serial_number = plist_int_or_string(dict, "Serial Number")?;
+    // 소스 토큰("[SD_CARD_CID:...]")을 깨뜨리는 문자는 식별자로 쓰지 않는다.
+    if [&manufacturer_id, &product_name, &serial_number]
+        .iter()
+        .any(|part| part.contains(']') || part.contains('['))
+    {
+        return None;
+    }
+    Some(format!("{manufacturer_id}:{product_name}:{serial_number}"))
+}
+
+fn sd_card_cid_from_node(dict: &plist::Dictionary) -> Option<String> {
+    ["Card Characteristics", "Metadata"]
+        .iter()
+        .filter_map(|key| dict.get(key).and_then(|value| value.as_dictionary()))
+        .find_map(sd_card_cid_from_dict)
+}
+
+fn collect_sd_card_cids(
+    node: &plist::Value,
+    inherited_cid: Option<String>,
+    cids: &mut HashMap<String, String>,
+) {
+    let Some(dict) = node.as_dictionary() else {
+        return;
+    };
+
+    // 슬롯 노드는 "Card Characteristics"를, 전송 상태 자식 노드는 "Metadata"를 노출한다.
+    // 블록 스토리지 서브트리는 슬롯의 형제 자식이므로 슬롯 수준에서 CID를 결정해 내려준다.
+    let current_cid = inherited_cid
+        .or_else(|| sd_card_cid_from_node(dict))
+        .or_else(|| {
+            plist_children(dict)
+                .iter()
+                .filter_map(|child| child.as_dictionary())
+                .find_map(sd_card_cid_from_node)
+        });
+
+    if let (Some(bsd_name), Some(cid)) = (plist_string(dict, "BSD Name"), current_cid.as_ref()) {
+        cids.entry(bsd_name).or_insert_with(|| cid.clone());
+    }
+
+    for child in plist_children(dict) {
+        collect_sd_card_cids(child, current_cid.clone(), cids);
+    }
+}
+
+/// `ioreg -a -r -c AppleSDXCSlot -l` 출력에서 BSD 이름 → SD 카드 CID 매핑을 만든다 (순수 함수).
+fn parse_sd_card_cids_from_ioreg_plist(data: &[u8]) -> HashMap<String, String> {
+    let mut cids = HashMap::new();
+    let Ok(value) = plist::from_bytes::<plist::Value>(data) else {
+        return cids;
+    };
+    if let Some(items) = value.as_array() {
+        for item in items {
+            collect_sd_card_cids(item, None, &mut cids);
+        }
+    }
+    cids
+}
+
+fn load_sd_card_cids() -> HashMap<String, String> {
+    let Ok(output) = Command::new("ioreg")
+        .args(["-a", "-r", "-c", "AppleSDXCSlot", "-l"])
+        .output()
+    else {
+        return HashMap::new();
+    };
+    if !output.status.success() {
+        return HashMap::new();
+    }
+    parse_sd_card_cids_from_ioreg_plist(&output.stdout)
+}
+
 fn enrich_volume_metadata(
     mut metadata: VolumeMetadata,
     io_registry_identities: &HashMap<String, IoRegistryIdentity>,
     usb_mass_storage_identities: &HashMap<String, UsbMassStorageIdentity>,
+    sd_card_cids: &HashMap<String, String>,
 ) -> VolumeMetadata {
     let lookup_keys = [
         metadata.device_identifier.clone(),
@@ -554,6 +656,10 @@ fn enrich_volume_metadata(
                 .transport_serial
                 .clone()
                 .or_else(|| identity.transport_serial.clone());
+        }
+
+        if metadata.sd_card_cid.is_none() {
+            metadata.sd_card_cid = sd_card_cids.get(&key).cloned();
         }
     }
 
@@ -680,6 +786,7 @@ fn volume_info_from_mount(
     transport_serial: Option<String>,
     bus_protocol: Option<String>,
     filesystem_name: Option<String>,
+    sd_card_cid: Option<String>,
 ) -> VolumeInfo {
     let (total_bytes, available_bytes) = if is_network {
         (None, None)
@@ -706,6 +813,7 @@ fn volume_info_from_mount(
         transport_serial,
         bus_protocol,
         filesystem_name,
+        sd_card_cid,
     }
 }
 
@@ -893,7 +1001,7 @@ mod tests {
         };
 
         let volume = volume_info_from_mount(
-            &entry, true, false, None, None, None, None, None, None, None, None,
+            &entry, true, false, None, None, None, None, None, None, None, None, None,
         );
 
         assert!(volume.is_network);
@@ -972,6 +1080,130 @@ mod tests {
         ));
     }
 
+    const SDXC_SLOT_FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>Card Present</key>
+        <true/>
+        <key>Metadata</key>
+        <dict/>
+        <key>Card Characteristics</key>
+        <dict>
+            <key>Manufacturer ID</key>
+            <integer>39</integer>
+            <key>Product Name</key>
+            <string>MTG2c</string>
+            <key>Serial Number</key>
+            <integer>17826466</integer>
+            <key>Manufacturing Date</key>
+            <string>2025-04</string>
+            <key>Block Count</key>
+            <integer>493125632</integer>
+        </dict>
+        <key>IORegistryEntryChildren</key>
+        <array>
+            <dict>
+                <key>IOObjectClass</key>
+                <string>IOPortTransportStateSD</string>
+                <key>Metadata</key>
+                <dict>
+                    <key>Manufacturer ID</key>
+                    <integer>39</integer>
+                    <key>Product Name</key>
+                    <string>MTG2c</string>
+                    <key>Serial Number</key>
+                    <integer>17826466</integer>
+                </dict>
+            </dict>
+            <dict>
+                <key>IOObjectClass</key>
+                <string>AppleSDXCBlockStorageDevice</string>
+                <key>IORegistryEntryChildren</key>
+                <array>
+                    <dict>
+                        <key>IORegistryEntryChildren</key>
+                        <array>
+                            <dict>
+                                <key>BSD Name</key>
+                                <string>disk14</string>
+                                <key>IORegistryEntryChildren</key>
+                                <array>
+                                    <dict>
+                                        <key>IORegistryEntryChildren</key>
+                                        <array>
+                                            <dict>
+                                                <key>BSD Name</key>
+                                                <string>disk14s1</string>
+                                            </dict>
+                                        </array>
+                                    </dict>
+                                </array>
+                            </dict>
+                        </array>
+                    </dict>
+                </array>
+            </dict>
+        </array>
+    </dict>
+</array>
+</plist>"#;
+
+    #[test]
+    fn test_parse_sd_card_cids_maps_bsd_names_to_cid() {
+        let cids = parse_sd_card_cids_from_ioreg_plist(SDXC_SLOT_FIXTURE.as_bytes());
+        assert_eq!(
+            cids.get("disk14").map(String::as_str),
+            Some("39:MTG2c:17826466")
+        );
+        assert_eq!(
+            cids.get("disk14s1").map(String::as_str),
+            Some("39:MTG2c:17826466")
+        );
+        assert_eq!(cids.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_sd_card_cids_falls_back_to_transport_metadata() {
+        let xml = SDXC_SLOT_FIXTURE.replace("<key>Card Characteristics</key>", "<key>Unused</key>");
+        let cids = parse_sd_card_cids_from_ioreg_plist(xml.as_bytes());
+        assert_eq!(
+            cids.get("disk14s1").map(String::as_str),
+            Some("39:MTG2c:17826466")
+        );
+    }
+
+    #[test]
+    fn test_parse_sd_card_cids_requires_complete_cid() {
+        let xml = SDXC_SLOT_FIXTURE.replace("<string>MTG2c</string>", "<string> </string>");
+        let cids = parse_sd_card_cids_from_ioreg_plist(xml.as_bytes());
+        assert!(cids.is_empty());
+    }
+
+    #[test]
+    fn test_parse_sd_card_cids_handles_empty_or_invalid_output() {
+        let empty = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><array/></plist>"#;
+        assert!(parse_sd_card_cids_from_ioreg_plist(empty.as_bytes()).is_empty());
+        assert!(parse_sd_card_cids_from_ioreg_plist(b"").is_empty());
+    }
+
+    #[test]
+    fn test_enrich_volume_metadata_applies_sd_card_cid_from_parent_disk() {
+        let metadata = VolumeMetadata {
+            device_identifier: Some("disk14s1".to_string()),
+            parent_whole_disk: Some("disk14".to_string()),
+            ..Default::default()
+        };
+        let mut sd_card_cids = HashMap::new();
+        sd_card_cids.insert("disk14".to_string(), "39:MTG2c:17826466".to_string());
+
+        let enriched =
+            enrich_volume_metadata(metadata, &HashMap::new(), &HashMap::new(), &sd_card_cids);
+        assert_eq!(enriched.sd_card_cid.as_deref(), Some("39:MTG2c:17826466"));
+    }
+
     #[test]
     fn test_find_matching_removable_mount_root() {
         let removable_volumes = vec![
@@ -991,6 +1223,7 @@ mod tests {
                 transport_serial: None,
                 bus_protocol: None,
                 filesystem_name: None,
+                sd_card_cid: None,
             },
             VolumeInfo {
                 name: "USB-NESTED".to_string(),
@@ -1008,6 +1241,7 @@ mod tests {
                 transport_serial: None,
                 bus_protocol: None,
                 filesystem_name: None,
+                sd_card_cid: None,
             },
         ];
 

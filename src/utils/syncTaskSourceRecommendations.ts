@@ -1,5 +1,6 @@
 import type { SyncTask } from '../hooks/useSyncTasks';
 import {
+  isSourceUuidType,
   normalizeUuidSubPath,
   parseUuidSourceToken,
   type SourceUuidType,
@@ -36,13 +37,13 @@ export function recommendationKey(
 }
 
 export function isUuidSourceResolutionError(message: string): boolean {
-  return /Volume with (DISK_UUID|VOLUME_UUID|UUID)\s+.+not found \(not mounted\?\)/i.test(
+  return /Volume with (DISK_UUID|VOLUME_UUID|SD_CARD_CID|UUID)\s+.+not found \(not mounted\?\)/i.test(
     message,
   );
 }
 
 function toSourceUuidType(value: string): SourceUuidType {
-  return value === 'volume' ? 'volume' : 'disk';
+  return isSourceUuidType(value) ? value : 'disk';
 }
 
 export function buildRecommendationTaskUpdate(

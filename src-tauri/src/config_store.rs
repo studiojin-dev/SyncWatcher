@@ -73,6 +73,9 @@ pub enum SourceType {
 pub enum SourceUuidType {
     Disk,
     Volume,
+    /// 내장 SD 슬롯 카드의 CID("MID:PNM:PSN"). 카메라 포맷 후에도 유지된다.
+    #[serde(rename = "sdcard")]
+    SdCard,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,6 +255,8 @@ pub struct SourceIdentitySnapshot {
     pub last_seen_disk_uuid: Option<String>,
     #[serde(default)]
     pub last_seen_volume_uuid: Option<String>,
+    #[serde(default)]
+    pub sd_card_cid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1591,6 +1596,7 @@ fn normalize_task_source(task: &SyncTaskRecord) -> String {
             let prefix = match uuid_type {
                 SourceUuidType::Disk => "[DISK_UUID:",
                 SourceUuidType::Volume => "[VOLUME_UUID:",
+                SourceUuidType::SdCard => "[SD_CARD_CID:",
             };
             return format!(
                 "{prefix}{uuid}]{}",
@@ -1624,6 +1630,7 @@ fn should_enable_auto_unmount(task: &SyncTaskRecord) -> bool {
     let is_uuid = task.source_type == Some(SourceType::Uuid)
         || source.starts_with("[DISK_UUID:")
         || source.starts_with("[VOLUME_UUID:")
+        || source.starts_with("[SD_CARD_CID:")
         || source.starts_with("[UUID:");
     task.auto_unmount && task.watch_mode && is_uuid
 }
@@ -1693,6 +1700,67 @@ mod tests {
 
         assert_eq!(task.source, "[DISK_UUID:disk-a]/DCIM");
         assert!(task.auto_unmount);
+    }
+
+    #[test]
+    fn source_uuid_type_serializes_sd_card_and_keeps_legacy_values() {
+        assert_eq!(
+            serde_json::to_string(&SourceUuidType::SdCard).unwrap(),
+            "\"sdcard\""
+        );
+        let parsed: Vec<SourceUuidType> =
+            serde_json::from_str(r#"["disk","volume","sdcard"]"#).unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                SourceUuidType::Disk,
+                SourceUuidType::Volume,
+                SourceUuidType::SdCard
+            ]
+        );
+        // 기존 설정의 sourceIdentity에는 sdCardCid가 없다.
+        let identity: SourceIdentitySnapshot =
+            serde_json::from_str(r#"{"deviceSerial":"S1","lastSeenDiskUuid":"d"}"#).unwrap();
+        assert_eq!(identity.sd_card_cid, None);
+    }
+
+    #[test]
+    fn normalize_sd_card_source_rebuilds_token() {
+        let task = normalize_sync_task(SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/tmp/source".to_string(),
+            target: "/tmp/target".to_string(),
+            source_bookmark: None,
+            source_network_mount: None,
+            target_bookmark: None,
+            target_network_mount: None,
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: true,
+            auto_unmount: true,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+        });
+        // source 문자열만 있는 레거시 경로에서도 SD 토큰을 UUID 소스로 인식해야 한다.
+        let mut legacy = task.expect("task should normalize");
+        legacy.source = "[SD_CARD_CID:39:MTG2c:17826466]/DCIM".to_string();
+        legacy.auto_unmount = true;
+        assert!(should_enable_auto_unmount(&legacy));
+
+        let mut typed = legacy.clone();
+        typed.source = String::new();
+        typed.source_type = Some(SourceType::Uuid);
+        typed.source_uuid = Some("39:MTG2c:17826466".to_string());
+        typed.source_uuid_type = Some(SourceUuidType::SdCard);
+        typed.source_sub_path = Some("DCIM".to_string());
+        let typed = normalize_sync_task(typed).expect("task should normalize");
+        assert_eq!(typed.source, "[SD_CARD_CID:39:MTG2c:17826466]/DCIM");
     }
 
     #[test]

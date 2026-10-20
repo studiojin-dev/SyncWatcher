@@ -1,4 +1,4 @@
-export type SourceUuidType = 'disk' | 'volume';
+export type SourceUuidType = 'disk' | 'volume' | 'sdcard';
 export type UuidTokenType = SourceUuidType | 'legacy';
 
 export interface UuidSelectableVolume {
@@ -6,6 +6,11 @@ export interface UuidSelectableVolume {
     mount_point: string;
     disk_uuid?: string;
     volume_uuid?: string;
+    sd_card_cid?: string;
+}
+
+export interface UuidSourceOptionLabels {
+    sdCardLabel?: string;
 }
 
 export interface UuidSourceOption {
@@ -25,7 +30,41 @@ export interface ParsedUuidSourceToken {
 
 const DISK_UUID_PREFIX = '[DISK_UUID:';
 const VOLUME_UUID_PREFIX = '[VOLUME_UUID:';
+const SD_CARD_CID_PREFIX = '[SD_CARD_CID:';
 const LEGACY_UUID_PREFIX = '[UUID:';
+const DEFAULT_SD_CARD_LABEL = 'SD Card Serial';
+
+const UUID_TOKEN_PREFIXES: Record<UuidTokenType, string> = {
+    disk: DISK_UUID_PREFIX,
+    volume: VOLUME_UUID_PREFIX,
+    sdcard: SD_CARD_CID_PREFIX,
+    legacy: LEGACY_UUID_PREFIX,
+};
+
+export function isSourceUuidType(value: string | null | undefined): value is SourceUuidType {
+    return value === 'disk' || value === 'volume' || value === 'sdcard';
+}
+
+function isUuidTokenType(value: string): value is UuidTokenType {
+    return isSourceUuidType(value) || value === 'legacy';
+}
+
+/** UUID 타입별 표시 라벨 (예: "Disk UUID", "SD Card Serial") */
+export function uuidTypeLabel(
+    uuidType: UuidTokenType,
+    labels: UuidSourceOptionLabels = {}
+): string {
+    switch (uuidType) {
+        case 'disk':
+            return 'Disk UUID';
+        case 'volume':
+            return 'Volume UUID';
+        case 'sdcard':
+            return labels.sdCardLabel || DEFAULT_SD_CARD_LABEL;
+        case 'legacy':
+            return 'Legacy UUID';
+    }
+}
 const UUID_OPTION_SEPARATOR = '::';
 
 function normalizeFsPath(path: string): string {
@@ -74,20 +113,15 @@ export function parseUuidOptionValue(value: string): { uuidType: UuidTokenType; 
     const typeRaw = value.slice(0, separatorIndex);
     const uuid = value.slice(separatorIndex + UUID_OPTION_SEPARATOR.length);
 
-    if ((typeRaw !== 'disk' && typeRaw !== 'volume' && typeRaw !== 'legacy') || !uuid) {
+    if (!isUuidTokenType(typeRaw) || !uuid) {
         return null;
     }
 
-    return { uuidType: typeRaw as UuidTokenType, uuid };
+    return { uuidType: typeRaw, uuid };
 }
 
 export function buildUuidSourceToken(uuidType: UuidTokenType, uuid: string, subPath: string): string {
-    const prefix =
-        uuidType === 'disk'
-            ? DISK_UUID_PREFIX
-            : uuidType === 'volume'
-              ? VOLUME_UUID_PREFIX
-              : LEGACY_UUID_PREFIX;
+    const prefix = UUID_TOKEN_PREFIXES[uuidType];
     return `${prefix}${uuid}]${normalizeUuidSubPath(subPath)}`;
 }
 
@@ -136,6 +170,7 @@ export function parseUuidSourceToken(source: string): ParsedUuidSourceToken | nu
     return (
         parseTokenWithPrefix(source, DISK_UUID_PREFIX, 'disk') ||
         parseTokenWithPrefix(source, VOLUME_UUID_PREFIX, 'volume') ||
+        parseTokenWithPrefix(source, SD_CARD_CID_PREFIX, 'sdcard') ||
         parseTokenWithPrefix(source, LEGACY_UUID_PREFIX, 'legacy')
     );
 }
@@ -156,18 +191,39 @@ export function inferUuidTypeFromVolumes(
         return 'volume';
     }
 
+    if (volumes.some((volume) => volume.sd_card_cid === uuid)) {
+        return 'sdcard';
+    }
+
     return null;
 }
 
 export function buildUuidSourceOptions<T extends UuidSelectableVolume>(
     volumes: T[],
-    formatVolumeSize: (volume: T) => string
+    formatVolumeSize: (volume: T) => string,
+    labels: UuidSourceOptionLabels = {}
 ): UuidSourceOption[] {
     const options: UuidSourceOption[] = [];
     const seen = new Set<string>();
 
     for (const volume of volumes) {
         const sizeLabel = formatVolumeSize(volume);
+
+        // 내장 SD 슬롯 카드만 CID가 있다. USB 리더 등 CID가 없으면 옵션을 만들지 않는다.
+        if (volume.sd_card_cid) {
+            const value = buildUuidOptionValue('sdcard', volume.sd_card_cid);
+            if (!seen.has(value)) {
+                options.push({
+                    value,
+                    label: `${volume.name} (${sizeLabel}) [${uuidTypeLabel('sdcard', labels)}: ${volume.sd_card_cid}]`,
+                    uuidType: 'sdcard',
+                    uuid: volume.sd_card_cid,
+                    mountPoint: volume.mount_point,
+                    mounted: true,
+                });
+                seen.add(value);
+            }
+        }
 
         if (volume.disk_uuid) {
             const value = buildUuidOptionValue('disk', volume.disk_uuid);

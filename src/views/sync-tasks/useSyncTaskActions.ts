@@ -37,6 +37,7 @@ import type {
 import {
   buildUuidSourceToken,
   inferUuidTypeFromVolumes,
+  isSourceUuidType,
   normalizeUuidSubPath,
   parseUuidSourceToken,
   type SourceUuidType,
@@ -306,10 +307,7 @@ export function useSyncTaskActions({
           editingTask?.sourceUuid || parsedEditingSourceToken?.uuid || '';
         const editingSourceTokenType =
           editingTask?.sourceUuidType ||
-          (parsedEditingSourceToken?.tokenType === 'disk' ||
-          parsedEditingSourceToken?.tokenType === 'volume'
-            ? parsedEditingSourceToken.tokenType
-            : parsedEditingSourceToken?.tokenType) ||
+          parsedEditingSourceToken?.tokenType ||
           '';
         const editingSourceSubPath = normalizeUuidSubPath(
           editingTask?.sourceSubPath ?? parsedEditingSourceToken?.subPath ?? '/',
@@ -343,7 +341,7 @@ export function useSyncTaskActions({
             !sourceSubPathChanged,
         );
         const resolvedSourceUuidType: SourceUuidType | undefined =
-          resolvedSourceTokenType === 'disk' || resolvedSourceTokenType === 'volume'
+          isSourceUuidType(resolvedSourceTokenType)
             ? resolvedSourceTokenType
             : undefined;
 
