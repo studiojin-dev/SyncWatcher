@@ -1,3 +1,4 @@
+import { useDialogAttention } from '../../hooks/useDialogAttention';
 import type { SyncTaskSourceRecommendation } from '../../utils/syncTaskSourceRecommendations';
 
 interface SyncTaskSourceRecommendationModalProps {
@@ -31,6 +32,8 @@ function SyncTaskSourceRecommendationModal({
   onOpenTaskEditor,
   onClose,
 }: SyncTaskSourceRecommendationModalProps) {
+  useDialogAttention(opened);
+
   if (!opened) {
     return null;
   }
