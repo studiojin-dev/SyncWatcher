@@ -9,7 +9,6 @@
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
-use std::time::SystemTime;
 
 /// EXIF 탐색 시 파일당 읽는 최대 바이트 수. Sony ARW/JPG의 Exif IFD는 앞부분에 있다.
 const EXIF_READ_LIMIT_BYTES: u64 = 256 * 1024;
@@ -182,34 +181,41 @@ fn list_directories(path: &Path) -> Vec<String> {
         .collect()
 }
 
-/// 볼륨의 DCIM 최근 이미지(최대 5개, 파일당 256KiB)에서 카메라 바디 시리얼을 읽는다.
+/// 볼륨의 DCIM 이미지(폴더·파일명 역순으로 최대 5개, 파일당 256KiB)에서 카메라 바디 시리얼을 읽는다.
+/// 카메라 파일명은 순번이므로 역순이 최근 촬영 순서에 가깝고, 파일마다 stat하지 않아도 된다.
 /// 파일 간 시리얼이 다르면 여러 카메라가 섞인 카드이므로 None을 반환한다.
 pub fn read_camera_body_serial(mount_point: &Path) -> Option<String> {
     let dcim = mount_point.join("DCIM");
-    let mut candidates: Vec<(SystemTime, std::path::PathBuf)> = Vec::new();
-    for folder in list_directories(&dcim).into_iter().take(MAX_DCIM_FOLDERS) {
+    let mut folders = list_directories(&dcim);
+    folders.sort_by(|left, right| right.cmp(left));
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    for folder in folders.into_iter().take(MAX_DCIM_FOLDERS) {
         let Ok(entries) = fs::read_dir(dcim.join(&folder)) else {
             continue;
         };
-        for entry in entries.take(MAX_ENTRIES_PER_FOLDER).filter_map(Result::ok) {
-            let path = entry.path();
-            if !is_exif_image(&path) {
-                continue;
-            }
-            let Ok(metadata) = entry.metadata() else {
-                continue;
-            };
-            if !metadata.is_file() {
-                continue;
-            }
-            let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            candidates.push((modified, path));
+        let mut images: Vec<std::path::PathBuf> = entries
+            .take(MAX_ENTRIES_PER_FOLDER)
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .map(|kind| kind.is_file())
+                    .unwrap_or(false)
+            })
+            .map(|entry| entry.path())
+            .filter(|path| is_exif_image(path))
+            .collect();
+        images.sort_by(|left, right| right.cmp(left));
+        let remaining = MAX_EXIF_FILES - candidates.len();
+        candidates.extend(images.into_iter().take(remaining));
+        if candidates.len() >= MAX_EXIF_FILES {
+            break;
         }
     }
-    candidates.sort_by(|left, right| right.0.cmp(&left.0));
 
     let mut found: Option<String> = None;
-    for (_, path) in candidates.into_iter().take(MAX_EXIF_FILES) {
+    for path in candidates {
         let Some(serial) = read_head(&path).and_then(|data| parse_exif_body_serial(&data)) else {
             continue;
         };
