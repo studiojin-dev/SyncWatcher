@@ -753,8 +753,20 @@ fn is_removable_mount(
         return false;
     };
 
-    metadata.internal == Some(false)
-        && (metadata.ejectable == Some(true) || metadata.removable_media == Some(true))
+    let is_external_removable = metadata.internal == Some(false)
+        && (metadata.ejectable == Some(true) || metadata.removable_media == Some(true));
+
+    is_external_removable || is_built_in_sd_card(metadata)
+}
+
+/// Mac 내장 SD 카드 슬롯은 diskutil이 Internal=true로 보고하므로 별도로 허용한다.
+/// 내장 디스크 오인 unmount를 막기 위해 SD 프로토콜 + RemovableMedia일 때만 인정한다.
+fn is_built_in_sd_card(metadata: &VolumeMetadata) -> bool {
+    metadata.removable_media == Some(true)
+        && metadata
+            .bus_protocol
+            .as_deref()
+            .is_some_and(|protocol| protocol.eq_ignore_ascii_case("Secure Digital"))
 }
 
 fn find_matching_removable_mount_root(
@@ -1053,6 +1065,36 @@ mod tests {
         };
         assert!(!is_removable_mount(&entry, false, Some(&internal_volume)));
         assert!(!is_removable_mount(&entry, false, None));
+
+        // Mac 내장 SD 카드 슬롯은 Internal=true로 보고되지만 카드 자체는 이동식이다.
+        let built_in_sd_card = VolumeMetadata {
+            internal: Some(true),
+            ejectable: Some(true),
+            removable_media: Some(true),
+            bus_protocol: Some("Secure Digital".to_string()),
+            ..VolumeMetadata::default()
+        };
+        assert!(is_removable_mount(&entry, false, Some(&built_in_sd_card)));
+
+        let built_in_sd_without_media_flag = VolumeMetadata {
+            removable_media: Some(false),
+            ..built_in_sd_card.clone()
+        };
+        assert!(!is_removable_mount(
+            &entry,
+            false,
+            Some(&built_in_sd_without_media_flag)
+        ));
+
+        let internal_non_sd_removable = VolumeMetadata {
+            bus_protocol: Some("PCI-Express".to_string()),
+            ..built_in_sd_card
+        };
+        assert!(!is_removable_mount(
+            &entry,
+            false,
+            Some(&internal_non_sd_removable)
+        ));
         assert!(!is_removable_mount(
             &entry,
             true,

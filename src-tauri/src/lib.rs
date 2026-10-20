@@ -9352,6 +9352,40 @@ async fn hide_to_background(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 팝업이 떴을 때 창이 백그라운드(숨김/최소화/비활성)라면 앞으로 가져오고
+/// Dock 아이콘을 바운스시킨다. 이미 포커스된 창이면 아무것도 하지 않는다.
+#[tauri::command]
+async fn request_dialog_attention(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    let is_visible = window.is_visible().unwrap_or(false);
+    let is_minimized = window.is_minimized().unwrap_or(false);
+    let is_focused = window.is_focused().unwrap_or(false);
+    if is_visible && !is_minimized && is_focused {
+        return Ok(());
+    }
+
+    if window.label() == "main" {
+        restore_main_window(&app);
+    } else {
+        #[cfg(target_os = "macos")]
+        {
+            if let Err(err) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
+                eprintln!("[App] Failed to set activation policy: {}", err);
+            }
+        }
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+
+    // 앱 활성화가 거부되는 경우에도 사용자가 알아챌 수 있도록, 활성화될 때까지 Dock 바운스.
+    window
+        .request_user_attention(Some(tauri::UserAttentionType::Critical))
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn quit_app(
     app: tauri::AppHandle,
@@ -10081,6 +10115,7 @@ pub fn run() {
             cancel_operation,
             send_notification,
             hide_to_background,
+            request_dialog_attention,
             quit_app,
             start_watch,
             stop_watch,

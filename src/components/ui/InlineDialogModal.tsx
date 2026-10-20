@@ -1,3 +1,4 @@
+import { useDialogAttention } from '../../hooks/useDialogAttention';
 import { CardAnimation } from './Animations';
 
 export type InlineDialogTone = 'primary' | 'warning' | 'danger' | 'neutral';
@@ -37,6 +38,8 @@ export default function InlineDialogModal({
   actions,
   onAction,
 }: InlineDialogModalProps) {
+  useDialogAttention(opened);
+
   if (!opened) {
     return null;
   }

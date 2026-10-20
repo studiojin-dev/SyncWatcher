@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useDialogAttention } from '../../hooks/useDialogAttention';
 import { useSettings } from '../../hooks/useSettings';
 import { formatBytes } from '../../utils/formatBytes';
 import { CardAnimation } from './Animations';
@@ -24,6 +25,7 @@ export default function AutoUnmountConfirmModal({
 }: AutoUnmountConfirmModalProps) {
   const { t } = useTranslation();
   const { settings } = useSettings();
+  useDialogAttention(opened);
 
   if (!opened) {
     return null;
