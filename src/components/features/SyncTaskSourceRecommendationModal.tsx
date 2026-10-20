@@ -1,5 +1,10 @@
+import { useTranslation } from 'react-i18next';
 import { useDialogAttention } from '../../hooks/useDialogAttention';
-import type { SyncTaskSourceRecommendation } from '../../utils/syncTaskSourceRecommendations';
+import {
+  CAMERA_EVIDENCE_CODES,
+  type SyncTaskSourceRecommendation,
+  type SyncTaskSourceRecommendationEvidence,
+} from '../../utils/syncTaskSourceRecommendations';
 
 interface SyncTaskSourceRecommendationModalProps {
   opened: boolean;
@@ -19,8 +24,33 @@ function confidenceTone(label: string): string {
   if (label === 'medium') {
     return 'bg-[var(--color-accent-warning)] text-black';
   }
+  if (label === 'low') {
+    return 'bg-[var(--bg-primary)] text-[var(--text-secondary)] border-dashed';
+  }
   return 'bg-[var(--bg-secondary)] text-[var(--text-secondary)]';
 }
+
+const EVIDENCE_DEFAULTS: Record<string, string> = {
+  sdCardCid: 'SD card serial (CID) matched',
+  deviceSerial: 'Device serial matched',
+  deviceGuid: 'Device GUID matched',
+  mediaUuid: 'Media UUID matched',
+  lastSeenUuid: 'Previously seen UUID matched',
+  capacity: 'Capacity matched: {{value}} bytes',
+  filesystem: 'File system matched: {{value}}',
+  volumeName: 'Volume name matched: {{value}}',
+  subPath: 'Configured sub path exists on this volume',
+  transportSerial: 'Card reader (USB) serial matched',
+  cameraBodySerial: 'Camera body serial matched: {{value}}',
+  cameraFolderStructure: 'Camera folder structure matched (PRIVATE/DCIM layout)',
+};
+
+const CONFIDENCE_DEFAULTS: Record<string, string> = {
+  high: 'High',
+  medium: 'Medium',
+  fallback: 'Fallback',
+  low: 'Low',
+};
 
 function SyncTaskSourceRecommendationModal({
   opened,
@@ -32,7 +62,19 @@ function SyncTaskSourceRecommendationModal({
   onOpenTaskEditor,
   onClose,
 }: SyncTaskSourceRecommendationModalProps) {
+  const { t } = useTranslation();
   useDialogAttention(opened);
+
+  const describeEvidence = (item: SyncTaskSourceRecommendationEvidence): string => {
+    const defaultValue = EVIDENCE_DEFAULTS[item.code];
+    if (!defaultValue) {
+      return item.value ? `${item.code}: ${item.value}` : item.code;
+    }
+    return t(`sourceRecommendation.evidence.${item.code}`, {
+      defaultValue,
+      value: item.value ?? '',
+    });
+  };
 
   if (!opened) {
     return null;
@@ -50,10 +92,15 @@ function SyncTaskSourceRecommendationModal({
         <div className="sticky top-0 bg-[var(--bg-primary)] border-b-3 border-[var(--border-main)] p-5 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-heading font-black uppercase">
-              SyncTask Source Review
+              {t('sourceRecommendation.title', {
+                defaultValue: 'SyncTask Source Review',
+              })}
             </h2>
             <p className="text-sm font-mono text-[var(--text-secondary)] mt-1">
-              UUID가 더 이상 현재 마운트와 일치하지 않는 작업입니다. 자동 변경은 하지 않고 추천만 제공합니다.
+              {t('sourceRecommendation.description', {
+                defaultValue:
+                  'These tasks no longer match a mounted volume UUID. Nothing is changed automatically; review the evidence and choose an action.',
+              })}
             </p>
           </div>
           <button
@@ -61,13 +108,21 @@ function SyncTaskSourceRecommendationModal({
             className="px-3 py-1 border-2 border-[var(--border-main)] font-mono text-xs hover:bg-[var(--bg-secondary)]"
             onClick={onClose}
           >
-            CLOSE
+            {t('sourceRecommendation.close', { defaultValue: 'CLOSE' })}
           </button>
         </div>
 
         <div className="p-5 space-y-4">
           {orderedRecommendations.map((recommendation) => {
             const isBusy = busyTaskId === recommendation.taskId;
+            const evidenceDetails = recommendation.evidenceDetails ?? [];
+            const hasCameraEvidence = evidenceDetails.some((item) =>
+              CAMERA_EVIDENCE_CODES.includes(item.code),
+            );
+            const evidenceLines =
+              evidenceDetails.length > 0
+                ? evidenceDetails.map(describeEvidence)
+                : recommendation.evidence;
             return (
               <div
                 key={`${recommendation.taskId}:${recommendation.proposedUuid}`}
@@ -88,7 +143,11 @@ function SyncTaskSourceRecommendationModal({
                           recommendation.confidenceLabel,
                         )}`}
                       >
-                        {recommendation.confidenceLabel}
+                        {t(`sourceRecommendation.confidence.${recommendation.confidenceLabel}`, {
+                          defaultValue:
+                            CONFIDENCE_DEFAULTS[recommendation.confidenceLabel] ??
+                            recommendation.confidenceLabel,
+                        })}
                       </span>
                     </div>
                     <div className="mt-3 space-y-2 font-mono text-xs">
@@ -118,32 +177,49 @@ function SyncTaskSourceRecommendationModal({
                       onClick={() => onUpdate(recommendation)}
                       disabled={isBusy}
                     >
-                      Update Task
+                      {t('sourceRecommendation.update', { defaultValue: 'Update Task' })}
                     </button>
                     <button
                       type="button"
                       className="px-3 py-2 border-2 border-[var(--border-main)] font-bold text-xs uppercase hover:bg-[var(--bg-primary)]"
                       onClick={() => onOpenTaskEditor(recommendation.taskId)}
                     >
-                      Open Task Editor
+                      {t('sourceRecommendation.openEditor', {
+                        defaultValue: 'Open Task Editor',
+                      })}
                     </button>
                     <button
                       type="button"
                       className="px-3 py-2 border-2 border-[var(--border-main)] font-bold text-xs uppercase hover:bg-[var(--bg-primary)]"
                       onClick={() => onDismiss(recommendation)}
                     >
-                      Dismiss
+                      {t('sourceRecommendation.dismiss', { defaultValue: 'Dismiss' })}
                     </button>
                   </div>
                 </div>
 
                 <div className="mt-3 border-t-2 border-dashed border-[var(--border-main)] pt-3">
-                  <div className="text-xs font-bold uppercase mb-2">Evidence</div>
+                  <div className="text-xs font-bold uppercase mb-2">
+                    {t('sourceRecommendation.evidenceHeading', {
+                      defaultValue: 'Why this volume was suggested',
+                    })}
+                  </div>
                   <ul className="space-y-1 font-mono text-xs text-[var(--text-secondary)]">
-                    {recommendation.evidence.map((item) => (
+                    {evidenceLines.map((item) => (
                       <li key={item}>- {item}</li>
                     ))}
                   </ul>
+                  {hasCameraEvidence ? (
+                    <p
+                      data-testid="camera-evidence-notice"
+                      className="mt-3 text-xs font-mono border-l-2 border-[var(--color-accent-warning)] pl-2 text-[var(--text-secondary)]"
+                    >
+                      {t('sourceRecommendation.cameraNotice', {
+                        defaultValue:
+                          'Camera body serial and folder structure identify the camera, not the card. Cards used in the same camera (or the same model) may look identical, so check the volume before updating.',
+                      })}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             );

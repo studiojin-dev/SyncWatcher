@@ -638,6 +638,36 @@
       "appStoreSupporterActive": "贊助已啟用",
       "restore": "恢復購買",
       "supporterKeysUnavailable": "此版本不支援贊助者金鑰。"
+    },
+    "sourceRecommendation": {
+      "title": "同步任務來源檢查",
+      "description": "這些任務已不再符合已掛載卷宗的 UUID。不會自動變更，請查看依據後選擇動作。",
+      "close": "關閉",
+      "update": "更新任務",
+      "openEditor": "編輯任務",
+      "dismiss": "忽略",
+      "evidenceHeading": "建議此卷宗的依據",
+      "cameraNotice": "相機機身序號與資料夾結構識別的是相機而非記憶卡。在同一台相機（或同型號相機）中使用過的卡可能無法區分，更新前請確認該卷宗。",
+      "confidence": {
+        "high": "高",
+        "medium": "中",
+        "fallback": "備選",
+        "low": "低"
+      },
+      "evidence": {
+        "sdCardCid": "SD 卡序號（CID）相符",
+        "deviceSerial": "裝置序號相符",
+        "deviceGuid": "裝置 GUID 相符",
+        "mediaUuid": "媒體 UUID 相符",
+        "lastSeenUuid": "先前見過的 UUID 相符",
+        "capacity": "容量相符：{{value}} 位元組",
+        "filesystem": "檔案系統相符：{{value}}",
+        "volumeName": "卷宗名稱相符：{{value}}",
+        "subPath": "此卷宗上存在已設定的子路徑",
+        "transportSerial": "讀卡機（USB）序號相符",
+        "cameraBodySerial": "相機機身序號相符：{{value}}",
+        "cameraFolderStructure": "相機資料夾結構相符（PRIVATE/DCIM）"
+      }
     }
   }
 }

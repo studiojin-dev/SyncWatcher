@@ -3750,6 +3750,148 @@ mod integration_tests {
             .any(|item| item == "transport serial matched"));
     }
 
+    fn build_camera_card(
+        name: &str,
+        layout: &[&str],
+        body_serial: Option<&str>,
+    ) -> (tempfile::TempDir, VolumeInfo) {
+        let temp = tempfile::tempdir().unwrap();
+        for dir in layout {
+            std::fs::create_dir_all(temp.path().join(dir)).unwrap();
+        }
+        if let Some(serial) = body_serial {
+            let folder = temp.path().join("DCIM/100MSDCF");
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(
+                folder.join("DSC00001.ARW"),
+                crate::camera_identity::test_support::build_tiff_with_body_serial(serial, true),
+            )
+            .unwrap();
+        }
+        let mut volume = build_volume(name, temp.path().to_str().unwrap());
+        volume.total_bytes = Some(512);
+        volume.filesystem_name = Some("ExFAT".to_string());
+        volume.volume_uuid = Some(format!("volume-{name}"));
+        (temp, volume)
+    }
+
+    fn camera_task_identity(
+        body_serial: Option<&str>,
+        folder_signature: Option<&str>,
+    ) -> SourceIdentitySnapshot {
+        SourceIdentitySnapshot {
+            total_bytes: Some(512),
+            filesystem_name: Some("ExFAT".to_string()),
+            volume_name: Some("A7RC".to_string()),
+            camera_body_serial: body_serial.map(ToString::to_string),
+            camera_folder_signature: folder_signature.map(ToString::to_string),
+            ..SourceIdentitySnapshot::default()
+        }
+    }
+
+    const SONY_LAYOUT: [&str; 3] = ["PRIVATE/SONY", "PRIVATE/DATABASE", "PRIVATE/M4ROOT"];
+    const SONY_USED_SIGNATURE: &str = "DCIM/###MSDCF|PRIVATE/DATABASE|PRIVATE/M4ROOT|PRIVATE/SONY";
+
+    #[test]
+    fn test_source_recommendation_uses_camera_body_serial_for_renamed_root_source() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "volume-before-format",
+            "/",
+            Some(camera_task_identity(Some("03407347"), None)),
+        );
+        let (_card, volume) = build_camera_card("Untitled", &[], Some("03407347"));
+
+        let recommendation = find_task_source_recommendation(&task, &[volume]).unwrap();
+        assert_eq!(recommendation.proposed_uuid, "volume-Untitled");
+        assert_eq!(recommendation.confidence_label, "medium");
+        assert!(recommendation
+            .evidence
+            .iter()
+            .any(|item| item == "camera body serial matched (03407347)"));
+        assert!(recommendation
+            .evidence_details
+            .iter()
+            .any(|detail| detail.code == "cameraBodySerial"
+                && detail.value.as_deref() == Some("03407347")));
+    }
+
+    #[test]
+    fn test_source_recommendation_uses_folder_signature_with_low_confidence() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "volume-before-format",
+            "/",
+            Some(camera_task_identity(None, Some(SONY_USED_SIGNATURE))),
+        );
+        // 카메라에서 막 포맷한 카드: DCIM이 아직 없다.
+        let (_card, volume) = build_camera_card("Untitled", &SONY_LAYOUT, None);
+
+        let recommendation = find_task_source_recommendation(&task, &[volume]).unwrap();
+        assert_eq!(recommendation.confidence_label, "low");
+        assert!(recommendation
+            .evidence_details
+            .iter()
+            .any(|detail| detail.code == "cameraFolderStructure"));
+    }
+
+    #[test]
+    fn test_source_recommendation_rejects_camera_evidence_mismatch() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "volume-before-format",
+            "/",
+            Some(camera_task_identity(
+                Some("03407347"),
+                Some(SONY_USED_SIGNATURE),
+            )),
+        );
+        let (_card, volume) = build_camera_card("Untitled", &["PRIVATE/AVCHD"], Some("99999999"));
+
+        assert!(find_task_source_recommendation(&task, &[volume]).is_none());
+    }
+
+    #[test]
+    fn test_source_recommendation_skips_identical_camera_cards() {
+        let task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "volume-before-format",
+            "/",
+            Some(camera_task_identity(Some("03407347"), None)),
+        );
+        let (_first_card, first) = build_camera_card("Untitled", &[], Some("03407347"));
+        let (_second_card, second) = build_camera_card("Untitled 1", &[], Some("03407347"));
+
+        assert!(find_task_source_recommendation(&task, &[first, second]).is_none());
+    }
+
+    #[test]
+    fn test_refresh_identity_keeps_last_seen_camera_body_serial_for_blank_card() {
+        let mut task = build_uuid_task(
+            "task-1",
+            SourceUuidType::Volume,
+            "volume-Untitled",
+            "/",
+            Some(camera_task_identity(
+                Some("03407347"),
+                Some(SONY_USED_SIGNATURE),
+            )),
+        );
+        let (_card, volume) = build_camera_card("Untitled", &SONY_LAYOUT, None);
+
+        refresh_uuid_source_identity(&mut task, &[volume]);
+        let identity = task.source_identity.unwrap();
+        assert_eq!(identity.camera_body_serial.as_deref(), Some("03407347"));
+        assert_eq!(
+            identity.camera_folder_signature.as_deref(),
+            Some("PRIVATE/DATABASE|PRIVATE/M4ROOT|PRIVATE/SONY")
+        );
+    }
+
     #[test]
     fn test_source_recommendation_skips_ambiguous_composite_matches() {
         let task = build_uuid_task(

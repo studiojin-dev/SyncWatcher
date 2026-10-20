@@ -647,6 +647,36 @@
       "removed": "Supporter key removed.",
       "removeFailed": "Failed to remove supporter key.",
       "supporterKeysUnavailable": "Supporter keys are not available in this build."
+    },
+    "sourceRecommendation": {
+      "title": "SyncTask Source Review",
+      "description": "These tasks no longer match a mounted volume UUID. Nothing is changed automatically; review the evidence and choose an action.",
+      "close": "CLOSE",
+      "update": "Update Task",
+      "openEditor": "Open Task Editor",
+      "dismiss": "Dismiss",
+      "evidenceHeading": "Why this volume was suggested",
+      "cameraNotice": "Camera body serial and folder structure identify the camera, not the card. Cards used in the same camera (or the same model) may look identical, so check the volume before updating.",
+      "confidence": {
+        "high": "High",
+        "medium": "Medium",
+        "fallback": "Fallback",
+        "low": "Low"
+      },
+      "evidence": {
+        "sdCardCid": "SD card serial (CID) matched",
+        "deviceSerial": "Device serial matched",
+        "deviceGuid": "Device GUID matched",
+        "mediaUuid": "Media UUID matched",
+        "lastSeenUuid": "Previously seen UUID matched",
+        "capacity": "Capacity matched: {{value}} bytes",
+        "filesystem": "File system matched: {{value}}",
+        "volumeName": "Volume name matched: {{value}}",
+        "subPath": "Configured sub path exists on this volume",
+        "transportSerial": "Card reader (USB) serial matched",
+        "cameraBodySerial": "Camera body serial matched: {{value}}",
+        "cameraFolderStructure": "Camera folder structure matched (PRIVATE/DCIM layout)"
+      }
     }
   }
 }

@@ -45,6 +45,8 @@ export interface SyncTask {
         lastSeenDiskUuid?: string;
         lastSeenVolumeUuid?: string;
         sdCardCid?: string;
+        cameraBodySerial?: string;
+        cameraFolderSignature?: string;
     };
     recurringSchedules?: RecurringSchedule[];
 }

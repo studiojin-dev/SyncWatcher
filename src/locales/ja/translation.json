@@ -638,6 +638,36 @@
       "appStoreSupporterActive": "支援が有効です",
       "restore": "購入を復元",
       "supporterKeysUnavailable": "このビルドではサポーターキーを利用できません。"
+    },
+    "sourceRecommendation": {
+      "title": "同期タスクのソース確認",
+      "description": "これらのタスクはマウント中のボリューム UUID と一致しなくなりました。自動では変更しません。根拠を確認して操作を選んでください。",
+      "close": "閉じる",
+      "update": "タスクを更新",
+      "openEditor": "タスクを編集",
+      "dismiss": "無視",
+      "evidenceHeading": "このボリュームを提案した根拠",
+      "cameraNotice": "カメラ本体のシリアルとフォルダー構成はカードではなくカメラを識別します。同じカメラ（または同じ機種）で使ったカードは区別できない場合があるため、更新前にボリュームを確認してください。",
+      "confidence": {
+        "high": "高",
+        "medium": "中",
+        "fallback": "代替",
+        "low": "低"
+      },
+      "evidence": {
+        "sdCardCid": "SDカードのシリアル（CID）が一致",
+        "deviceSerial": "デバイスのシリアルが一致",
+        "deviceGuid": "デバイス GUID が一致",
+        "mediaUuid": "メディア UUID が一致",
+        "lastSeenUuid": "以前に確認した UUID が一致",
+        "capacity": "容量が一致: {{value}} バイト",
+        "filesystem": "ファイルシステムが一致: {{value}}",
+        "volumeName": "ボリューム名が一致: {{value}}",
+        "subPath": "設定したサブパスがこのボリュームに存在",
+        "transportSerial": "カードリーダー（USB）のシリアルが一致",
+        "cameraBodySerial": "カメラ本体のシリアルが一致: {{value}}",
+        "cameraFolderStructure": "カメラのフォルダー構成が一致（PRIVATE/DCIM）"
+      }
     }
   }
 }

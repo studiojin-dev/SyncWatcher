@@ -6,6 +6,17 @@ import {
   type SourceUuidType,
 } from '../views/syncTaskUuid';
 
+export interface SyncTaskSourceRecommendationEvidence {
+  /** i18n 키 접미사 (예: 'cameraBodySerial') */
+  code: string;
+  value?: string | null;
+}
+
+export const CAMERA_EVIDENCE_CODES: readonly string[] = [
+  'cameraBodySerial',
+  'cameraFolderStructure',
+];
+
 export interface SyncTaskSourceRecommendation {
   taskId: string;
   taskName: string;
@@ -18,6 +29,7 @@ export interface SyncTaskSourceRecommendation {
   proposedVolumeName: string;
   confidenceLabel: string;
   evidence: string[];
+  evidenceDetails?: SyncTaskSourceRecommendationEvidence[];
 }
 
 export interface SyncTaskSourceRecommendationsEnvelope {

@@ -1,4 +1,5 @@
 pub mod apple_bridge;
+pub mod camera_identity;
 pub mod config_store;
 pub mod control_plane;
 pub mod distribution;
@@ -2733,6 +2734,55 @@ struct SyncTaskSourceRecommendation {
     proposed_volume_name: String,
     confidence_label: String,
     evidence: Vec<String>,
+    #[serde(default)]
+    evidence_details: Vec<RecommendationEvidence>,
+}
+
+/// 추천 근거. `code`는 프론트엔드 i18n 키, `value`는 표시용 값이다.
+#[derive(
+    Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "camelCase")]
+struct RecommendationEvidence {
+    code: String,
+    #[serde(default)]
+    value: Option<String>,
+}
+
+impl RecommendationEvidence {
+    fn new(code: &str) -> Self {
+        Self {
+            code: code.to_string(),
+            value: None,
+        }
+    }
+
+    fn with_value(code: &str, value: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            value: Some(value.into()),
+        }
+    }
+
+    /// 로그·호환용 영어 설명.
+    fn describe(&self) -> String {
+        let value = self.value.as_deref().unwrap_or("");
+        match self.code.as_str() {
+            "sdCardCid" => "SD card CID matched".to_string(),
+            "deviceSerial" => "device serial matched".to_string(),
+            "deviceGuid" => "device GUID matched".to_string(),
+            "mediaUuid" => "media UUID matched".to_string(),
+            "lastSeenUuid" => "last seen UUID matched".to_string(),
+            "capacity" => format!("capacity matched ({value} bytes)"),
+            "filesystem" => format!("filesystem matched ({value})"),
+            "volumeName" => format!("volume name matched ({value})"),
+            "subPath" => "configured source subpath exists".to_string(),
+            "transportSerial" => "transport serial matched".to_string(),
+            "cameraBodySerial" => format!("camera body serial matched ({value})"),
+            "cameraFolderStructure" => "camera folder structure matched".to_string(),
+            other => other.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default)]
@@ -2752,10 +2802,21 @@ enum RecommendationConfidence {
 }
 
 impl RecommendationConfidence {
-    fn label(self, has_transport_serial: bool) -> &'static str {
+    fn label(self, evidence: &[RecommendationEvidence]) -> &'static str {
+        let has = |code: &str| evidence.iter().any(|item| item.code == code);
         match self {
-            RecommendationConfidence::Composite if has_transport_serial => "medium",
-            RecommendationConfidence::Composite => "fallback",
+            // 하드웨어/카메라 단위 근거가 있으면 medium
+            RecommendationConfidence::Composite
+                if has("transportSerial") || has("cameraBodySerial") =>
+            {
+                "medium"
+            }
+            // 볼륨 이름/하위 경로 근거
+            RecommendationConfidence::Composite if has("volumeName") || has("subPath") => {
+                "fallback"
+            }
+            // 카메라 폴더 구조만 일치 (같은 기종 카드끼리 구분 불가)
+            RecommendationConfidence::Composite => "low",
             RecommendationConfidence::LastSeenUuid => "medium",
             RecommendationConfidence::SdCardCid
             | RecommendationConfidence::DeviceSerial
@@ -2864,6 +2925,8 @@ fn build_source_identity_snapshot(
         last_seen_disk_uuid: trim_to_option(volume.disk_uuid.clone()),
         last_seen_volume_uuid: trim_to_option(volume.volume_uuid.clone()),
         sd_card_cid: trim_to_option(volume.sd_card_cid.clone()),
+        camera_body_serial: camera_identity::read_camera_body_serial(&volume.mount_point),
+        camera_folder_signature: camera_identity::read_camera_folder_signature(&volume.mount_point),
     })
 }
 
@@ -2876,7 +2939,16 @@ fn refresh_uuid_source_identity(
         return;
     }
 
-    if let Some(snapshot) = build_source_identity_snapshot(task, volumes) {
+    if let Some(mut snapshot) = build_source_identity_snapshot(task, volumes) {
+        // 포맷 직후 빈 카드에는 이미지가 없으므로 마지막으로 본 카메라 근거를 유지한다.
+        if let Some(previous) = task.source_identity.as_ref() {
+            if snapshot.camera_body_serial.is_none() {
+                snapshot.camera_body_serial = previous.camera_body_serial.clone();
+            }
+            if snapshot.camera_folder_signature.is_none() {
+                snapshot.camera_folder_signature = previous.camera_folder_signature.clone();
+            }
+        }
         task.source_identity = Some(snapshot);
     }
 }
@@ -2904,7 +2976,7 @@ fn composite_candidate_matches(
     task: &SyncTaskRecord,
     identity: &SourceIdentitySnapshot,
     volume: &system_integration::VolumeInfo,
-) -> Option<Vec<String>> {
+) -> Option<Vec<RecommendationEvidence>> {
     let total_bytes = identity.total_bytes?;
     let filesystem_name = identity.filesystem_name.as_ref()?;
     if volume.total_bytes != Some(total_bytes) {
@@ -2923,31 +2995,66 @@ fn composite_candidate_matches(
         })
         .unwrap_or(false);
     let volume_name_matches = identity.volume_name.as_deref() == Some(volume.name.as_str());
+    // 카메라 근거는 용량/파일시스템이 맞는 후보에서만, 스냅샷에 값이 있을 때만 읽는다.
+    let body_serial_match = trim_to_option(identity.camera_body_serial.clone()).filter(|serial| {
+        camera_identity::read_camera_body_serial(&volume.mount_point).as_deref()
+            == Some(serial.as_str())
+    });
+    let folder_signature_matches = identity
+        .camera_folder_signature
+        .as_deref()
+        .and_then(|expected| {
+            camera_identity::read_camera_folder_signature(&volume.mount_point)
+                .map(|current| camera_identity::camera_folder_signatures_match(expected, &current))
+        })
+        .unwrap_or(false);
 
-    if !volume_name_matches && !sub_path_exists {
+    if !volume_name_matches
+        && !sub_path_exists
+        && body_serial_match.is_none()
+        && !folder_signature_matches
+    {
         return None;
     }
 
     let mut evidence = vec![
-        format!("capacity matched ({total_bytes} bytes)"),
-        format!("filesystem matched ({filesystem_name})"),
+        RecommendationEvidence::with_value("capacity", total_bytes.to_string()),
+        RecommendationEvidence::with_value("filesystem", filesystem_name.clone()),
     ];
     if volume_name_matches {
-        evidence.push(format!("volume name matched ({})", volume.name));
+        evidence.push(RecommendationEvidence::with_value(
+            "volumeName",
+            volume.name.clone(),
+        ));
     }
     if sub_path_exists {
-        evidence.push("configured source subpath exists".to_string());
+        evidence.push(RecommendationEvidence::new("subPath"));
+    }
+    if let Some(serial) = body_serial_match {
+        evidence.push(RecommendationEvidence::with_value(
+            "cameraBodySerial",
+            serial,
+        ));
+    }
+    if folder_signature_matches {
+        evidence.push(RecommendationEvidence::new("cameraFolderStructure"));
     }
     if eq_option_case_insensitive(&identity.transport_serial, &volume.transport_serial) {
-        evidence.push("transport serial matched".to_string());
+        evidence.push(RecommendationEvidence::new("transportSerial"));
     }
 
     Some(evidence)
 }
 
 fn select_unique_volume<'a>(
-    matches: Vec<(&'a system_integration::VolumeInfo, Vec<String>)>,
-) -> Option<(&'a system_integration::VolumeInfo, Vec<String>)> {
+    matches: Vec<(
+        &'a system_integration::VolumeInfo,
+        Vec<RecommendationEvidence>,
+    )>,
+) -> Option<(
+    &'a system_integration::VolumeInfo,
+    Vec<RecommendationEvidence>,
+)> {
     if matches.len() == 1 {
         matches.into_iter().next()
     } else {
@@ -2994,7 +3101,7 @@ fn build_recommendation(
     current_uuid: &str,
     preferred_type: config_store::SourceUuidType,
     confidence: RecommendationConfidence,
-    evidence: Vec<String>,
+    evidence: Vec<RecommendationEvidence>,
 ) -> Option<SyncTaskSourceRecommendation> {
     let (proposed_uuid_type, proposed_uuid) = resolve_recommended_uuid(preferred_type, volume)?;
     let token_label = match current_token_type {
@@ -3014,9 +3121,6 @@ fn build_recommendation(
         proposed_uuid,
         normalized_uuid_sub_path_for_task(task)?
     );
-    let has_transport_serial = evidence
-        .iter()
-        .any(|item| item == "transport serial matched");
 
     Some(SyncTaskSourceRecommendation {
         task_id: task.id.clone(),
@@ -3028,8 +3132,12 @@ fn build_recommendation(
         suggested_source,
         proposed_mount_point: volume.mount_point.clone(),
         proposed_volume_name: volume.name.clone(),
-        confidence_label: confidence.label(has_transport_serial).to_string(),
-        evidence,
+        confidence_label: confidence.label(&evidence).to_string(),
+        evidence: evidence
+            .iter()
+            .map(RecommendationEvidence::describe)
+            .collect(),
+        evidence_details: evidence,
     })
 }
 
@@ -3048,7 +3156,7 @@ fn find_task_source_recommendation(
         (
             RecommendationConfidence::SdCardCid,
             identity.sd_card_cid.clone(),
-            "SD card CID matched".to_string(),
+            RecommendationEvidence::new("sdCardCid"),
             Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
                 volume.sd_card_cid.as_deref() == Some(value)
             }) as Box<dyn Fn(&system_integration::VolumeInfo, &str) -> bool>,
@@ -3056,7 +3164,7 @@ fn find_task_source_recommendation(
         (
             RecommendationConfidence::DeviceSerial,
             identity.device_serial.clone(),
-            "device serial matched".to_string(),
+            RecommendationEvidence::new("deviceSerial"),
             Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
                 volume.device_serial.as_deref() == Some(value)
             }),
@@ -3064,7 +3172,7 @@ fn find_task_source_recommendation(
         (
             RecommendationConfidence::DeviceGuid,
             identity.device_guid.clone(),
-            "device GUID matched".to_string(),
+            RecommendationEvidence::new("deviceGuid"),
             Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
                 volume.device_guid.as_deref() == Some(value)
             }),
@@ -3072,7 +3180,7 @@ fn find_task_source_recommendation(
         (
             RecommendationConfidence::MediaUuid,
             identity.media_uuid.clone(),
-            "media UUID matched".to_string(),
+            RecommendationEvidence::new("mediaUuid"),
             Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
                 volume.media_uuid.as_deref() == Some(value)
             }),
@@ -3083,7 +3191,7 @@ fn find_task_source_recommendation(
                 .last_seen_disk_uuid
                 .clone()
                 .or_else(|| identity.last_seen_volume_uuid.clone()),
-            "last seen UUID matched".to_string(),
+            RecommendationEvidence::new("lastSeenUuid"),
             Box::new(|volume: &system_integration::VolumeInfo, value: &str| {
                 volume.disk_uuid.as_deref() == Some(value)
                     || volume.volume_uuid.as_deref() == Some(value)
@@ -3091,14 +3199,14 @@ fn find_task_source_recommendation(
         ),
     ];
 
-    for (confidence, probe, evidence_label, matcher) in exact_checks {
+    for (confidence, probe, evidence_item, matcher) in exact_checks {
         let Some(probe) = trim_to_option(probe) else {
             continue;
         };
         let matches = volumes
             .iter()
             .filter(|volume| matcher(volume, &probe))
-            .map(|volume| (volume, vec![evidence_label.clone()]))
+            .map(|volume| (volume, vec![evidence_item.clone()]))
             .collect::<Vec<_>>();
         if let Some((volume, evidence)) = select_unique_volume(matches) {
             return build_recommendation(

@@ -638,6 +638,36 @@
       "appStoreSupporterActive": "支持已激活",
       "restore": "恢复购买",
       "supporterKeysUnavailable": "此构建版本不支持使用支持者密钥。"
+    },
+    "sourceRecommendation": {
+      "title": "同步任务源检查",
+      "description": "这些任务已不再匹配已挂载卷的 UUID。不会自动更改，请查看依据后选择操作。",
+      "close": "关闭",
+      "update": "更新任务",
+      "openEditor": "编辑任务",
+      "dismiss": "忽略",
+      "evidenceHeading": "推荐此卷的依据",
+      "cameraNotice": "相机机身序列号和文件夹结构识别的是相机而不是存储卡。在同一台相机（或同型号相机）中使用过的卡可能无法区分，更新前请确认该卷。",
+      "confidence": {
+        "high": "高",
+        "medium": "中",
+        "fallback": "备选",
+        "low": "低"
+      },
+      "evidence": {
+        "sdCardCid": "SD 卡序列号（CID）匹配",
+        "deviceSerial": "设备序列号匹配",
+        "deviceGuid": "设备 GUID 匹配",
+        "mediaUuid": "介质 UUID 匹配",
+        "lastSeenUuid": "先前见过的 UUID 匹配",
+        "capacity": "容量匹配：{{value}} 字节",
+        "filesystem": "文件系统匹配：{{value}}",
+        "volumeName": "卷名匹配：{{value}}",
+        "subPath": "此卷上存在已设置的子路径",
+        "transportSerial": "读卡器（USB）序列号匹配",
+        "cameraBodySerial": "相机机身序列号匹配：{{value}}",
+        "cameraFolderStructure": "相机文件夹结构匹配（PRIVATE/DCIM）"
+      }
     }
   }
 }

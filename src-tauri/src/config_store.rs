@@ -257,6 +257,12 @@ pub struct SourceIdentitySnapshot {
     pub last_seen_volume_uuid: Option<String>,
     #[serde(default)]
     pub sd_card_cid: Option<String>,
+    /// DCIM 이미지 EXIF에서 마지막으로 본 카메라 바디 시리얼 (카드가 아닌 카메라 식별)
+    #[serde(default)]
+    pub camera_body_serial: Option<String>,
+    /// PRIVATE/DCIM 카메라 폴더 구조 시그니처 (카메라 계열 식별)
+    #[serde(default)]
+    pub camera_folder_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

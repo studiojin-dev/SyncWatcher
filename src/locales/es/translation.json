@@ -639,6 +639,36 @@
       "appStoreSupporterActive": "Apoyo activo",
       "restore": "Restaurar compra",
       "supporterKeysUnavailable": "Las claves de patrocinador no están disponibles en esta compilación."
+    },
+    "sourceRecommendation": {
+      "title": "Revisión del origen de tareas",
+      "description": "Estas tareas ya no coinciden con el UUID de un volumen montado. No se cambia nada automáticamente; revisa la evidencia y elige una acción.",
+      "close": "CERRAR",
+      "update": "Actualizar tarea",
+      "openEditor": "Editar tarea",
+      "dismiss": "Descartar",
+      "evidenceHeading": "Por qué se sugirió este volumen",
+      "cameraNotice": "El número de serie de la cámara y la estructura de carpetas identifican la cámara, no la tarjeta. Las tarjetas usadas en la misma cámara (o el mismo modelo) pueden parecer idénticas, así que verifica el volumen antes de actualizar.",
+      "confidence": {
+        "high": "Alta",
+        "medium": "Media",
+        "fallback": "Alternativa",
+        "low": "Baja"
+      },
+      "evidence": {
+        "sdCardCid": "Coincide el número de serie de la tarjeta SD (CID)",
+        "deviceSerial": "Coincide el número de serie del dispositivo",
+        "deviceGuid": "Coincide el GUID del dispositivo",
+        "mediaUuid": "Coincide el UUID del medio",
+        "lastSeenUuid": "Coincide un UUID visto anteriormente",
+        "capacity": "Coincide la capacidad: {{value}} bytes",
+        "filesystem": "Coincide el sistema de archivos: {{value}}",
+        "volumeName": "Coincide el nombre del volumen: {{value}}",
+        "subPath": "La subruta configurada existe en este volumen",
+        "transportSerial": "Coincide el número de serie del lector de tarjetas (USB)",
+        "cameraBodySerial": "Coincide el número de serie de la cámara: {{value}}",
+        "cameraFolderStructure": "Coincide la estructura de carpetas de la cámara (PRIVATE/DCIM)"
+      }
     }
   }
 }
