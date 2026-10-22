@@ -176,6 +176,14 @@ fi
 CONFIG_PATH="src-tauri/tauri.appstore.conf.json"
 PRODUCT_NAME="$(node -p "require('./${CONFIG_PATH}').productName")"
 VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+# App Store Connect rejects a CFBundleShortVersionString with a pre-release suffix
+# (for example 2.2.0-beta.1). Beta/RC versions ship through the GitHub DMG channel
+# only (ADR-20261022-0038-UPC); bump to the stable X.Y.Z before an App Store build.
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Refusing Mac App Store build: version '${VERSION}' is not a plain X.Y.Z release version." >&2
+  echo "Pre-release versions are GitHub DMG (beta channel) only. Set src-tauri/tauri.conf.json to a stable version first." >&2
+  exit 1
+fi
 APPSTORE_BUILD_CONFIG="$(python3 - "${CONFIG_PATH}" "${APPLE_APP_STORE_PROVISIONING_PROFILE_PATH}" <<'PY'
 import json
 import sys

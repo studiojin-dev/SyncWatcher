@@ -341,6 +341,35 @@ describe('UpdateChecker', () => {
     expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries the beta endpoint when a dismissed result came from the stable fallback', async () => {
+    settingsState.updateChannel = 'beta';
+    // Beta resolution failed in the backend, which fell back to the stable manifest.
+    checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1', channel: 'stable' }));
+
+    const { rerender } = render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    expect(await screen.findByText('v2.1.1 is available')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
+
+    checkMock.mockResolvedValueOnce(createUpdateMetadata({ rid: 8, version: '2.2.0-beta.1', channel: 'beta' }));
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={1}
+      />,
+    );
+
+    expect(await screen.findByText('v2.2.0-beta.1 is available')).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(invokeMock).toHaveBeenLastCalledWith('check_for_app_update', { channel: 'beta' });
+    expect(closeMock).toHaveBeenCalledWith(7);
+  });
+
   it('reopens the cached update on a manual check when the channel is unchanged', async () => {
     checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1' }));
 
