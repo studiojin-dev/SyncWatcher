@@ -113,6 +113,9 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     const [dismissed, setDismissed] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const updateRef = useRef<Update | null>(null);
+    /** 렌더마다 갱신되는 현재 채널. 진행 중인 확인이 끝났을 때 채널이 바뀌었는지 비교한다. */
+    const latestChannelRef = useRef<UpdateChannel>(updateChannel);
+    latestChannelRef.current = updateChannel;
     /** `updateRef`를 조회할 때 설정돼 있던 채널. 채널이 바뀌면 캐시를 버리고 다시 조회한다. */
     const cachedRequestedChannelRef = useRef<UpdateChannel | null>(null);
     /** 백엔드가 실제로 조회한 채널. 베타 요청이 안정으로 대체됐다면 수동 확인 때 다시 시도한다. */
@@ -188,7 +191,15 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 return;
             }
 
-            const result = await checkForSelfUpdate(updateChannel);
+            // 확인이 진행되는 동안 사용자가 채널을 바꿀 수 있다(예: 시작 자동 확인 중 설정 변경).
+            // 요청 시점 채널과 현재 채널이 다르면 돌아온 Update를 닫고 새 채널로 다시 조회한다.
+            let requestedChannel = latestChannelRef.current;
+            let result = await checkForSelfUpdate(requestedChannel);
+            while (latestChannelRef.current !== requestedChannel) {
+                releaseUpdateResource(result?.update ?? null);
+                requestedChannel = latestChannelRef.current;
+                result = await checkForSelfUpdate(requestedChannel);
+            }
 
             if (result) {
                 const { update } = result;
@@ -196,7 +207,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                     releaseUpdateResource(updateRef.current);
                 }
                 updateRef.current = update;
-                cachedRequestedChannelRef.current = updateChannel;
+                cachedRequestedChannelRef.current = requestedChannel;
                 cachedEffectiveChannelRef.current = result.channel;
                 setUpdateInfo({
                     version: update.version,
