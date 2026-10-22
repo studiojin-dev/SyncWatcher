@@ -416,6 +416,45 @@ describe('UpdateChecker', () => {
     expect(showToastMock).toHaveBeenCalledWith('You are up to date.', 'success');
   });
 
+  it('discards an in-flight result when the channel changes before it returns', async () => {
+    const stableCheck = createDeferred<ReturnType<typeof createUpdateMetadata>>();
+    checkMock.mockReturnValueOnce(stableCheck.promise);
+
+    const { rerender } = render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('check_for_app_update', { channel: 'stable' });
+    });
+
+    // The user switches to beta while the startup check is still pending.
+    settingsState.updateChannel = 'beta';
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    const betaCheck = createDeferred<ReturnType<typeof createUpdateMetadata>>();
+    checkMock.mockReturnValueOnce(betaCheck.promise);
+    stableCheck.resolve(createUpdateMetadata({ rid: 11, version: '2.1.1', channel: 'stable' }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenLastCalledWith('check_for_app_update', { channel: 'beta' });
+    });
+    expect(closeMock).toHaveBeenCalledWith(11);
+    expect(screen.queryByText('v2.1.1 is available')).not.toBeInTheDocument();
+
+    betaCheck.resolve(createUpdateMetadata({ rid: 12, version: '2.2.0-beta.1', channel: 'beta' }));
+    expect(await screen.findByText('v2.2.0-beta.1 is available')).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
   it('reopens the cached update on a manual check when the channel is unchanged', async () => {
     checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1' }));
 
