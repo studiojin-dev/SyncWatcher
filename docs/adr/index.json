@@ -1,5 +1,23 @@
 [
   {
+    "id": "ADR-20261022-0038-UPC",
+    "title": "Beta update channel with pre-release manifest resolution",
+    "tags": [
+      "updater",
+      "release",
+      "beta",
+      "github-releases",
+      "settings",
+      "distribution",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-10-22",
+    "tldr": "Add a user-selectable `stable | beta` update channel for the GitHub DMG build. Beta resolves the highest-semver GitHub release (stable or pre-release) that carries `latest.json` and points the Tauri updater at that tag's manifest; stable keeps the fixed `releases/latest` endpoint. The Mac App Store build is unaffected and never exposes the option.",
+    "path": "docs/adr/ADR-20261022-0038-UPC-beta-update-channel-and-prerelease-manifest-resolution.md"
+  },
+  {
     "id": "ADR-20261022-0037-SRL",
     "title": "Rule-based save templates and target path mapping",
     "tags": [

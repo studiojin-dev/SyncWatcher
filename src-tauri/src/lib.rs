@@ -1,3 +1,4 @@
+pub mod app_update;
 pub mod apple_bridge;
 pub mod camera_identity;
 pub mod config_store;
@@ -6576,6 +6577,14 @@ async fn import_legacy_channel_data(app: tauri::AppHandle) -> Result<LegacyImpor
 }
 
 #[tauri::command]
+async fn check_for_app_update(
+    webview: tauri::Webview,
+    channel: Option<config_store::UpdateChannel>,
+) -> Result<Option<app_update::AppUpdateMetadata>, String> {
+    app_update::check_for_app_update(webview, channel.unwrap_or_default()).await
+}
+
+#[tauri::command]
 async fn check_app_store_update(
     app: tauri::AppHandle,
 ) -> Result<AppStoreUpdateCheckResult, String> {
@@ -10509,6 +10518,7 @@ pub fn run() {
             capture_network_mount,
             import_legacy_channel_data,
             check_app_store_update,
+            check_for_app_update,
             set_launch_at_login,
             update_settings,
             reset_settings,

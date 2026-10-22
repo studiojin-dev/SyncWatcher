@@ -374,7 +374,12 @@
       "termsLink": "이용 약관",
       "privacyLink": "개인정보 처리방침",
       "saveSettings": "설정 저장",
-      "resetDefaults": "기본값으로 재설정"
+      "resetDefaults": "기본값으로 재설정",
+      "updateChannel": "업데이트 채널",
+      "updateChannelDesc": "베타를 선택하면 GitHub Releases의 사전 공개(pre-release) 빌드를 정식 배포 전에 먼저 받습니다. 다시 안정으로 바꿔도 이미 설치된 베타가 되돌아가지는 않으며, 더 높은 안정 버전이 나올 때까지 그대로 사용합니다.",
+      "updateChannelStable": "안정",
+      "updateChannelBeta": "베타",
+      "updateChannelCheckNow": "지금 확인"
     },
     "startup": {
       "title": "SyncWatcher 시작 중",
@@ -615,7 +620,8 @@
       "checkFailed": "업데이트 확인에 실패했습니다.",
       "later": "나중에",
       "updateNow": "지금 업데이트",
-      "openAppStore": "App Store 열기"
+      "openAppStore": "App Store 열기",
+      "prereleaseNotice": "베타 빌드입니다. 미완성 기능이나 버그가 포함될 수 있습니다."
     },
     "license": {
       "title": "후원 상태 활성화",

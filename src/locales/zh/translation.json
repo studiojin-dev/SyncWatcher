@@ -365,7 +365,12 @@
       "termsLink": "服务条款",
       "privacyLink": "隐私政策",
       "saveSettings": "保存设置",
-      "resetDefaults": "恢复默认值"
+      "resetDefaults": "恢复默认值",
+      "updateChannel": "更新渠道",
+      "updateChannelDesc": "选择测试版后，会在正式发布前先收到 GitHub Releases 的预发布版本。切回稳定版不会回退已安装的测试版，直到有更新的稳定版发布。",
+      "updateChannelStable": "稳定版",
+      "updateChannelBeta": "测试版",
+      "updateChannelCheckNow": "立即检查"
     },
     "startup": {
       "title": "正在启动 SyncWatcher",
@@ -606,7 +611,8 @@
       "updateNow": "立即更新",
       "appStoreAvailable": "Mac App Store 上已有 v{{version}} 可用",
       "appStoreDescription": "Mac App Store 版本的 SyncWatcher 无法直接在应用内安装更新。请打开 App Store 完成更新。",
-      "openAppStore": "打开 App Store"
+      "openAppStore": "打开 App Store",
+      "prereleaseNotice": "这是测试版，可能包含未完成的功能或错误。"
     },
     "license": {
       "title": "激活支持者状态",

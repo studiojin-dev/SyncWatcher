@@ -366,7 +366,12 @@
       "termsLink": "Términos del servicio",
       "privacyLink": "Política de privacidad",
       "saveSettings": "Guardar Configuración",
-      "resetDefaults": "Restablecer Valores"
+      "resetDefaults": "Restablecer Valores",
+      "updateChannel": "Canal de actualización",
+      "updateChannelDesc": "Beta recibe compilaciones preliminares de GitHub Releases antes de que pasen a estable. Volver a Estable no revierte una beta instalada; seguirás en ella hasta que salga una versión estable más nueva.",
+      "updateChannelStable": "Estable",
+      "updateChannelBeta": "Beta",
+      "updateChannelCheckNow": "Comprobar ahora"
     },
     "startup": {
       "title": "Iniciando SyncWatcher",
@@ -607,7 +612,8 @@
       "updateNow": "Actualizar ahora",
       "appStoreAvailable": "La versión {{version}} está disponible en Mac App Store",
       "appStoreDescription": "SyncWatcher no puede instalar actualizaciones directamente desde la versión de Mac App Store. Abre App Store para actualizar allí.",
-      "openAppStore": "Abrir App Store"
+      "openAppStore": "Abrir App Store",
+      "prereleaseNotice": "Esta es una compilación beta. Puede contener funciones incompletas o errores."
     },
     "license": {
       "title": "Activar estado de patrocinador",

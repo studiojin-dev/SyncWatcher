@@ -374,7 +374,12 @@
       "termsLink": "Terms of Service",
       "privacyLink": "Privacy Policy",
       "saveSettings": "Save Settings",
-      "resetDefaults": "Reset to Defaults"
+      "resetDefaults": "Reset to Defaults",
+      "updateChannel": "Update Channel",
+      "updateChannelDesc": "Beta receives pre-release builds from GitHub Releases before they are promoted to stable. Switching back to Stable does not downgrade an installed beta; you stay on it until a newer stable version ships.",
+      "updateChannelStable": "Stable",
+      "updateChannelBeta": "Beta",
+      "updateChannelCheckNow": "Check Now"
     },
     "startup": {
       "title": "Starting SyncWatcher",
@@ -615,7 +620,8 @@
       "checkFailed": "Failed to check for updates.",
       "later": "Later",
       "updateNow": "Update Now",
-      "openAppStore": "Open App Store"
+      "openAppStore": "Open App Store",
+      "prereleaseNotice": "This is a beta build. It may contain unfinished features or bugs."
     },
     "license": {
       "title": "Activate Supporter Status",

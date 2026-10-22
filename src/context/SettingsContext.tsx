@@ -16,7 +16,14 @@ export interface Settings {
     isRegistered: boolean;
     launchAtLogin: boolean;
     mcpEnabled: boolean;
+    updateChannel: UpdateChannel;
 }
+
+/**
+ * 자동 업데이트 채널. `beta`는 GitHub pre-release도 업데이트 후보로 포함한다.
+ * Mac App Store 빌드에서는 자체 업데이트가 없으므로 무시된다.
+ */
+export type UpdateChannel = 'stable' | 'beta';
 
 export const DEFAULT_SETTINGS: Settings = {
     language: 'en',
@@ -30,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
     isRegistered: false,
     launchAtLogin: false,
     mcpEnabled: false,
+    updateChannel: 'stable',
 };
 
 const STORAGE_KEY = 'syncwatcher_settings';

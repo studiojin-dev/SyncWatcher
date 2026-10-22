@@ -55,6 +55,16 @@ pub enum ThemeMode {
     System,
 }
 
+/// 자동 업데이트 채널. `Beta`는 GitHub pre-release(`-beta.N`, `-rcN`)도 업데이트 후보로 포함한다.
+/// Mac App Store 빌드에서는 무시된다(자체 업데이트 불가).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Beta,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CloseAction {
@@ -103,6 +113,8 @@ pub struct StoredSettings {
     pub mcp_enabled: bool,
     #[serde(default)]
     pub mcp_auth_token: Option<String>,
+    #[serde(default)]
+    pub update_channel: UpdateChannel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -119,6 +131,7 @@ pub struct SettingsSnapshot {
     pub is_registered: bool,
     pub launch_at_login: bool,
     pub mcp_enabled: bool,
+    pub update_channel: UpdateChannel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -133,6 +146,7 @@ pub struct SettingsPatch {
     pub max_log_lines: Option<u32>,
     pub close_action: Option<CloseAction>,
     pub mcp_enabled: Option<bool>,
+    pub update_channel: Option<UpdateChannel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -176,6 +190,9 @@ impl SettingsPatch {
         if let Some(mcp_enabled) = self.mcp_enabled {
             settings.mcp_enabled = mcp_enabled;
         }
+        if let Some(update_channel) = self.update_channel {
+            settings.update_channel = update_channel;
+        }
     }
 }
 
@@ -191,6 +208,7 @@ impl From<McpSettingsPatch> for SettingsPatch {
             max_log_lines: None,
             close_action: value.close_action,
             mcp_enabled: value.mcp_enabled,
+            update_channel: None,
         }
     }
 }
@@ -835,6 +853,7 @@ pub async fn settings_snapshot_from_store(
                 .map_err(|error| error.to_string()),
         ),
         mcp_enabled: settings.mcp_enabled,
+        update_channel: settings.update_channel,
     })
 }
 
@@ -875,6 +894,9 @@ pub fn apply_settings_patch(mut settings: StoredSettings, patch: SettingsPatch) 
     }
     if let Some(mcp_enabled) = patch.mcp_enabled {
         settings.mcp_enabled = mcp_enabled;
+    }
+    if let Some(update_channel) = patch.update_channel {
+        settings.update_channel = update_channel;
     }
     settings
 }
@@ -1301,6 +1323,7 @@ fn default_settings() -> StoredSettings {
         close_action: CloseAction::Quit,
         mcp_enabled: false,
         mcp_auth_token: None,
+        update_channel: UpdateChannel::Stable,
     }
 }
 
