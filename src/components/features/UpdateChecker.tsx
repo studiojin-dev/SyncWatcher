@@ -290,7 +290,10 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
         cachedEffectiveChannelRef.current = null;
         releaseUpdateResource(cached);
         setUpdateInfo(null);
-        setState((current) => (current === 'available' ? 'idle' : current));
+        setErrorMessage('');
+        setProgress(0);
+        // 'available'뿐 아니라 설치 실패('error')도 이전 채널의 Update에 묶인 상태이므로 함께 접는다.
+        setState('idle');
         setDismissed(false);
     }, [state, updateChannel]);
 

@@ -370,6 +370,52 @@ describe('UpdateChecker', () => {
     expect(closeMock).toHaveBeenCalledWith(7);
   });
 
+  it('does not resurface a closed install error after the channel changes', async () => {
+    downloadAndInstallMock.mockRejectedValue(new Error('boom'));
+    checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1' }));
+
+    const { rerender } = render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    expect(await screen.findByText('v2.1.1 is available')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Update Now' }));
+    expect(await screen.findByText('Update failed')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('Update failed')).not.toBeInTheDocument();
+
+    settingsState.updateChannel = 'beta';
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(closeMock).toHaveBeenCalledWith(7);
+    });
+    expect(screen.queryByText('Update failed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Update')).not.toBeInTheDocument();
+
+    checkMock.mockResolvedValueOnce(null);
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={1}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenLastCalledWith('check_for_app_update', { channel: 'beta' });
+    });
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(showToastMock).toHaveBeenCalledWith('You are up to date.', 'success');
+  });
+
   it('reopens the cached update on a manual check when the channel is unchanged', async () => {
     checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1' }));
 
