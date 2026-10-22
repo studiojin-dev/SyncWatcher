@@ -30,6 +30,7 @@ export type SubView =
       source: string;
       target: string;
       excludePatterns: string[];
+      saveRuleId?: string | null;
     }
   | { kind: 'sync'; taskId: string; taskName: string }
   | { kind: 'dryRun'; taskId: string; taskName: string };

@@ -18,6 +18,7 @@ mod integration_tests {
         RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus,
         RecurringScheduleHistoryStore, RecurringScheduleRecord,
     };
+    use crate::save_rules;
     use crate::security_scoped::SecurityScopedAccessManager;
     use crate::sync_engine::types::{
         ConflictFileSnapshot, DryRunPhase, DryRunProgress, DryRunSummary, FileDiff, FileDiffKind,
@@ -39,20 +40,21 @@ mod integration_tests {
         find_runtime_watch_cycle, find_task_source_recommendation, finish_runtime_producer,
         format_bytes_with_unit, get_app_config_dir, get_app_version, handle_volume_watch_event,
         handle_volume_watch_tick, has_autostart_arg, is_auto_unmount_session_disabled_internal,
-        is_runtime_watch_task_active, join_paths, log_conflict_resolution_failure,
-        log_conflict_resolution_success, log_conflict_skip_on_close,
-        mark_downstream_watch_tasks_settle_for_target, normalize_uuid_sub_path,
-        owner_license_debug_token_from_args, parse_uuid_source_path, patch_sync_task_internal_core,
-        persist_patched_sync_task_and_collect_history_warnings, preflight_target_path,
-        progress_phase_to_log_category, prune_auto_unmount_session_disabled_tasks,
-        read_current_conflict_file_info, record_runtime_validation_issue,
-        refresh_uuid_source_identity, remove_runtime_sync_task_state,
-        resolve_conflict_items_internal, resolve_runtime_exclude_patterns,
-        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
-        runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
-        runtime_watch_restart_task_ids, runtime_watch_task_needs_restart,
-        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
-        should_include_check_for_updates_menu, should_reconcile_runtime_watchers_for_volume_change,
+        is_runtime_watch_task_active, join_paths, load_dry_run_artifact,
+        log_conflict_resolution_failure, log_conflict_resolution_success,
+        log_conflict_skip_on_close, mark_downstream_watch_tasks_settle_for_target,
+        normalize_uuid_sub_path, owner_license_debug_token_from_args, parse_uuid_source_path,
+        patch_sync_task_internal_core, persist_patched_sync_task_and_collect_history_warnings,
+        preflight_target_path, progress_phase_to_log_category,
+        prune_auto_unmount_session_disabled_tasks, read_current_conflict_file_info,
+        record_runtime_validation_issue, refresh_uuid_source_identity,
+        remove_runtime_sync_task_state, resolve_conflict_items_internal,
+        resolve_runtime_exclude_patterns, resolve_save_rule_by_id, runtime_desired_watch_sources,
+        runtime_find_watch_task, runtime_get_state_internal, runtime_validation_issue_log_message,
+        runtime_watch_bootstrap_task_ids, runtime_watch_restart_task_ids,
+        runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
+        set_auto_unmount_session_disabled_internal, should_include_check_for_updates_menu,
+        should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_control_plane_auth,
         validate_dry_run_artifact, validate_legacy_config_store_file_path, validate_runtime_tasks,
@@ -64,6 +66,7 @@ mod integration_tests {
         RuntimeSyncEnqueueResult, RuntimeSyncTask, RuntimeTaskValidationCode,
         RuntimeTaskValidationIssue, SyncEventOrigin, SyncFileBatchEvent, SyncLiveState, SyncOrigin,
         TargetNewerConflictItem, TaskLogBatchSubscription, VolumeEmitDebounceState,
+        DRY_RUN_ARTIFACT_STALE_ERROR,
     };
     use serde::de::DeserializeOwned;
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -109,6 +112,7 @@ mod integration_tests {
             auto_unmount: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
+            save_rule_id: None,
         }
     }
 
@@ -247,6 +251,7 @@ mod integration_tests {
             auto_unmount: false,
             verify_after_copy: true,
             exclusion_sets: Vec::new(),
+            save_rule_id: None,
         }
     }
 
@@ -311,6 +316,7 @@ mod integration_tests {
             source_sub_path: Some(normalize_uuid_sub_path(source_sub_path).unwrap()),
             source_identity,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         }
     }
 
@@ -451,6 +457,7 @@ mod integration_tests {
             path: PathBuf::from(relative_path),
             source_path: PathBuf::from(source_path),
             target_path: PathBuf::from(target_path),
+            target_relative_path: None,
             source: ConflictFileSnapshot {
                 size: source_size,
                 modified_unix_ms: Some(200),
@@ -1030,6 +1037,7 @@ mod integration_tests {
                 target_size: None,
                 checksum_source: None,
                 checksum_target: None,
+                target_path: None,
             }],
             target_preflight: None,
         };
@@ -1067,6 +1075,7 @@ mod integration_tests {
                 target_size: None,
                 checksum_source: None,
                 checksum_target: None,
+                target_path: None,
             }],
             target_preflight: None,
         };
@@ -1097,6 +1106,7 @@ mod integration_tests {
                 source_size: Some(1),
                 target_size: Some(0),
                 error: None,
+                target_path: None,
             }],
         };
 
@@ -1200,6 +1210,7 @@ mod integration_tests {
                     checksum_mode: false,
                     retention_count: 20,
                 }],
+                save_rule_id: None,
             },
             None,
             None,
@@ -1250,6 +1261,7 @@ mod integration_tests {
                     checksum_mode: false,
                     retention_count: 20,
                 }],
+                save_rule_id: None,
             },
             None,
             None,
@@ -1299,6 +1311,7 @@ mod integration_tests {
                 source_sub_path: None,
                 source_identity: None,
                 recurring_schedules: Vec::new(),
+                save_rule_id: None,
             },
             None,
             None,
@@ -1403,6 +1416,7 @@ mod integration_tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         }])
         .expect("repair content should serialize");
 
@@ -1494,6 +1508,7 @@ mod integration_tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         };
         state
             .config_store
@@ -1588,6 +1603,7 @@ mod integration_tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         };
         state
             .config_store
@@ -1667,6 +1683,7 @@ mod integration_tests {
                     checksum_mode: false,
                     retention_count: 5,
                 }],
+                save_rule_id: None,
             }])
             .expect("tasks should save");
 
@@ -2545,6 +2562,7 @@ mod integration_tests {
             auto_unmount: false,
             verify_after_copy: true,
             exclusion_sets: vec!["set-a".to_string(), "set-b".to_string()],
+            save_rule_id: None,
         };
 
         let sets = vec![
@@ -2866,6 +2884,7 @@ mod integration_tests {
                     source_sub_path: None,
                     source_identity: None,
                     recurring_schedules: Vec::new(),
+                    save_rule_id: None,
                 },
                 SyncTaskRecord {
                     id: "task-b".to_string(),
@@ -2887,6 +2906,7 @@ mod integration_tests {
                     source_sub_path: None,
                     source_identity: None,
                     recurring_schedules: Vec::new(),
+                    save_rule_id: None,
                 },
             ])
             .expect("tasks should save");
@@ -2896,6 +2916,7 @@ mod integration_tests {
             PathBuf::from("/src/b"),
             PathBuf::from("/dst/shared"),
             Vec::new(),
+            None,
             &state,
             None,
         )
@@ -4177,6 +4198,7 @@ mod integration_tests {
             target,
             false,
             Vec::new(),
+            None,
             &state,
             None,
             None,
@@ -4231,6 +4253,7 @@ mod integration_tests {
             target_size: None,
             checksum_source: None,
             checksum_target: None,
+            target_path: None,
         };
         let diff_b = FileDiff {
             path: PathBuf::from("a.txt"),
@@ -4239,6 +4262,7 @@ mod integration_tests {
             target_size: Some(1024),
             checksum_source: None,
             checksum_target: None,
+            target_path: None,
         };
 
         assert!(live
@@ -4280,6 +4304,7 @@ mod integration_tests {
                 target_size: None,
                 checksum_source: None,
                 checksum_target: None,
+                target_path: None,
             };
             batch = live.record_diff(diff, progress.clone(), Instant::now());
         }
@@ -4303,6 +4328,7 @@ mod integration_tests {
                     source_size: Some(1),
                     target_size: Some(0),
                     error: None,
+                    target_path: None,
                 },
                 base,
             )
@@ -4316,6 +4342,7 @@ mod integration_tests {
                 source_size: Some(2),
                 target_size: Some(1),
                 error: Some("copy failed".to_string()),
+                target_path: None,
             },
             base + Duration::from_millis(250),
         );
@@ -4338,6 +4365,7 @@ mod integration_tests {
                     source_size: Some(1),
                     target_size: Some(0),
                     error: None,
+                    target_path: None,
                 },
                 Instant::now(),
             );
@@ -4359,6 +4387,7 @@ mod integration_tests {
                     source_size: Some(1),
                     target_size: Some(0),
                     error: None,
+                    target_path: None,
                 },
                 Instant::now(),
             )
@@ -4390,6 +4419,7 @@ mod integration_tests {
             target.clone(),
             false,
             Vec::new(),
+            None,
             &state,
             None,
             None,
@@ -4424,6 +4454,7 @@ mod integration_tests {
             target.clone(),
             false,
             Vec::new(),
+            None,
             &state,
             None,
             None,
@@ -4456,6 +4487,7 @@ mod integration_tests {
             target.clone(),
             false,
             Vec::new(),
+            None,
             &state,
             None,
             None,
@@ -4476,6 +4508,226 @@ mod integration_tests {
                 .collect()
         };
         assert_eq!(second_paths, vec!["b.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_artifact_with_save_rule_tracks_mapped_target_and_template_changes() {
+        let state = build_app_state();
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(source.join("DCIM/100MSDCF")).expect("source dirs");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+        std::fs::write(source.join("DCIM/100MSDCF/DSC00001.JPG"), b"jpg").expect("write jpg");
+
+        let templates = state
+            .config_store
+            .load_save_rule_templates()
+            .expect("built-in templates");
+        let by_type = templates
+            .iter()
+            .find(|template| template.id == save_rules::PRESET_CAMERA_BY_TYPE)
+            .cloned()
+            .expect("by-type preset");
+
+        let result = sync_dry_run_internal(
+            None,
+            None,
+            "task-1".to_string(),
+            source.clone(),
+            target.clone(),
+            false,
+            Vec::new(),
+            Some(by_type.clone()),
+            &state,
+            None,
+            None,
+        )
+        .await
+        .expect("dry run should succeed");
+        assert_eq!(result.diffs.len(), 1);
+        assert_eq!(
+            result.diffs[0].target_path.as_deref(),
+            Some(Path::new("Photo/DSC00001.JPG"))
+        );
+
+        let artifact = load_dry_run_artifact("task-1", &state)
+            .await
+            .expect("artifact should be stored");
+        assert_eq!(artifact.config.save_rule.as_ref(), Some(&by_type));
+        assert_eq!(
+            artifact.candidates[0].target_relative_path.as_deref(),
+            Some(Path::new("Photo/DSC00001.JPG"))
+        );
+
+        let source_raw = source.to_string_lossy().to_string();
+        let target_raw = target.to_string_lossy().to_string();
+        validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            Some(&by_type),
+            None,
+        )
+        .await
+        .expect("unchanged template should validate");
+
+        // 템플릿이 바뀌면 캐시된 dry run은 더 이상 유효하지 않다.
+        let mut edited = by_type.clone();
+        edited.category_names.image = "Pictures".to_string();
+        let error = validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            Some(&edited),
+            None,
+        )
+        .await
+        .expect_err("edited template should invalidate the artifact");
+        assert!(error.contains(DRY_RUN_ARTIFACT_STALE_ERROR));
+
+        // 매핑된 타깃 경로에 파일이 생기면 후보 스냅샷이 달라져 무효화된다.
+        std::fs::create_dir_all(target.join("Photo")).expect("target photo dir");
+        std::fs::write(target.join("Photo/DSC00001.JPG"), b"jpg").expect("write target jpg");
+        let error = validate_dry_run_artifact(
+            &artifact,
+            &source_raw,
+            &target_raw,
+            &source,
+            &target,
+            false,
+            &[],
+            Some(&by_type),
+            None,
+        )
+        .await
+        .expect_err("changed mapped target should invalidate the artifact");
+        assert!(error.contains(DRY_RUN_ARTIFACT_STALE_ERROR), "{error}");
+    }
+
+    #[tokio::test]
+    async fn test_create_sync_task_rejects_unknown_save_rule_id() {
+        let state = build_app_state();
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(&source).expect("source");
+        std::fs::create_dir_all(&target).expect("target");
+        let build = |save_rule_id: Option<&str>| SyncTaskRecord {
+            id: "task-rule".to_string(),
+            name: "Task".to_string(),
+            source: source.to_string_lossy().to_string(),
+            source_bookmark: None,
+            source_network_mount: None,
+            target: target.to_string_lossy().to_string(),
+            target_bookmark: None,
+            target_network_mount: None,
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+            save_rule_id: save_rule_id.map(str::to_string),
+        };
+
+        let error =
+            create_sync_task_internal(build(Some("no-such-template")), None, None, None, &state)
+                .await
+                .expect_err("unknown template must be rejected");
+        assert!(error.contains("Save rule template not found"), "{error}");
+
+        let created = create_sync_task_internal(
+            build(Some(save_rules::PRESET_CAMERA_BY_TYPE)),
+            None,
+            None,
+            None,
+            &state,
+        )
+        .await
+        .expect("known template is accepted");
+        assert_eq!(
+            created.save_rule_id.as_deref(),
+            Some(save_rules::PRESET_CAMERA_BY_TYPE)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_find_orphan_files_internal_honors_save_rule_mapping() {
+        let state = build_app_state();
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(source.join("DCIM/100MSDCF")).expect("source dirs");
+        std::fs::create_dir_all(target.join("Photo")).expect("target dirs");
+        std::fs::write(source.join("DCIM/100MSDCF/DSC00001.JPG"), b"jpg").expect("write jpg");
+        std::fs::write(target.join("Photo/DSC00001.JPG"), b"jpg").expect("write target jpg");
+        std::fs::write(target.join("Photo/DSC00002.JPG"), b"old").expect("write stale jpg");
+
+        state
+            .config_store
+            .save_tasks(&[SyncTaskRecord {
+                id: "task-1".to_string(),
+                name: "Task".to_string(),
+                source: source.to_string_lossy().to_string(),
+                source_bookmark: None,
+                source_network_mount: None,
+                target: target.to_string_lossy().to_string(),
+                target_bookmark: None,
+                target_network_mount: None,
+                checksum_mode: false,
+                verify_after_copy: true,
+                exclusion_sets: Vec::new(),
+                watch_mode: false,
+                auto_unmount: false,
+                source_type: Some(SourceType::Path),
+                source_uuid: None,
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+                recurring_schedules: Vec::new(),
+                save_rule_id: Some(save_rules::PRESET_CAMERA_BY_TYPE.to_string()),
+            }])
+            .expect("tasks should save");
+
+        let save_rule = resolve_save_rule_by_id(Some(save_rules::PRESET_CAMERA_BY_TYPE), &state)
+            .expect("preset should resolve");
+        assert!(save_rule.is_some());
+        assert!(resolve_save_rule_by_id(Some("missing-template"), &state).is_err());
+        assert_eq!(
+            resolve_save_rule_by_id(None, &state).expect("none resolves"),
+            None
+        );
+
+        let orphans = find_orphan_files_internal(
+            "task-1".to_string(),
+            source.clone(),
+            target.clone(),
+            Vec::new(),
+            save_rule,
+            &state,
+            None,
+        )
+        .await
+        .expect("orphan scan should succeed");
+        let paths: Vec<String> = orphans
+            .iter()
+            .map(|orphan| orphan.path.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(paths, vec!["Photo/DSC00002.JPG".to_string()]);
     }
 
     #[tokio::test]
@@ -4503,6 +4755,7 @@ mod integration_tests {
             &target,
             false,
             &[],
+            None,
             &dry_run,
             &conflicts,
         )
@@ -4517,6 +4770,7 @@ mod integration_tests {
             &target,
             false,
             &[],
+            None,
             None,
         )
         .await
@@ -4533,6 +4787,7 @@ mod integration_tests {
             &target,
             false,
             &[],
+            None,
             None,
         )
         .await
@@ -4564,6 +4819,7 @@ mod integration_tests {
             &missing_target,
             false,
             &[],
+            None,
             &dry_run,
             &conflicts,
         )
@@ -4581,6 +4837,7 @@ mod integration_tests {
             &missing_target,
             false,
             &[],
+            None,
             None,
         )
         .await
@@ -4621,6 +4878,7 @@ mod integration_tests {
             &target,
             false,
             &[],
+            None,
             &dry_run,
             &conflicts,
         )
@@ -4638,6 +4896,7 @@ mod integration_tests {
             &target,
             false,
             &[],
+            None,
             Some(&cancel_token),
         )
         .await

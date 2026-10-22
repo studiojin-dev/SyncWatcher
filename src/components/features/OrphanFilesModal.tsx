@@ -33,6 +33,8 @@ interface OrphanFilesModalProps {
     source: string;
     target: string;
     excludePatterns: string[];
+    /** 저장 규칙 템플릿 ID. 있으면 매핑된 타깃 경로 기준으로 고아 파일을 찾는다. */
+    saveRuleId?: string | null;
     onBack: () => void;
 }
 
@@ -193,6 +195,7 @@ export default function OrphanFilesModal({
     source,
     target,
     excludePatterns,
+    saveRuleId = null,
     onBack,
 }: OrphanFilesModalProps) {
     const { t } = useTranslation();
@@ -224,6 +227,7 @@ export default function OrphanFilesModal({
                 source,
                 target,
                 excludePatterns: stableExcludePatterns,
+                saveRuleId,
             });
             setOrphans(result);
             setSelectedPaths(new Set());
@@ -232,7 +236,7 @@ export default function OrphanFilesModal({
         } finally {
             setLoading(false);
         }
-    }, [showToast, source, stableExcludePatterns, target, taskId]);
+    }, [showToast, source, stableExcludePatterns, target, taskId, saveRuleId]);
 
     useEffect(() => {
         void scanOrphans();

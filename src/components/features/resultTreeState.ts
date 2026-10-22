@@ -2,6 +2,8 @@ import type { DataUnitSystem } from '../../utils/formatBytes';
 
 export interface ResultTreeEntry {
   path: string;
+  /** 저장 규칙으로 바뀐 타깃 상대 경로 (소스 경로와 다를 때만) */
+  targetPath?: string | null;
   typeLabel: string;
   sourceSize: number | null;
   targetSize: number | null;

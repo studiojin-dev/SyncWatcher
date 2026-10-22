@@ -132,7 +132,10 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed",
-      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing.",
+      "saveRule": "Save rule",
+      "saveRuleMirror": "Mirror source folder structure (default)",
+      "saveRuleHint": "Files are sorted into folders and renamed by this template. Edit templates in Settings."
     },
     "recurringSchedules": {
       "title": "Recurring Schedules",
@@ -274,7 +277,8 @@
       "colType": "Type",
       "colSourceSize": "Source Size",
       "colTargetSize": "Target Size",
-      "scanning": "Scanning..."
+      "scanning": "Scanning...",
+      "savedAs": "Saved as {{path}}"
     },
     "orphan": {
       "title": "Orphan Files",
@@ -676,6 +680,53 @@
         "transportSerial": "Card reader (USB) serial matched",
         "cameraBodySerial": "Camera body serial matched: {{value}}",
         "cameraFolderStructure": "Camera folder structure matched (PRIVATE/DCIM layout)"
+      }
+    },
+    "saveRules": {
+      "title": "Save Rule Templates",
+      "intro": "A save rule template decides the target folder and file name for each copied file: by file type (proxy, video, RAW, photo, metadata), capture date, or EXIF values. Pick a template in a task’s settings.",
+      "builtIn": "BUILT-IN",
+      "duplicate": "Duplicate",
+      "confirmDelete": "Delete template \"{{name}}\"?",
+      "anyType": "Any type",
+      "addTemplate": "Add Save Rule Template",
+      "reset": "Restore built-ins",
+      "resetHint": "Restore built-in templates; your own templates are kept.",
+      "resetDone": "Built-in templates restored.",
+      "saved": "Save rule template saved.",
+      "copySuffix": "copy",
+      "ruleNumber": "Rule {{index}}",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "removeRule": "Remove rule",
+      "matchCategories": "File types (empty = any)",
+      "matchExtensions": "Extensions (empty = any)",
+      "folderTemplate": "Folder template",
+      "fileNameTemplate": "File name template",
+      "templateName": "Template name",
+      "templateNamePlaceholder": "My camera layout",
+      "description": "Description",
+      "dateSource": "Date tokens use",
+      "dateSourceCapture": "Capture time (EXIF / video), else file modified time",
+      "dateSourceModified": "File modified time only",
+      "videoTimestamp": "MP4/MOV creation time is",
+      "videoTimestampLocal": "Local time as recorded (most cameras)",
+      "videoTimestampUtc": "UTC, convert to this Mac’s time zone",
+      "categoryNames": "Folder names for {category}",
+      "rules": "Rules (first match wins)",
+      "addRule": "Add rule",
+      "unmatchedHint": "Files that match no rule keep their original relative path.",
+      "tokensTitle": "Tokens",
+      "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} date/time · {name} original stem · {ext}/{EXT}/{ext_lower} extension · {folder} source folder · {path} source sub-path · {category} folder name above · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} from EXIF. Missing values render empty; the original extension is kept.",
+      "metadataCoverage": "Capture time and camera data come from JPEG, HEIF/HEIC and TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, RAF…). MP4/MOV use the Sony XML sidecar or the file header. Other formats (CR3, MXF, AVI…) fall back to the file modified time.",
+      "preview": "Preview (sample files)",
+      "category": {
+        "proxy": "Proxy",
+        "video": "Video",
+        "raw": "RAW",
+        "image": "Photo",
+        "metadata": "Metadata",
+        "other": "Other"
       }
     }
   }

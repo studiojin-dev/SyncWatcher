@@ -49,6 +49,8 @@ export interface SyncTask {
         cameraFolderSignature?: string;
     };
     recurringSchedules?: RecurringSchedule[];
+    /** 저장 규칙 템플릿 ID. null/undefined면 원본 폴더 구조를 그대로 미러링 */
+    saveRuleId?: string | null;
 }
 
 export interface SyncTaskNetworkMount {
@@ -111,6 +113,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         sourceSubPath: task.sourceSubPath,
         sourceIdentity: task.sourceIdentity,
         recurringSchedules: normalizeRecurringSchedules(task.recurringSchedules),
+        saveRuleId: task.saveRuleId ?? null,
     };
 
     normalizedTask.autoUnmount = shouldEnableAutoUnmount(normalizedTask);

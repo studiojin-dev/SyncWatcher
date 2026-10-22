@@ -7,11 +7,15 @@ import type { TranslateFn } from './helpers';
 import { uuidTypeLabel } from '../syncTaskUuid';
 import type { SyncTaskFormController } from './useSyncTaskFormController';
 
+/** Mantine Select는 빈 문자열 값을 안정적으로 다루지 않으므로 '미러링'에는 센티널 값을 쓴다. */
+const MIRROR_SAVE_RULE_VALUE = '__mirror__';
+
 interface SyncTaskFormModalProps {
   opened: boolean;
   editingTask: SyncTask | null;
   form: SyncTaskFormController;
   sets: Array<{ id: string; name: string }>;
+  saveRuleTemplates?: Array<{ id: string; name: string; description?: string }>;
   savingTask: boolean;
   onClose: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
@@ -23,6 +27,7 @@ function SyncTaskFormModal({
   editingTask,
   form,
   sets,
+  saveRuleTemplates = [],
   savingTask,
   onClose,
   onSubmit,
@@ -434,6 +439,67 @@ function SyncTaskFormModal({
             />
             <div className="mt-2 text-xs font-mono text-[var(--text-secondary)] border-l-2 border-[var(--accent-info)] pl-2">
               {t('syncTasks.systemMetadataAlwaysExcluded')}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-bold mb-1 uppercase font-mono">
+              {t('syncTasks.saveRule', { defaultValue: 'Save rule' })}
+            </label>
+            <Select
+              data={[
+                {
+                  value: MIRROR_SAVE_RULE_VALUE,
+                  label: t('syncTasks.saveRuleMirror', {
+                    defaultValue: 'Mirror source folder structure (default)',
+                  }),
+                },
+                ...saveRuleTemplates.map((template) => ({
+                  value: template.id,
+                  label: template.name,
+                })),
+              ]}
+              value={form.saveRuleId ?? MIRROR_SAVE_RULE_VALUE}
+              onChange={(value) =>
+                form.setSaveRuleId(
+                  value && value !== MIRROR_SAVE_RULE_VALUE ? value : null,
+                )
+              }
+              allowDeselect={false}
+              disabled={savingTask}
+              aria-label={t('syncTasks.saveRule', { defaultValue: 'Save rule' })}
+              comboboxProps={{
+                position: 'bottom',
+                middlewares: { flip: true, shift: true },
+                withinPortal: true,
+              }}
+              styles={{
+                input: {
+                  border: '3px solid var(--border-main)',
+                  borderRadius: 0,
+                  fontFamily: 'var(--font-heading)',
+                  transform: 'none',
+                  transition: 'background-color 0.1s ease-out',
+                },
+                dropdown: {
+                  border: '3px solid var(--border-main)',
+                  borderRadius: 0,
+                  boxShadow: '4px 4px 0 0 black',
+                  transform: 'none',
+                },
+              }}
+            />
+            <div className="mt-2 text-xs font-mono text-[var(--text-secondary)] border-l-2 border-[var(--accent-info)] pl-2">
+              {form.saveRuleId
+                ? saveRuleTemplates.find((template) => template.id === form.saveRuleId)
+                    ?.description ||
+                  t('syncTasks.saveRuleHint', {
+                    defaultValue:
+                      'Files are sorted into folders and renamed by this template. Edit templates in Settings.',
+                  })
+                : t('syncTasks.saveRuleHint', {
+                    defaultValue:
+                      'Files are sorted into folders and renamed by this template. Edit templates in Settings.',
+                  })}
             </div>
           </div>
           <div className="flex gap-3 mt-6 justify-end">

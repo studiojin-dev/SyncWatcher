@@ -1,3 +1,4 @@
+use crate::save_rules::{CollisionResolver, SaveRuleMapper, SaveRuleTemplateRecord};
 use crate::sync_engine::types::{
     ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunPhase, DryRunProgress,
     DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile, SyncFileEntry,
@@ -476,6 +477,33 @@ impl SyncEngine {
             .filter(|f| f.is_file)
             .map(|file| file.size)
             .sum();
+
+        let target_mapping = if let Some(save_rule) = options.save_rule.as_ref() {
+            emit_progress(SyncEngine::build_dry_run_progress(
+                DryRunPhase::Comparing,
+                "Applying save rules...".to_string(),
+                0,
+                total_files as u64,
+                0,
+                total_bytes,
+                DryRunSummary {
+                    total_files,
+                    ..DryRunSummary::default()
+                },
+            ));
+            Some(
+                Self::build_target_mapping(
+                    &source_canonical,
+                    &source_files,
+                    save_rule,
+                    cancel_token.clone(),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
         let mut compare_summary = DryRunSummary {
             total_files,
             files_to_copy: 0,
@@ -519,16 +547,25 @@ impl SyncEngine {
             let Some(source_meta) = source_map.get(&path) else {
                 continue;
             };
+            let target_relative: PathBuf = target_mapping
+                .as_ref()
+                .and_then(|mapping| mapping.get(&path).cloned())
+                .unwrap_or_else(|| path.clone());
+            let mapped_target_path = if target_relative != path {
+                Some(target_relative.clone())
+            } else {
+                None
+            };
 
-            if let Some(target_meta) = target_map.get(&path) {
+            if let Some(target_meta) = target_map.get(&target_relative) {
                 if source_meta.is_file {
                     compare_processed_files += 1;
                     compare_processed_bytes += source_meta.size;
                     let source_path = source_canonical.join(&path);
                     let target_path = target_canonical
                         .as_ref()
-                        .map(|target| target.join(&path))
-                        .unwrap_or_else(|| self.target.join(&path));
+                        .map(|target| target.join(&target_relative))
+                        .unwrap_or_else(|| self.target.join(&target_relative));
                     let mut already_checked_equal_hash = false;
 
                     if Self::compare_modified_time_at_second_precision(
@@ -542,6 +579,7 @@ impl SyncEngine {
                                 path: path.clone(),
                                 source_path: source_path.clone(),
                                 target_path: target_path.clone(),
+                                target_relative_path: mapped_target_path.clone(),
                                 source: Self::snapshot_from_metadata(source_meta),
                                 target: Self::snapshot_from_metadata(target_meta),
                             });
@@ -570,6 +608,7 @@ impl SyncEngine {
                                 path: path.clone(),
                                 source_path: source_path.clone(),
                                 target_path: target_path.clone(),
+                                target_relative_path: mapped_target_path.clone(),
                                 source: Self::snapshot_from_metadata(source_meta),
                                 target: Self::snapshot_from_metadata(target_meta),
                             });
@@ -632,6 +671,7 @@ impl SyncEngine {
                             target_size: Some(target_meta.size),
                             checksum_source: None,
                             checksum_target: None,
+                            target_path: mapped_target_path.clone(),
                         };
                         on_diff(
                             diff.clone(),
@@ -661,6 +701,7 @@ impl SyncEngine {
                     target_size: None,
                     checksum_source: None,
                     checksum_target: None,
+                    target_path: mapped_target_path.clone(),
                 };
                 on_diff(
                     diff.clone(),
@@ -888,7 +929,7 @@ impl SyncEngine {
 
         for diff in &dry_run.diffs {
             let source_path = self.source.join(&diff.path);
-            let target_path = self.target.join(&diff.path);
+            let target_path = self.target.join(diff.target_relative_path());
 
             match diff.kind {
                 FileDiffKind::New | FileDiffKind::Modified => {
@@ -933,6 +974,7 @@ impl SyncEngine {
                             source_size: diff.source_size,
                             target_size: diff.target_size,
                             error: Some(e.to_string()),
+                            target_path: diff.target_path.clone(),
                         };
                         file_callback(entry);
                     } else {
@@ -946,6 +988,7 @@ impl SyncEngine {
                             source_size: diff.source_size,
                             target_size: diff.target_size.or(Some(0)),
                             error: None,
+                            target_path: diff.target_path.clone(),
                         };
                         file_callback(entry);
                     }
@@ -973,14 +1016,49 @@ impl SyncEngine {
     }
 
     pub async fn find_orphan_files(&self, exclude_patterns: &[String]) -> Result<Vec<OrphanFile>> {
-        self.find_orphan_files_with_cancel(exclude_patterns, None)
+        self.find_orphan_files_with_cancel(exclude_patterns, None, None)
             .await
+    }
+
+    /// 저장 규칙을 적용해 소스 파일들의 타깃 상대 경로를 계산한다.
+    /// 메타데이터 읽기는 블로킹 I/O이므로 별도 스레드에서 수행한다.
+    async fn build_target_mapping(
+        source_canonical: &Path,
+        source_files: &[FileMetadata],
+        save_rule: &SaveRuleTemplateRecord,
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<HashMap<PathBuf, PathBuf>> {
+        let mapper = SaveRuleMapper::new(save_rule)
+            .map_err(|error| anyhow::anyhow!("Invalid save rule template: {error}"))?;
+        let mut entries: Vec<(PathBuf, SystemTime)> = source_files
+            .iter()
+            .filter(|file| file.is_file)
+            .map(|file| (file.path.clone(), file.modified))
+            .collect();
+        entries.sort();
+        let source_root = source_canonical.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let mut resolver = CollisionResolver::default();
+            let mut mapping = HashMap::with_capacity(entries.len());
+            for (index, (relative, modified)) in entries.iter().enumerate() {
+                if index % 64 == 0 && cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                    anyhow::bail!("Operation cancelled while applying save rules");
+                }
+                let mapped = mapper.map(&source_root.join(relative), relative, Some(*modified));
+                let resolved = resolver.resolve(relative, mapped.target_relative);
+                mapping.insert(relative.clone(), resolved);
+            }
+            Ok(mapping)
+        })
+        .await
+        .context("Save rule mapping task failed")?
     }
 
     pub async fn find_orphan_files_with_cancel(
         &self,
         exclude_patterns: &[String],
         cancel_token: Option<CancellationToken>,
+        save_rule: Option<&SaveRuleTemplateRecord>,
     ) -> Result<Vec<OrphanFile>> {
         let source_canonical = tokio::fs::canonicalize(&self.source)
             .await
@@ -1027,16 +1105,46 @@ impl SyncEngine {
                 &target_canonical,
                 DryRunPhase::ScanningTarget,
                 exclude_patterns,
-                cancel_token,
+                cancel_token.clone(),
                 Arc::new(StdMutex::new(|_: DryRunProgress| {})),
             )
             .await
             .context("Failed to read target directory")?;
 
+        // 저장 규칙이 있으면 "소스에 존재하는 경로"는 매핑된 타깃 경로와 그 상위 폴더들이다.
+        let mapped_paths: Option<HashSet<PathBuf>> = if let Some(save_rule) = save_rule {
+            let mapping = Self::build_target_mapping(
+                &source_canonical,
+                &source_files,
+                save_rule,
+                cancel_token,
+            )
+            .await?;
+            let mut expected = HashSet::new();
+            for target_relative in mapping.into_values() {
+                let mut ancestor = target_relative.parent().map(Path::to_path_buf);
+                while let Some(dir) = ancestor {
+                    if dir.as_os_str().is_empty() {
+                        break;
+                    }
+                    ancestor = dir.parent().map(Path::to_path_buf);
+                    expected.insert(dir);
+                }
+                expected.insert(target_relative);
+            }
+            Some(expected)
+        } else {
+            None
+        };
+
         let source_paths: HashSet<&PathBuf> = source_files.iter().map(|f| &f.path).collect();
+        let is_expected = |path: &PathBuf| match &mapped_paths {
+            Some(mapped) => mapped.contains(path),
+            None => source_paths.contains(path),
+        };
         let mut orphans: Vec<OrphanFile> = target_files
             .iter()
-            .filter(|meta| !source_paths.contains(&meta.path))
+            .filter(|meta| !is_expected(&meta.path))
             .map(|meta| OrphanFile {
                 path: meta.path.clone(),
                 size: if meta.is_file { meta.size } else { 0 },
@@ -2071,6 +2179,234 @@ mod tests {
         assert_eq!(result.failures.len(), 0);
         assert!(!target_dir.path().join("stale").exists());
 
+        Ok(())
+    }
+
+    fn by_type_template() -> crate::save_rules::SaveRuleTemplateRecord {
+        crate::save_rules::built_in_templates()
+            .into_iter()
+            .find(|template| template.id == crate::save_rules::PRESET_CAMERA_BY_TYPE)
+            .expect("preset")
+    }
+
+    fn options_with_rule(template: crate::save_rules::SaveRuleTemplateRecord) -> SyncOptions {
+        SyncOptions {
+            checksum_mode: false,
+            preserve_permissions: false,
+            preserve_times: true,
+            verify_after_copy: false,
+            exclude_patterns: Vec::new(),
+            save_rule: Some(template),
+        }
+    }
+
+    #[tokio::test]
+    async fn save_rule_maps_new_files_into_category_folders() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        fs::create_dir_all(source_dir.path().join("DCIM/100MSDCF")).await?;
+        fs::create_dir_all(source_dir.path().join("PRIVATE/M4ROOT/CLIP")).await?;
+        fs::create_dir_all(source_dir.path().join("PRIVATE/M4ROOT/SUB")).await?;
+        fs::write(source_dir.path().join("DCIM/100MSDCF/DSC00001.ARW"), b"raw").await?;
+        fs::write(source_dir.path().join("DCIM/100MSDCF/DSC00001.JPG"), b"jpg").await?;
+        fs::write(
+            source_dir.path().join("PRIVATE/M4ROOT/CLIP/C0001.MP4"),
+            b"clip",
+        )
+        .await?;
+        fs::write(
+            source_dir.path().join("PRIVATE/M4ROOT/SUB/C0001S03.MP4"),
+            b"px",
+        )
+        .await?;
+        fs::write(
+            source_dir.path().join("PRIVATE/M4ROOT/CLIP/C0001M01.XML"),
+            b"<x/>",
+        )
+        .await?;
+        fs::write(source_dir.path().join("notes.pdf"), b"pdf").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = options_with_rule(by_type_template());
+        let dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 6);
+        let mapped: HashMap<PathBuf, PathBuf> = dry_run
+            .diffs
+            .iter()
+            .map(|diff| (diff.path.clone(), diff.target_relative_path().to_path_buf()))
+            .collect();
+        assert_eq!(
+            mapped[&PathBuf::from("DCIM/100MSDCF/DSC00001.ARW")],
+            PathBuf::from("RAW/DSC00001.ARW")
+        );
+        assert_eq!(
+            mapped[&PathBuf::from("DCIM/100MSDCF/DSC00001.JPG")],
+            PathBuf::from("Photo/DSC00001.JPG")
+        );
+        assert_eq!(
+            mapped[&PathBuf::from("PRIVATE/M4ROOT/CLIP/C0001.MP4")],
+            PathBuf::from("Video/C0001.MP4")
+        );
+        assert_eq!(
+            mapped[&PathBuf::from("PRIVATE/M4ROOT/SUB/C0001S03.MP4")],
+            PathBuf::from("Proxy/C0001S03.MP4")
+        );
+        assert_eq!(
+            mapped[&PathBuf::from("PRIVATE/M4ROOT/CLIP/C0001M01.XML")],
+            PathBuf::from("Metadata/C0001M01.XML")
+        );
+        assert_eq!(
+            mapped[&PathBuf::from("notes.pdf")],
+            PathBuf::from("Other/notes.pdf")
+        );
+
+        let result = engine
+            .sync_files_from_dry_run(&dry_run, &options, |_| {}, |_| {})
+            .await?;
+        assert_eq!(result.files_copied, 6);
+        assert!(target_dir.path().join("RAW/DSC00001.ARW").exists());
+        assert!(target_dir.path().join("Video/C0001.MP4").exists());
+        assert!(target_dir.path().join("Other/notes.pdf").exists());
+        assert!(!target_dir.path().join("DCIM").exists());
+
+        // 두 번째 실행: 모두 동일하므로 복사할 것이 없어야 한다 (매핑된 경로로 비교).
+        let second = engine.dry_run(&options).await?;
+        assert_eq!(second.files_to_copy, 0, "{:?}", second.diffs);
+
+        // 타깃의 매핑된 파일이 바뀌면 Modified로 감지되고 target_path를 유지한다.
+        fs::write(
+            source_dir.path().join("DCIM/100MSDCF/DSC00001.JPG"),
+            b"jpg-v2",
+        )
+        .await?;
+        let third = engine.dry_run(&options).await?;
+        assert_eq!(third.files_to_copy, 1);
+        assert_eq!(third.diffs[0].kind, FileDiffKind::Modified);
+        assert_eq!(
+            third.diffs[0].target_path.as_deref(),
+            Some(Path::new("Photo/DSC00001.JPG"))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_rule_orphan_scan_uses_mapped_paths() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        fs::create_dir_all(source_dir.path().join("DCIM/100MSDCF")).await?;
+        fs::write(source_dir.path().join("DCIM/100MSDCF/DSC00001.JPG"), b"jpg").await?;
+        fs::create_dir_all(target_dir.path().join("Photo")).await?;
+        fs::write(target_dir.path().join("Photo/DSC00001.JPG"), b"jpg").await?;
+        fs::write(target_dir.path().join("Photo/DSC00009.JPG"), b"gone").await?;
+        fs::create_dir_all(target_dir.path().join("Stale")).await?;
+        fs::write(target_dir.path().join("Stale/old.txt"), b"old").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let template = by_type_template();
+        let orphans = engine
+            .find_orphan_files_with_cancel(&[], None, Some(&template))
+            .await?;
+        let paths: Vec<PathBuf> = orphans.iter().map(|o| o.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("Photo/DSC00009.JPG"),
+                PathBuf::from("Stale"),
+                PathBuf::from("Stale/old.txt"),
+            ]
+        );
+
+        // 규칙 없이 보면 매핑된 파일이 모두 고아로 보인다 (기존 동작 유지).
+        let without_rule = engine.find_orphan_files(&[]).await?;
+        assert!(without_rule
+            .iter()
+            .any(|o| o.path == PathBuf::from("Photo/DSC00001.JPG")));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_rule_collisions_get_stable_suffixes() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        fs::create_dir_all(source_dir.path().join("DCIM/100MSDCF")).await?;
+        fs::create_dir_all(source_dir.path().join("DCIM/101MSDCF")).await?;
+        fs::write(source_dir.path().join("DCIM/100MSDCF/DSC00001.JPG"), b"a").await?;
+        fs::write(source_dir.path().join("DCIM/101MSDCF/DSC00001.JPG"), b"bb").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = options_with_rule(by_type_template());
+        let dry_run = engine.dry_run(&options).await?;
+        let mut targets: Vec<PathBuf> = dry_run
+            .diffs
+            .iter()
+            .map(|diff| diff.target_relative_path().to_path_buf())
+            .collect();
+        targets.sort();
+        assert_eq!(
+            targets,
+            vec![
+                PathBuf::from("Photo/DSC00001.JPG"),
+                PathBuf::from("Photo/DSC00001_2.JPG")
+            ]
+        );
+        engine
+            .sync_files_from_dry_run(&dry_run, &options, |_| {}, |_| {})
+            .await?;
+        let second = engine.dry_run(&options).await?;
+        assert_eq!(second.files_to_copy, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn save_rule_target_newer_conflict_uses_mapped_target() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+        fs::create_dir_all(source_dir.path().join("DCIM")).await?;
+        let source_file = source_dir.path().join("DCIM/DSC00001.JPG");
+        fs::write(&source_file, b"source").await?;
+        fs::create_dir_all(target_dir.path().join("Photo")).await?;
+        let target_file = target_dir.path().join("Photo/DSC00001.JPG");
+        fs::write(&target_file, b"target-v2").await?;
+        let source_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        filetime::set_file_mtime(
+            &source_file,
+            filetime::FileTime::from_system_time(source_time),
+        )?;
+        filetime::set_file_mtime(
+            &target_file,
+            filetime::FileTime::from_system_time(source_time + std::time::Duration::from_secs(60)),
+        )?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+        let options = options_with_rule(by_type_template());
+        let (dry_run, conflicts) = engine
+            .dry_run_with_progress_and_conflicts(
+                &options,
+                CancellationToken::new(),
+                |_| {},
+                |_, _| {},
+            )
+            .await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].path, PathBuf::from("DCIM/DSC00001.JPG"));
+        assert_eq!(
+            conflicts[0].target_relative_path.as_deref(),
+            Some(Path::new("Photo/DSC00001.JPG"))
+        );
+        assert!(conflicts[0].target_path.ends_with("Photo/DSC00001.JPG"));
         Ok(())
     }
 }

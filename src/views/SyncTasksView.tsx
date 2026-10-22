@@ -4,6 +4,7 @@ import { IconPlus } from '@tabler/icons-react';
 import { SyncTask } from '../hooks/useSyncTasks';
 import { useSyncTasksContext } from '../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../context/ExclusionSetsContext';
+import { useSaveRuleTemplatesContext } from '../context/SaveRuleTemplatesContext';
 import { useSyncTaskStatusStore } from '../hooks/useSyncTaskStatus';
 import { useSettings } from '../hooks/useSettings';
 import { FadeIn } from '../components/ui/Animations';
@@ -42,6 +43,8 @@ function SyncTasksView({
   const { tasks, addTask, updateTask, deleteTask, error, reload } =
     useSyncTasksContext();
   const { sets, getPatternsForSets } = useExclusionSetsContext();
+  const { templates: saveRuleTemplates, getTemplateById: getSaveRuleTemplate } =
+    useSaveRuleTemplatesContext();
   const { settings } = useSettings();
   const { showToast } = useToast();
   const [showForm, setShowForm] = useState(false);
@@ -323,6 +326,7 @@ function SyncTasksView({
         editingTask={editingTask}
         form={form}
         sets={sets}
+        saveRuleTemplates={saveRuleTemplates}
         savingTask={savingTask}
         onClose={closeForm}
         onSubmit={handleSubmit}
@@ -343,6 +347,7 @@ function SyncTasksView({
           source={subView.source}
           target={subView.target}
           excludePatterns={subView.excludePatterns}
+          saveRuleId={subView.saveRuleId ?? null}
           onBack={() => setSubView({ kind: 'list' })}
         />
       ) : null}
@@ -399,6 +404,7 @@ function SyncTasksView({
           conflictSessionsLoading={conflictSessionsLoading}
           dataUnitSystem={settings.dataUnitSystem}
           getPatternsForSets={getPatternsForSets}
+          getSaveRuleName={(id) => getSaveRuleTemplate(id)?.name ?? null}
           t={t}
           onRefreshConflictSessions={() => {
             void loadConflictSessions();

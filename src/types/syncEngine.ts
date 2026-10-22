@@ -15,6 +15,8 @@ export interface FileDiff {
   target_size: number | null;
   checksum_source: string | null;
   checksum_target: string | null;
+  /** 저장 규칙으로 바뀐 타깃 상대 경로. 없으면 path와 같다. */
+  target_path?: string | null;
 }
 
 export type TargetPreflightKind =
@@ -62,6 +64,8 @@ export interface SyncFileEntry {
   source_size: number | null;
   target_size: number | null;
   error?: string;
+  /** 저장 규칙으로 바뀐 타깃 상대 경로. 없으면 path와 같다. */
+  target_path?: string | null;
 }
 
 export interface SyncFileBatchEvent {

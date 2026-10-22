@@ -74,6 +74,7 @@ Task payloads include the fields used by the app backend, including:
 - checksumMode
 - verifyAfterCopy
 - exclusionSets
+- saveRuleId (save rule template id; omit or null to mirror the source layout)
 - watchMode
 - autoUnmount
 - sourceType

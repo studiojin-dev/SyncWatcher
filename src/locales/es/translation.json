@@ -125,7 +125,10 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed",
-      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing.",
+      "saveRule": "Regla de guardado",
+      "saveRuleMirror": "Conservar la estructura de carpetas del origen (predeterminado)",
+      "saveRuleHint": "Los archivos se ordenan en carpetas y se renombran según esta plantilla. Edita las plantillas en Ajustes."
     },
     "recurringSchedules": {
       "title": "Ejecuciones Programadas",
@@ -267,7 +270,8 @@
       "colType": "Tipo",
       "colSourceSize": "Tamaño de origen",
       "colTargetSize": "Tamaño de destino",
-      "scanning": "Escaneando..."
+      "scanning": "Escaneando...",
+      "savedAs": "Guardado como {{path}}"
     },
     "orphan": {
       "title": "Archivos huérfanos",
@@ -668,6 +672,53 @@
         "transportSerial": "Coincide el número de serie del lector de tarjetas (USB)",
         "cameraBodySerial": "Coincide el número de serie de la cámara: {{value}}",
         "cameraFolderStructure": "Coincide la estructura de carpetas de la cámara (PRIVATE/DCIM)"
+      }
+    },
+    "saveRules": {
+      "title": "Plantillas de reglas de guardado",
+      "intro": "Una plantilla de reglas de guardado decide la carpeta de destino y el nombre de cada archivo copiado: por tipo (proxy, vídeo, RAW, foto, metadatos), fecha de captura o valores EXIF. Elige una plantilla en los ajustes de la tarea.",
+      "builtIn": "INTEGRADA",
+      "duplicate": "Duplicar",
+      "confirmDelete": "¿Eliminar la plantilla \"{{name}}\"?",
+      "anyType": "Cualquier tipo",
+      "addTemplate": "Añadir plantilla de reglas",
+      "reset": "Restaurar integradas",
+      "resetHint": "Restaura las plantillas integradas; tus propias plantillas se conservan.",
+      "resetDone": "Plantillas integradas restauradas.",
+      "saved": "Plantilla de reglas guardada.",
+      "copySuffix": "copia",
+      "ruleNumber": "Regla {{index}}",
+      "moveUp": "Subir",
+      "moveDown": "Bajar",
+      "removeRule": "Eliminar regla",
+      "matchCategories": "Tipos de archivo (vacío = cualquiera)",
+      "matchExtensions": "Extensiones (vacío = cualquiera)",
+      "folderTemplate": "Plantilla de carpeta",
+      "fileNameTemplate": "Plantilla de nombre de archivo",
+      "templateName": "Nombre de la plantilla",
+      "templateNamePlaceholder": "Mi organización de cámara",
+      "description": "Descripción",
+      "dateSource": "Los tokens de fecha usan",
+      "dateSourceCapture": "Hora de captura (EXIF / vídeo), si no, fecha de modificación",
+      "dateSourceModified": "Solo la fecha de modificación del archivo",
+      "videoTimestamp": "La hora de creación de MP4/MOV es",
+      "videoTimestampLocal": "Hora local tal como se grabó (la mayoría de cámaras)",
+      "videoTimestampUtc": "UTC, convertir a la zona horaria de este Mac",
+      "categoryNames": "Nombres de carpeta para {category}",
+      "rules": "Reglas (gana la primera coincidencia)",
+      "addRule": "Añadir regla",
+      "unmatchedHint": "Los archivos que no coinciden con ninguna regla conservan su ruta relativa original.",
+      "tokensTitle": "Tokens",
+      "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} fecha/hora · {name} nombre original sin extensión · {ext}/{EXT}/{ext_lower} extensión · {folder} carpeta de origen · {path} subruta de origen · {category} nombre de carpeta de arriba · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} desde EXIF. Los valores ausentes quedan vacíos; la extensión original se conserva.",
+      "metadataCoverage": "La hora de captura y los datos de cámara provienen de JPEG, HEIF/HEIC y RAW basados en TIFF (ARW, NEF, CR2, DNG, ORF, RW2, RAF…). MP4/MOV usan el XML lateral de Sony o la cabecera del archivo. Otros formatos (CR3, MXF, AVI…) usan la fecha de modificación.",
+      "preview": "Vista previa (archivos de ejemplo)",
+      "category": {
+        "proxy": "Proxy",
+        "video": "Vídeo",
+        "raw": "RAW",
+        "image": "Foto",
+        "metadata": "Metadatos",
+        "other": "Otros"
       }
     }
   }

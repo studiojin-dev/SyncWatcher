@@ -19,132 +19,16 @@ const MAX_DCIM_FOLDERS: usize = 32;
 /// 폴더당 살펴볼 항목 최대 개수.
 const MAX_ENTRIES_PER_FOLDER: usize = 4096;
 
-const EXIF_IFD_POINTER_TAG: u16 = 0x8769;
-const BODY_SERIAL_NUMBER_TAG: u16 = 0xA431;
-const EXIF_TYPE_ASCII: u16 = 2;
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CameraIdentity {
     pub body_serial: Option<String>,
     pub folder_signature: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-enum ByteOrder {
-    Little,
-    Big,
-}
-
-fn read_u16(data: &[u8], offset: usize, order: ByteOrder) -> Option<u16> {
-    let bytes: [u8; 2] = data.get(offset..offset.checked_add(2)?)?.try_into().ok()?;
-    Some(match order {
-        ByteOrder::Little => u16::from_le_bytes(bytes),
-        ByteOrder::Big => u16::from_be_bytes(bytes),
-    })
-}
-
-fn read_u32(data: &[u8], offset: usize, order: ByteOrder) -> Option<u32> {
-    let bytes: [u8; 4] = data.get(offset..offset.checked_add(4)?)?.try_into().ok()?;
-    Some(match order {
-        ByteOrder::Little => u32::from_le_bytes(bytes),
-        ByteOrder::Big => u32::from_be_bytes(bytes),
-    })
-}
-
-struct IfdEntry {
-    entry_offset: usize,
-    field_type: u16,
-    count: u32,
-}
-
-fn find_ifd_entry(tiff: &[u8], ifd_offset: usize, tag: u16, order: ByteOrder) -> Option<IfdEntry> {
-    let entry_count = usize::from(read_u16(tiff, ifd_offset, order)?);
-    for index in 0..entry_count {
-        let entry_offset = ifd_offset
-            .checked_add(2)?
-            .checked_add(index.checked_mul(12)?)?;
-        if read_u16(tiff, entry_offset, order)? == tag {
-            return Some(IfdEntry {
-                entry_offset,
-                field_type: read_u16(tiff, entry_offset.checked_add(2)?, order)?,
-                count: read_u32(tiff, entry_offset.checked_add(4)?, order)?,
-            });
-        }
-    }
-    None
-}
-
-/// TIFF 헤더부터 시작하는 바이트에서 BodySerialNumber를 찾는다.
-fn parse_tiff_body_serial(tiff: &[u8]) -> Option<String> {
-    let order = match tiff.get(0..2)? {
-        b"II" => ByteOrder::Little,
-        b"MM" => ByteOrder::Big,
-        _ => return None,
-    };
-    if read_u16(tiff, 2, order)? != 42 {
-        return None;
-    }
-    let ifd0 = usize::try_from(read_u32(tiff, 4, order)?).ok()?;
-    let exif_pointer = find_ifd_entry(tiff, ifd0, EXIF_IFD_POINTER_TAG, order)?;
-    let exif_ifd = usize::try_from(read_u32(
-        tiff,
-        exif_pointer.entry_offset.checked_add(8)?,
-        order,
-    )?)
-    .ok()?;
-
-    let serial = find_ifd_entry(tiff, exif_ifd, BODY_SERIAL_NUMBER_TAG, order)?;
-    if serial.field_type != EXIF_TYPE_ASCII {
-        return None;
-    }
-    let count = usize::try_from(serial.count).ok()?;
-    let value_offset = if count <= 4 {
-        serial.entry_offset.checked_add(8)?
-    } else {
-        usize::try_from(read_u32(tiff, serial.entry_offset.checked_add(8)?, order)?).ok()?
-    };
-    let raw = tiff.get(value_offset..value_offset.checked_add(count)?)?;
-    let text = String::from_utf8_lossy(raw);
-    let trimmed = text.trim_matches(|c: char| c == '\0' || c.is_whitespace());
-    if trimmed.is_empty() || trimmed.contains('\0') {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
 /// JPEG(APP1 Exif) 또는 TIFF 기반 RAW(ARW 등) 바이트에서 EXIF BodySerialNumber를 읽는다.
 /// 신뢰할 수 없는 외부 미디어 데이터이므로 범위를 벗어나면 None을 반환한다.
 pub fn parse_exif_body_serial(data: &[u8]) -> Option<String> {
-    if data.get(0..2)? != [0xFF, 0xD8] {
-        return parse_tiff_body_serial(data);
-    }
-
-    let mut offset = 2usize;
-    loop {
-        if *data.get(offset)? != 0xFF {
-            return None;
-        }
-        let marker = *data.get(offset.checked_add(1)?)?;
-        // SOS 이후는 이미지 데이터이므로 탐색을 끝낸다.
-        if marker == 0xDA || marker == 0xD9 {
-            return None;
-        }
-        let segment_length = usize::from(read_u16(data, offset.checked_add(2)?, ByteOrder::Big)?);
-        if segment_length < 2 {
-            return None;
-        }
-        let payload_start = offset.checked_add(4)?;
-        let segment_end = offset.checked_add(2)?.checked_add(segment_length)?;
-        if marker == 0xE1 && data.get(payload_start..payload_start.checked_add(6)?)? == b"Exif\0\0"
-        {
-            let tiff_start = payload_start.checked_add(6)?;
-            let tiff = data.get(tiff_start..segment_end.min(data.len()))?;
-            if let Some(serial) = parse_tiff_body_serial(tiff) {
-                return Some(serial);
-            }
-        }
-        offset = segment_end;
-    }
+    crate::save_rules::exif::parse_exif(data).and_then(|fields| fields.body_serial)
 }
 
 fn is_exif_image(path: &Path) -> bool {

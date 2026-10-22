@@ -103,6 +103,22 @@ vi.mock('../context/ExclusionSetsContext', () => ({
   }),
 }));
 
+vi.mock('../context/SaveRuleTemplatesContext', () => ({
+  useSaveRuleTemplatesContext: () => ({
+    templates: [],
+    loaded: true,
+    error: null,
+    addTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn(),
+    resetTemplates: vi.fn(),
+    previewTemplate: vi.fn(async () => []),
+    getTemplateById: () => null,
+    reload: vi.fn(),
+  }),
+}));
+
+
 vi.mock('../hooks/useSettings', () => ({
   useSettings: () => ({
     settings: {

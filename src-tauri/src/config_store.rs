@@ -16,6 +16,7 @@ use crate::recurring::{
     normalize_recurring_schedules, validate_guided_preset_compatible_schedules,
     validate_strict_recurring_schedule_ids, RecurringScheduleRecord,
 };
+use crate::save_rules::{self, SaveRuleTemplateRecord};
 use crate::supporter;
 use crate::DataUnitSystem;
 
@@ -23,6 +24,7 @@ pub const APP_IDENTIFIER: &str = "dev.studiojin.syncwatcher";
 pub const SETTINGS_FILE_NAME: &str = "settings.yaml";
 pub const TASKS_FILE_NAME: &str = "tasks.yaml";
 pub const EXCLUSION_SETS_FILE_NAME: &str = "exclusion_sets.yaml";
+pub const SAVE_RULE_TEMPLATES_FILE_NAME: &str = "save_rule_templates.yaml";
 pub const CONTROL_PLANE_SOCKET_FILE_NAME: &str = "syncwatcher-mcp.sock";
 
 const APP_SUPPORT_DIR_OVERRIDE_ENV: &str = "SYNCWATCHER_APP_SUPPORT_DIR";
@@ -230,6 +232,9 @@ pub struct SyncTaskRecord {
     pub source_identity: Option<SourceIdentitySnapshot>,
     #[serde(default)]
     pub recurring_schedules: Vec<RecurringScheduleRecord>,
+    /// 저장 규칙 템플릿 ID. `None`이면 원본 폴더 구조를 그대로 미러링한다.
+    #[serde(default)]
+    pub save_rule_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
@@ -301,6 +306,8 @@ pub struct CreateSyncTaskRequest {
     pub source_identity: Option<SourceIdentitySnapshot>,
     #[serde(default)]
     pub recurring_schedules: Vec<RecurringScheduleRecord>,
+    #[serde(default)]
+    pub save_rule_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -325,6 +332,19 @@ pub struct UpdateSyncTaskRequest {
     pub source_sub_path: Option<String>,
     pub source_identity: Option<SourceIdentitySnapshot>,
     pub recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
+    /// `Some(Some(id))`로 설정, `Some(None)`으로 해제, `None`이면 유지.
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub save_rule_id: Option<Option<String>>,
+}
+
+/// JSON `null`을 `Some(None)`(해제)으로, 필드 생략을 `None`(유지)으로 구분한다.
+pub(crate) fn deserialize_double_option<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -389,6 +409,18 @@ pub struct ExclusionSetEnvelope {
 #[serde(rename_all = "camelCase")]
 pub struct ExclusionSetsEnvelope {
     pub sets: Vec<ExclusionSetRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveRuleTemplateEnvelope {
+    pub template: SaveRuleTemplateRecord,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveRuleTemplatesEnvelope {
+    pub templates: Vec<SaveRuleTemplateRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -479,6 +511,32 @@ impl ConfigStore {
 
     pub fn exclusion_sets_file_path(&self) -> PathBuf {
         self.config_dir.join(EXCLUSION_SETS_FILE_NAME)
+    }
+
+    pub fn save_rule_templates_file_path(&self) -> PathBuf {
+        self.config_dir.join(SAVE_RULE_TEMPLATES_FILE_NAME)
+    }
+
+    /// 저장 규칙 템플릿을 읽는다. 파일이 없으면 기본 템플릿으로 만들고,
+    /// 사용자가 지운 기본 템플릿은 되살리지 않는다 (초기화 명령으로만 복원).
+    pub fn load_save_rule_templates(
+        &self,
+    ) -> Result<Vec<SaveRuleTemplateRecord>, ConfigStoreError> {
+        self.ensure_config_dir()?;
+        let path = self.save_rule_templates_file_path();
+        let stored: Vec<SaveRuleTemplateRecord> =
+            self.load_or_create_yaml(&path, save_rules::built_in_templates())?;
+        let normalized = normalize_save_rule_templates(stored);
+        self.write_if_changed(&path, &normalized)?;
+        Ok(normalized)
+    }
+
+    pub fn save_save_rule_templates(
+        &self,
+        templates: &[SaveRuleTemplateRecord],
+    ) -> Result<(), ConfigStoreError> {
+        self.ensure_config_dir()?;
+        self.write_yaml_atomic(&self.save_rule_templates_file_path(), templates)
     }
 
     pub fn load_settings(&self) -> Result<StoredSettings, ConfigStoreError> {
@@ -864,6 +922,8 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
     normalized
         .exclusion_sets
         .retain(|value| !value.trim().is_empty());
+    normalized.save_rule_id =
+        normalize_optional_string(normalized.save_rule_id).map(|value| value.trim().to_string());
     normalized.auto_unmount = should_enable_auto_unmount(&normalized);
 
     Ok(normalized)
@@ -893,6 +953,7 @@ pub fn build_sync_task_record(
         source_sub_path: request.source_sub_path,
         source_identity: request.source_identity,
         recurring_schedules: request.recurring_schedules,
+        save_rule_id: request.save_rule_id,
     })?;
 
     validate_strict_recurring_schedule_ids(&task.recurring_schedules)
@@ -980,6 +1041,10 @@ pub fn apply_sync_task_update(
             .recurring_schedules
             .clone()
             .unwrap_or(task.recurring_schedules),
+        save_rule_id: match &update.save_rule_id {
+            Some(value) => value.clone(),
+            None => task.save_rule_id,
+        },
     };
     if update.source_identity.is_none() && source_changed {
         next.source_identity = None;
@@ -1005,6 +1070,49 @@ pub fn validate_exclusion_sets(sets: &[ExclusionSetRecord]) -> Result<(), Config
         })?;
     }
     Ok(())
+}
+
+pub fn validate_save_rule_templates(
+    templates: &[SaveRuleTemplateRecord],
+) -> Result<(), ConfigStoreError> {
+    let mut seen = std::collections::HashSet::new();
+    for template in templates {
+        input_validation::validate_task_id(&template.id).map_err(|error| {
+            ConfigStoreError::ValidationError {
+                message: format!("Invalid save rule template id '{}': {error}", template.id),
+            }
+        })?;
+        if !seen.insert(template.id.as_str()) {
+            return Err(ConfigStoreError::ValidationError {
+                message: format!("Duplicate save rule template id '{}'", template.id),
+            });
+        }
+        save_rules::validate_template(template).map_err(|error| {
+            ConfigStoreError::ValidationError {
+                message: format!("Invalid save rule template '{}': {error}", template.name),
+            }
+        })?;
+    }
+    Ok(())
+}
+
+/// 기본 제공 템플릿의 `builtIn` 플래그를 ID 기준으로 바로잡고, 각 템플릿을 정규화한다.
+pub fn normalize_save_rule_templates(
+    templates: Vec<SaveRuleTemplateRecord>,
+) -> Vec<SaveRuleTemplateRecord> {
+    let built_in_ids: std::collections::HashSet<String> = save_rules::built_in_templates()
+        .into_iter()
+        .map(|template| template.id)
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    templates
+        .into_iter()
+        .filter(|template| seen.insert(template.id.clone()))
+        .map(|mut template| {
+            template.built_in = built_in_ids.contains(&template.id);
+            save_rules::normalize_template(template)
+        })
+        .collect()
 }
 
 fn parse_error(path: &Path, raw_content: String, error: serde_yaml::Error) -> ConfigStoreError {
@@ -1701,6 +1809,7 @@ mod tests {
             source_sub_path: Some("DCIM".to_string()),
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         })
         .expect("task should normalize");
 
@@ -1752,6 +1861,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         });
         // source 문자열만 있는 레거시 경로에서도 SD 토큰을 UUID 소스로 인식해야 한다.
         let mut legacy = task.expect("task should normalize");
@@ -1944,6 +2054,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         }];
 
         store
@@ -2001,6 +2112,7 @@ mod tests {
                 checksum_mode: false,
                 retention_count: 20,
             }],
+            save_rule_id: None,
         }];
 
         store
@@ -2038,6 +2150,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         }];
 
         store
@@ -2096,6 +2209,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         }];
 
         store
@@ -2152,6 +2266,7 @@ mod tests {
                     checksum_mode: false,
                     retention_count: 20,
                 }],
+                save_rule_id: None,
             },
         )
         .expect_err("create should reject unsupported custom cron");
@@ -2181,6 +2296,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         })
         .expect("task should normalize");
 
@@ -2226,6 +2342,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         })
         .expect("task should normalize");
 
@@ -2271,6 +2388,7 @@ mod tests {
             source_sub_path: None,
             source_identity: None,
             recurring_schedules: Vec::new(),
+            save_rule_id: None,
         })
         .expect("task should normalize");
 
@@ -2334,6 +2452,7 @@ mod tests {
                 checksum_mode: false,
                 retention_count: 20,
             }],
+            save_rule_id: None,
         })
         .expect("task should normalize");
 
@@ -2401,5 +2520,91 @@ mod tests {
 
         assert_ne!(initial_token, next_token);
         assert!(next_token.starts_with("swmcp_"));
+    }
+
+    #[test]
+    fn save_rule_templates_default_to_built_ins_and_persist_custom_ones() {
+        let temp = tempdir().expect("tempdir");
+        let store = ConfigStore::from_config_dir(temp.path().to_path_buf());
+
+        let templates = store
+            .load_save_rule_templates()
+            .expect("templates should load");
+        assert_eq!(templates.len(), save_rules::built_in_templates().len());
+        assert!(templates.iter().all(|template| template.built_in));
+        assert!(store.save_rule_templates_file_path().exists());
+
+        let mut custom = templates[0].clone();
+        custom.id = "my-rule".to_string();
+        custom.name = "My rule".to_string();
+        custom.built_in = true; // ID 기준으로 정규화되어 false가 되어야 한다
+        custom.rules[0].extensions = vec![".ARW".to_string()];
+        let mut next = templates.clone();
+        next.push(custom);
+        store
+            .save_save_rule_templates(&next)
+            .expect("templates should save");
+
+        let reloaded = store
+            .load_save_rule_templates()
+            .expect("templates should reload");
+        let mine = reloaded
+            .iter()
+            .find(|template| template.id == "my-rule")
+            .expect("custom template");
+        assert!(!mine.built_in);
+        assert_eq!(mine.rules[0].extensions, vec!["arw".to_string()]);
+        validate_save_rule_templates(&reloaded).expect("valid");
+
+        let mut duplicated = reloaded.clone();
+        duplicated.push(reloaded[0].clone());
+        assert!(validate_save_rule_templates(&duplicated).is_err());
+    }
+
+    #[test]
+    fn sync_task_update_keeps_clears_or_sets_save_rule_id() {
+        let task = normalize_sync_task(SyncTaskRecord {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            source: "/src".to_string(),
+            source_bookmark: None,
+            source_network_mount: None,
+            target: "/dst".to_string(),
+            target_bookmark: None,
+            target_network_mount: None,
+            checksum_mode: false,
+            verify_after_copy: true,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+            save_rule_id: Some("  camera-by-type ".to_string()),
+        })
+        .expect("task should normalize");
+        assert_eq!(task.save_rule_id.as_deref(), Some("camera-by-type"));
+
+        let keep: UpdateSyncTaskRequest =
+            serde_json::from_value(serde_json::json!({ "taskId": "task-1", "name": "Renamed" }))
+                .expect("payload");
+        let kept = apply_sync_task_update(task.clone(), &keep).expect("update");
+        assert_eq!(kept.save_rule_id.as_deref(), Some("camera-by-type"));
+
+        let clear: UpdateSyncTaskRequest =
+            serde_json::from_value(serde_json::json!({ "taskId": "task-1", "saveRuleId": null }))
+                .expect("payload");
+        let cleared = apply_sync_task_update(task.clone(), &clear).expect("update");
+        assert_eq!(cleared.save_rule_id, None);
+
+        let set: UpdateSyncTaskRequest = serde_json::from_value(
+            serde_json::json!({ "taskId": "task-1", "saveRuleId": "camera-by-date" }),
+        )
+        .expect("payload");
+        let updated = apply_sync_task_update(task, &set).expect("update");
+        assert_eq!(updated.save_rule_id.as_deref(), Some("camera-by-date"));
     }
 }

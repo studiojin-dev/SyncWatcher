@@ -92,6 +92,10 @@ vi.mock('../components/settings/ExclusionSetsManager', () => ({
   ExclusionSetsManager: () => <div>exclusion-sets</div>,
 }));
 
+vi.mock('../components/settings/SaveRuleTemplatesManager', () => ({
+  SaveRuleTemplatesManager: () => <div>save-rule-templates</div>,
+}));
+
 vi.mock('../components/features/LicenseActivation', () => ({
   default: ({ open }: { open: boolean }) => (open ? <div>license-modal</div> : null),
 }));

@@ -13,6 +13,7 @@ pub mod mcp_stdio;
 pub mod network_mount;
 pub mod path_validation;
 pub mod recurring;
+pub mod save_rules;
 pub mod security_scoped;
 pub mod supporter;
 pub mod sync_engine;
@@ -50,11 +51,12 @@ use system_integration::DiskMonitor;
 
 use config_store::{
     apply_sync_task_update, build_sync_task_record, default_exclusion_set_records,
-    settings_snapshot_from_store, validate_exclusion_sets, AppSettings, ConfigStore,
-    ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope, ExclusionSetEnvelope,
-    ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch, NetworkMountRecord,
-    NewSyncTaskRecord, SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord,
-    SyncTasksEnvelope, UpdateSettingsPayload, UpdateSyncTaskRequest,
+    settings_snapshot_from_store, validate_exclusion_sets, validate_save_rule_templates,
+    AppSettings, ConfigStore, ConfigStoreChangedEvent, ConfigStoreError, DeleteResultEnvelope,
+    ExclusionSetEnvelope, ExclusionSetRecord, ExclusionSetsEnvelope, McpSettingsPatch,
+    NetworkMountRecord, NewSyncTaskRecord, SaveRuleTemplateEnvelope, SaveRuleTemplatesEnvelope,
+    SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope,
+    UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
@@ -70,6 +72,7 @@ use recurring::{
     RecurringScheduleHistoryEntry, RecurringScheduleHistoryStatus, RecurringScheduleHistoryStore,
     RecurringScheduleRecord,
 };
+use save_rules::{SaveRulePreviewEntry, SaveRuleTemplateRecord};
 use security_scoped::{CapturedPathAccess, LegacyImportStatus, SecurityScopedAccessManager};
 
 use watcher::{WatchEvent, WatcherManager};
@@ -439,6 +442,8 @@ struct DryRunCandidatePathSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DryRunArtifactCandidate {
     relative_path: PathBuf,
+    /// 타깃 루트 기준 상대 경로 (저장 규칙 적용 후). `None`이면 `relative_path`와 같다.
+    target_relative_path: Option<PathBuf>,
     source: DryRunCandidatePathSnapshot,
     target: DryRunCandidatePathSnapshot,
 }
@@ -449,6 +454,7 @@ struct DryRunTaskConfigSnapshot {
     target: String,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
+    save_rule: Option<SaveRuleTemplateRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -565,6 +571,8 @@ struct RuntimeConfigPayload {
     #[serde(default)]
     exclusion_sets: Vec<RuntimeExclusionSet>,
     #[serde(default)]
+    save_rule_templates: Vec<SaveRuleTemplateRecord>,
+    #[serde(default)]
     settings: RuntimeSettings,
 }
 
@@ -592,6 +600,8 @@ struct RuntimeSyncTask {
     verify_after_copy: bool,
     #[serde(default)]
     exclusion_sets: Vec<String>,
+    #[serde(default)]
+    save_rule_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -746,6 +756,7 @@ enum ConfigStoreScopeKind {
     Settings,
     SyncTasks,
     ExclusionSets,
+    SaveRuleTemplates,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -753,6 +764,7 @@ enum ConfigStoreFileScope {
     Settings,
     SyncTasks,
     ExclusionSets,
+    SaveRuleTemplates,
 }
 
 impl ConfigStoreFileScope {
@@ -761,6 +773,7 @@ impl ConfigStoreFileScope {
             "settings" => Ok(Self::Settings),
             "syncTasks" => Ok(Self::SyncTasks),
             "exclusionSets" => Ok(Self::ExclusionSets),
+            "saveRuleTemplates" => Ok(Self::SaveRuleTemplates),
             _ => Err(format!("Unsupported config store scope: {value}")),
         }
     }
@@ -770,6 +783,7 @@ impl ConfigStoreFileScope {
             Self::Settings => "settings",
             Self::SyncTasks => "syncTasks",
             Self::ExclusionSets => "exclusionSets",
+            Self::SaveRuleTemplates => "saveRuleTemplates",
         }
     }
 
@@ -778,6 +792,7 @@ impl ConfigStoreFileScope {
             Self::Settings => store.settings_file_path(),
             Self::SyncTasks => store.tasks_file_path(),
             Self::ExclusionSets => store.exclusion_sets_file_path(),
+            Self::SaveRuleTemplates => store.save_rule_templates_file_path(),
         }
     }
 }
@@ -799,6 +814,9 @@ fn config_store_file_scope_for_exact_path(
     }
     if path == store.exclusion_sets_file_path().as_path() {
         return Some(ConfigStoreFileScope::ExclusionSets);
+    }
+    if path == store.save_rule_templates_file_path().as_path() {
+        return Some(ConfigStoreFileScope::SaveRuleTemplates);
     }
     None
 }
@@ -1176,6 +1194,7 @@ fn to_runtime_task_record(task: &SyncTaskRecord) -> RuntimeSyncTask {
         auto_unmount: task.auto_unmount && is_uuid_source(&task.source, task.source_type.clone()),
         verify_after_copy: task.verify_after_copy,
         exclusion_sets: task.exclusion_sets.clone(),
+        save_rule_id: task.save_rule_id.clone(),
     }
 }
 
@@ -1307,6 +1326,11 @@ fn config_store_scope_for_path(path: &Path, state: &AppState) -> Option<ConfigSt
         return Some(ConfigStoreScopeKind::ExclusionSets);
     }
 
+    let save_rule_templates_path = state.config_store.save_rule_templates_file_path();
+    if path == save_rule_templates_path.as_path() {
+        return Some(ConfigStoreScopeKind::SaveRuleTemplates);
+    }
+
     None
 }
 
@@ -1336,6 +1360,9 @@ async fn apply_config_write_side_effects(
         ConfigStoreScopeKind::ExclusionSets => {
             emit_config_store_changed(&app, &["exclusionSets"]);
         }
+        ConfigStoreScopeKind::SaveRuleTemplates => {
+            emit_config_store_changed(&app, &["saveRuleTemplates"]);
+        }
     }
 
     Ok(())
@@ -1361,6 +1388,11 @@ fn validate_repaired_config_store_file(
                 .map_err(|error| format!("Invalid exclusion_sets.yaml content: {error}"))?;
             validate_exclusion_sets(&sets).map_err(config_store_error_to_string)
         }
+        ConfigStoreFileScope::SaveRuleTemplates => {
+            let templates = serde_yaml::from_str::<Vec<SaveRuleTemplateRecord>>(content)
+                .map_err(|error| format!("Invalid save_rule_templates.yaml content: {error}"))?;
+            validate_save_rule_templates(&templates).map_err(config_store_error_to_string)
+        }
     }
 }
 
@@ -1377,9 +1409,9 @@ fn canonicalize_repaired_config_store_file(
             serde_yaml::to_string(&normalized)
                 .map_err(|error| format!("Failed to serialize tasks.yaml content: {error}"))
         }
-        ConfigStoreFileScope::Settings | ConfigStoreFileScope::ExclusionSets => {
-            Ok(content.to_string())
-        }
+        ConfigStoreFileScope::Settings
+        | ConfigStoreFileScope::ExclusionSets
+        | ConfigStoreFileScope::SaveRuleTemplates => Ok(content.to_string()),
     }
 }
 
@@ -1902,6 +1934,7 @@ async fn build_dry_run_artifact(
     target: &Path,
     checksum_mode: bool,
     exclude_patterns: &[String],
+    save_rule: Option<&SaveRuleTemplateRecord>,
     result: &DryRunResult,
     target_newer_conflicts: &[TargetNewerConflictCandidate],
 ) -> Result<DryRunArtifact, String> {
@@ -1920,12 +1953,15 @@ async fn build_dry_run_artifact(
 
         candidates.push(DryRunArtifactCandidate {
             relative_path: diff.path.clone(),
+            target_relative_path: diff.target_path.clone(),
             source: capture_dry_run_candidate_path_snapshot(
                 &canonical_source_root.join(&diff.path),
             )
             .await?,
-            target: capture_dry_run_candidate_path_snapshot(&target_snapshot_root.join(&diff.path))
-                .await?,
+            target: capture_dry_run_candidate_path_snapshot(
+                &target_snapshot_root.join(diff.target_relative_path()),
+            )
+            .await?,
         });
     }
 
@@ -1936,12 +1972,18 @@ async fn build_dry_run_artifact(
 
         candidates.push(DryRunArtifactCandidate {
             relative_path: conflict.path.clone(),
+            target_relative_path: conflict.target_relative_path.clone(),
             source: capture_dry_run_candidate_path_snapshot(
                 &canonical_source_root.join(&conflict.path),
             )
             .await?,
             target: capture_dry_run_candidate_path_snapshot(
-                &target_snapshot_root.join(&conflict.path),
+                &target_snapshot_root.join(
+                    conflict
+                        .target_relative_path
+                        .as_deref()
+                        .unwrap_or(&conflict.path),
+                ),
             )
             .await?,
         });
@@ -1953,6 +1995,7 @@ async fn build_dry_run_artifact(
             target: raw_target.to_string(),
             checksum_mode,
             exclude_patterns: exclude_patterns.to_vec(),
+            save_rule: save_rule.cloned(),
         },
         source_root,
         target_root,
@@ -1970,6 +2013,7 @@ async fn validate_dry_run_artifact(
     target: &Path,
     checksum_mode: bool,
     exclude_patterns: &[String],
+    save_rule: Option<&SaveRuleTemplateRecord>,
     cancel_token: Option<&CancellationToken>,
 ) -> Result<(), String> {
     if cancel_token.is_some_and(CancellationToken::is_cancelled) {
@@ -1981,6 +2025,7 @@ async fn validate_dry_run_artifact(
         target: raw_target.to_string(),
         checksum_mode,
         exclude_patterns: exclude_patterns.to_vec(),
+        save_rule: save_rule.cloned(),
     };
 
     if artifact.config != current_config {
@@ -2005,7 +2050,12 @@ async fn validate_dry_run_artifact(
         )
         .await?;
         let current_target = capture_dry_run_candidate_path_snapshot(
-            &target_snapshot_root.join(&candidate.relative_path),
+            &target_snapshot_root.join(
+                candidate
+                    .target_relative_path
+                    .as_deref()
+                    .unwrap_or(&candidate.relative_path),
+            ),
         )
         .await?;
 
@@ -3280,6 +3330,46 @@ fn resolve_runtime_exclude_patterns(
     resolved_patterns
 }
 
+/// 작업에 지정된 저장 규칙 템플릿을 런타임 설정에서 찾는다. 없거나 지워진 ID면 `None`(미러링).
+fn resolve_runtime_save_rule(
+    task: &RuntimeSyncTask,
+    templates: &[SaveRuleTemplateRecord],
+) -> Option<SaveRuleTemplateRecord> {
+    let id = task.save_rule_id.as_deref()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    templates.iter().find(|template| template.id == id).cloned()
+}
+
+/// 프런트엔드가 넘긴 템플릿 ID를 설정 저장소에서 찾는다. 모르는 ID는 오류.
+fn resolve_save_rule_by_id(
+    save_rule_id: Option<&str>,
+    state: &AppState,
+) -> Result<Option<SaveRuleTemplateRecord>, String> {
+    let Some(id) = save_rule_id.map(str::trim).filter(|id| !id.is_empty()) else {
+        return Ok(None);
+    };
+    input_validation::validate_task_id(id).map_err(|e| e.to_string())?;
+    let templates = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    templates
+        .into_iter()
+        .find(|template| template.id == id)
+        .map(Some)
+        .ok_or_else(|| format!("Save rule template not found: {id}"))
+}
+
+/// 작업이 가리키는 저장 규칙 템플릿이 실제로 존재하는지 확인한다 (MCP·수동 편집 방어).
+fn ensure_task_save_rule_exists(task: &SyncTaskRecord, state: &AppState) -> Result<(), String> {
+    let Some(id) = task.save_rule_id.as_deref() else {
+        return Ok(());
+    };
+    resolve_save_rule_by_id(Some(id), state).map(|_| ())
+}
+
 #[derive(Debug, Clone)]
 struct DueRecurringSchedule {
     task: SyncTaskRecord,
@@ -3456,6 +3546,10 @@ async fn run_due_recurring_schedule(
         .map(to_runtime_exclusion_set_record)
         .collect();
     let exclude_patterns = resolve_runtime_exclude_patterns(&runtime_task, &runtime_sets);
+    let save_rule = {
+        let config = state.runtime_config.read().await;
+        resolve_runtime_save_rule(&runtime_task, &config.save_rule_templates)
+    };
 
     let result = execute_sync_internal(
         task.id.clone(),
@@ -3465,6 +3559,7 @@ async fn run_due_recurring_schedule(
         schedule.checksum_mode,
         task.verify_after_copy,
         exclude_patterns,
+        save_rule,
         app,
         state.clone(),
         false,
@@ -5054,7 +5149,15 @@ async fn maybe_activate_task_path_access(task_id: &str, state: &AppState) -> Res
 
 async fn load_canonical_config(
     state: &AppState,
-) -> Result<(AppSettings, Vec<SyncTaskRecord>, Vec<ExclusionSetRecord>), String> {
+) -> Result<
+    (
+        AppSettings,
+        Vec<SyncTaskRecord>,
+        Vec<ExclusionSetRecord>,
+        Vec<SaveRuleTemplateRecord>,
+    ),
+    String,
+> {
     let settings = state
         .config_store
         .load_settings()
@@ -5066,6 +5169,10 @@ async fn load_canonical_config(
     let exclusion_sets = state
         .config_store
         .load_exclusion_sets()
+        .map_err(config_store_error_to_string)?;
+    let save_rule_templates = state
+        .config_store
+        .load_save_rule_templates()
         .map_err(config_store_error_to_string)?;
 
     if let Err(error) = maybe_activate_settings_path_access(&settings, state) {
@@ -5083,7 +5190,7 @@ async fn load_canonical_config(
         }
     }
 
-    Ok((settings, tasks, exclusion_sets))
+    Ok((settings, tasks, exclusion_sets, save_rule_templates))
 }
 
 async fn stop_control_plane_listener(state: AppState) -> Result<(), String> {
@@ -5147,13 +5254,15 @@ async fn apply_canonical_config_to_runtime(
     state: AppState,
 ) -> Result<RuntimeState, String> {
     let _apply_guard = state.runtime_config_apply_lock.clone().lock_owned().await;
-    let (settings, tasks, exclusion_sets) = load_canonical_config(&state).await?;
+    let (settings, tasks, exclusion_sets, save_rule_templates) =
+        load_canonical_config(&state).await?;
 
     validate_settings_record(&settings)?;
     validate_sync_task_records(&tasks)?;
     for set in &exclusion_sets {
         input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
     }
+    validate_save_rule_templates(&save_rule_templates).map_err(config_store_error_to_string)?;
 
     let valid_task_ids: HashSet<String> = tasks.iter().map(|task| task.id.clone()).collect();
     let payload = RuntimeConfigPayload {
@@ -5162,6 +5271,7 @@ async fn apply_canonical_config_to_runtime(
             .iter()
             .map(to_runtime_exclusion_set_record)
             .collect(),
+        save_rule_templates,
         settings: to_runtime_settings_record(&settings),
     };
 
@@ -5423,6 +5533,7 @@ async fn execute_sync_internal(
     checksum_mode: bool,
     verify_after_copy: bool,
     exclude_patterns: Vec<String>,
+    save_rule: Option<SaveRuleTemplateRecord>,
     app: tauri::AppHandle,
     state: AppState,
     sync_slot_pre_acquired: bool,
@@ -5501,6 +5612,7 @@ async fn execute_sync_internal(
                 preserve_times: true,
                 verify_after_copy,
                 exclude_patterns,
+                save_rule,
             };
 
             // 동기화 실행 (취소 토큰과 함께)
@@ -5558,6 +5670,7 @@ async fn execute_sync_internal(
                         &target,
                         checksum_mode,
                         &options.exclude_patterns,
+                        options.save_rule.as_ref(),
                         Some(&cancel_token),
                     )
                     .await
@@ -5972,6 +6085,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
     }
 
     let exclude_patterns = resolve_runtime_exclude_patterns(&task, &runtime_config.exclusion_sets);
+    let save_rule = resolve_runtime_save_rule(&task, &runtime_config.save_rule_templates);
     let result = execute_sync_internal(
         task.id.clone(),
         task.name.clone(),
@@ -5980,6 +6094,7 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
         task.checksum_mode,
         task.verify_after_copy,
         exclude_patterns,
+        save_rule,
         app.clone(),
         state.clone(),
         true,
@@ -6637,6 +6752,179 @@ async fn delete_exclusion_set(
 }
 
 #[tauri::command]
+async fn list_save_rule_templates(
+    state: tauri::State<'_, AppState>,
+) -> Result<SaveRuleTemplatesEnvelope, String> {
+    let templates = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    Ok(SaveRuleTemplatesEnvelope { templates })
+}
+
+#[tauri::command]
+async fn create_save_rule_template(
+    template: SaveRuleTemplateRecord,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SaveRuleTemplateEnvelope, String> {
+    input_validation::validate_task_id(&template.id).map_err(|e| e.to_string())?;
+    let mut template = save_rules::normalize_template(template);
+    template.built_in = false;
+    save_rules::validate_template(&template)?;
+
+    let mut templates = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    if templates
+        .iter()
+        .any(|candidate| candidate.id == template.id)
+    {
+        return Err(format!(
+            "Save rule template already exists: {}",
+            template.id
+        ));
+    }
+    templates.push(template.clone());
+    validate_save_rule_templates(&templates).map_err(config_store_error_to_string)?;
+    state
+        .config_store
+        .save_save_rule_templates(&templates)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["saveRuleTemplates"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    Ok(SaveRuleTemplateEnvelope { template })
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveRuleTemplateUpdatePayload {
+    name: Option<String>,
+    description: Option<String>,
+    date_source: Option<save_rules::DateSource>,
+    video_timestamp: Option<save_rules::VideoTimestampMode>,
+    category_names: Option<save_rules::CategoryNames>,
+    rules: Option<Vec<save_rules::SaveRule>>,
+}
+
+#[tauri::command]
+async fn update_save_rule_template(
+    id: String,
+    updates: SaveRuleTemplateUpdatePayload,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SaveRuleTemplateEnvelope, String> {
+    input_validation::validate_task_id(&id).map_err(|e| e.to_string())?;
+    let mut templates = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    let Some(existing_index) = templates.iter().position(|template| template.id == id) else {
+        return Err(format!("Save rule template not found: {id}"));
+    };
+    let mut template = templates[existing_index].clone();
+    if let Some(name) = updates.name {
+        template.name = name;
+    }
+    if let Some(description) = updates.description {
+        template.description = description;
+    }
+    if let Some(date_source) = updates.date_source {
+        template.date_source = date_source;
+    }
+    if let Some(video_timestamp) = updates.video_timestamp {
+        template.video_timestamp = video_timestamp;
+    }
+    if let Some(category_names) = updates.category_names {
+        template.category_names = category_names;
+    }
+    if let Some(rules) = updates.rules {
+        template.rules = rules;
+    }
+    let template = save_rules::normalize_template(template);
+    save_rules::validate_template(&template)?;
+    templates[existing_index] = template.clone();
+    validate_save_rule_templates(&templates).map_err(config_store_error_to_string)?;
+    state
+        .config_store
+        .save_save_rule_templates(&templates)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["saveRuleTemplates"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    Ok(SaveRuleTemplateEnvelope { template })
+}
+
+#[tauri::command]
+async fn delete_save_rule_template(
+    id: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeleteResultEnvelope, String> {
+    input_validation::validate_task_id(&id).map_err(|e| e.to_string())?;
+    let tasks = state
+        .config_store
+        .load_tasks()
+        .map_err(config_store_error_to_string)?;
+    if let Some(task) = tasks
+        .iter()
+        .find(|task| task.save_rule_id.as_deref() == Some(id.as_str()))
+    {
+        return Err(format!(
+            "Save rule template '{id}' is still used by task '{}'",
+            task.name
+        ));
+    }
+    let mut templates = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    let before_len = templates.len();
+    templates.retain(|template| template.id != id);
+    let deleted = templates.len() != before_len;
+    if deleted {
+        state
+            .config_store
+            .save_save_rule_templates(&templates)
+            .map_err(config_store_error_to_string)?;
+        emit_config_store_changed(&app, &["saveRuleTemplates"]);
+        let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    }
+    Ok(DeleteResultEnvelope { deleted })
+}
+
+/// 기본 제공 템플릿을 원래 내용으로 되돌리고(없으면 추가), 사용자 템플릿은 그대로 둔다.
+#[tauri::command]
+async fn reset_save_rule_templates(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<SaveRuleTemplatesEnvelope, String> {
+    let existing = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    let mut templates = save_rules::built_in_templates();
+    templates.extend(existing.into_iter().filter(|template| !template.built_in));
+    validate_save_rule_templates(&templates).map_err(config_store_error_to_string)?;
+    state
+        .config_store
+        .save_save_rule_templates(&templates)
+        .map_err(config_store_error_to_string)?;
+    emit_config_store_changed(&app, &["saveRuleTemplates"]);
+    let _ = apply_canonical_config_to_runtime(app.clone(), state.inner().clone()).await?;
+    Ok(SaveRuleTemplatesEnvelope { templates })
+}
+
+/// 고정 샘플 파일로 템플릿 결과를 미리 보여준다. 저장하지 않은 템플릿도 받을 수 있다.
+#[tauri::command]
+async fn preview_save_rule_template(
+    template: SaveRuleTemplateRecord,
+) -> Result<Vec<SaveRulePreviewEntry>, String> {
+    let template = save_rules::normalize_template(template);
+    save_rules::preview_template(&template)
+}
+
+#[tauri::command]
 async fn reset_exclusion_sets(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -6729,6 +7017,7 @@ async fn sync_dry_run_internal(
     target: PathBuf,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
+    save_rule: Option<SaveRuleTemplateRecord>,
     state: &AppState,
     external_cancel_token: Option<CancellationToken>,
     mcp_job_id: Option<String>,
@@ -6786,6 +7075,7 @@ async fn sync_dry_run_internal(
             preserve_times: true,
             verify_after_copy: false,
             exclude_patterns,
+            save_rule,
         };
 
         let cancel_token = CancellationToken::new();
@@ -7021,6 +7311,7 @@ async fn sync_dry_run_internal(
             &target,
             checksum_mode,
             &options.exclude_patterns,
+            options.save_rule.as_ref(),
             &result,
             &target_newer_conflicts,
         )
@@ -7093,6 +7384,7 @@ async fn find_orphan_files_internal(
     source: PathBuf,
     target: PathBuf,
     exclude_patterns: Vec<String>,
+    save_rule: Option<SaveRuleTemplateRecord>,
     state: &AppState,
     external_cancel_token: Option<CancellationToken>,
 ) -> Result<Vec<OrphanFile>, String> {
@@ -7143,7 +7435,11 @@ async fn find_orphan_files_internal(
 
         let engine = SyncEngine::new(source, target);
         engine
-            .find_orphan_files_with_cancel(&exclude_patterns, external_cancel_token)
+            .find_orphan_files_with_cancel(
+                &exclude_patterns,
+                external_cancel_token,
+                save_rule.as_ref(),
+            )
             .await
             .map_err(|e| format!("{:#}", e))
     }
@@ -7264,10 +7560,12 @@ async fn sync_dry_run(
     target: PathBuf,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
+    save_rule_id: Option<String>,
     diff_batch_channel: Option<JavaScriptChannelId>,
     state: tauri::State<'_, AppState>,
 ) -> Result<DryRunResult, String> {
     activate_task_path_access(&task_id, state.inner()).await?;
+    let save_rule = resolve_save_rule_by_id(save_rule_id.as_deref(), state.inner())?;
     sync_dry_run_internal(
         Some(app),
         diff_batch_channel.map(|channel_id| channel_id.channel_on(webview)),
@@ -7276,6 +7574,7 @@ async fn sync_dry_run(
         target,
         checksum_mode,
         exclude_patterns,
+        save_rule,
         state.inner(),
         None,
         None,
@@ -7289,14 +7588,17 @@ async fn find_orphan_files(
     source: PathBuf,
     target: PathBuf,
     exclude_patterns: Vec<String>,
+    save_rule_id: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<OrphanFile>, String> {
     activate_task_path_access(&task_id, state.inner()).await?;
+    let save_rule = resolve_save_rule_by_id(save_rule_id.as_deref(), state.inner())?;
     find_orphan_files_internal(
         task_id,
         source,
         target,
         exclude_patterns,
+        save_rule,
         state.inner(),
         None,
     )
@@ -7982,12 +8284,14 @@ async fn start_sync(
     checksum_mode: bool,
     verify_after_copy: bool,
     exclude_patterns: Vec<String>,
+    save_rule_id: Option<String>,
     app: tauri::AppHandle,
     webview: Webview,
     file_batch_channel: Option<JavaScriptChannelId>,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncExecutionResult, String> {
     activate_task_path_access(&task_id, state.inner()).await?;
+    let save_rule = resolve_save_rule_by_id(save_rule_id.as_deref(), state.inner())?;
     let result = execute_sync_internal(
         task_id,
         task_name.unwrap_or_else(|| "Manual Sync".to_string()),
@@ -7996,6 +8300,7 @@ async fn start_sync(
         checksum_mode,
         verify_after_copy,
         exclude_patterns,
+        save_rule,
         app,
         state.inner().clone(),
         false,
@@ -8019,7 +8324,7 @@ async fn start_sync_from_dry_run(
     file_batch_channel: Option<JavaScriptChannelId>,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncExecutionResult, String> {
-    let (task, exclude_patterns) = load_task_context(&task_id, state.inner()).await?;
+    let (task, exclude_patterns, save_rule) = load_task_context(&task_id, state.inner()).await?;
     let artifact = load_dry_run_artifact(&task_id, state.inner())
         .await
         .ok_or_else(|| DRY_RUN_ARTIFACT_MISSING_ERROR.to_string())?;
@@ -8032,6 +8337,7 @@ async fn start_sync_from_dry_run(
         task.checksum_mode,
         task.verify_after_copy,
         exclude_patterns,
+        save_rule,
         app,
         state.inner().clone(),
         false,
@@ -8156,6 +8462,9 @@ struct SyncTaskUpdatePayload {
     source_sub_path: Option<String>,
     source_identity: Option<config_store::SourceIdentitySnapshot>,
     recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
+    /// `null`이면 해제, 생략하면 유지.
+    #[serde(default, deserialize_with = "config_store::deserialize_double_option")]
+    save_rule_id: Option<Option<String>>,
 }
 
 #[tauri::command]
@@ -8186,6 +8495,7 @@ async fn update_sync_task(
             source_sub_path: updates.source_sub_path,
             source_identity: updates.source_identity,
             recurring_schedules: updates.recurring_schedules,
+            save_rule_id: updates.save_rule_id,
         },
         updates.source_credential,
         updates.target_credential,
@@ -8363,6 +8673,8 @@ async fn runtime_set_config(
     for set in &payload.exclusion_sets {
         input_validation::validate_exclude_patterns(&set.patterns).map_err(|e| e.to_string())?;
     }
+    validate_save_rule_templates(&payload.save_rule_templates)
+        .map_err(config_store_error_to_string)?;
 
     {
         let mut config = state.runtime_config.write().await;
@@ -8450,7 +8762,7 @@ struct TaskIdParams {
 async fn load_task_context(
     task_id: &str,
     state: &AppState,
-) -> Result<(SyncTaskRecord, Vec<String>), String> {
+) -> Result<(SyncTaskRecord, Vec<String>, Option<SaveRuleTemplateRecord>), String> {
     let tasks = state
         .config_store
         .load_tasks()
@@ -8469,7 +8781,12 @@ async fn load_task_context(
         .map(to_runtime_exclusion_set_record)
         .collect();
     let exclude_patterns = resolve_runtime_exclude_patterns(&runtime_task, &runtime_sets);
-    Ok((task, exclude_patterns))
+    let save_rule_templates = state
+        .config_store
+        .load_save_rule_templates()
+        .map_err(config_store_error_to_string)?;
+    let save_rule = resolve_runtime_save_rule(&runtime_task, &save_rule_templates);
+    Ok((task, exclude_patterns, save_rule))
 }
 
 async fn spawn_mcp_sync_job(
@@ -8477,7 +8794,7 @@ async fn spawn_mcp_sync_job(
     app: tauri::AppHandle,
     state: AppState,
 ) -> Result<String, String> {
-    let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
+    let (task, exclude_patterns, save_rule) = load_task_context(&task_id, &state).await?;
     let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let job_id = next_mcp_job_id(McpJobKind::Sync, seq);
     let now = unix_now_ms();
@@ -8506,6 +8823,7 @@ async fn spawn_mcp_sync_job(
             task.checksum_mode,
             task.verify_after_copy,
             exclude_patterns,
+            save_rule,
             app_for_job,
             state_for_job.clone(),
             false,
@@ -8563,7 +8881,7 @@ async fn spawn_mcp_dry_run_job(
     app: AppHandle,
     state: AppState,
 ) -> Result<String, String> {
-    let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
+    let (task, exclude_patterns, save_rule) = load_task_context(&task_id, &state).await?;
     let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let job_id = next_mcp_job_id(McpJobKind::DryRun, seq);
     state
@@ -8597,6 +8915,7 @@ async fn spawn_mcp_dry_run_job(
             PathBuf::from(task.target.clone()),
             task.checksum_mode,
             exclude_patterns,
+            save_rule,
             &state_for_job,
             Some(cancel_token.clone()),
             Some(job_id_for_job.clone()),
@@ -8645,7 +8964,7 @@ async fn spawn_mcp_dry_run_job(
 }
 
 async fn spawn_mcp_orphan_scan_job(task_id: String, state: AppState) -> Result<String, String> {
-    let (task, exclude_patterns) = load_task_context(&task_id, &state).await?;
+    let (task, exclude_patterns, save_rule) = load_task_context(&task_id, &state).await?;
     let seq = state.mcp_job_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let job_id = next_mcp_job_id(McpJobKind::OrphanScan, seq);
     state
@@ -8676,6 +8995,7 @@ async fn spawn_mcp_orphan_scan_job(task_id: String, state: AppState) -> Result<S
             PathBuf::from(task.source.clone()),
             PathBuf::from(task.target.clone()),
             exclude_patterns,
+            save_rule,
             &state_for_job,
             Some(cancel_token.clone()),
         )
@@ -8978,6 +9298,7 @@ async fn create_sync_task_internal(
     state: &AppState,
 ) -> Result<SyncTaskRecord, String> {
     let mut task = normalize_sync_task_record(task).map_err(config_store_error_to_string)?;
+    ensure_task_save_rule_exists(&task, state)?;
     validate_strict_recurring_schedule_ids(&task.recurring_schedules).map_err(|message| {
         config_store_error_to_string(ConfigStoreError::ValidationError { message })
     })?;
@@ -9279,6 +9600,7 @@ async fn patch_sync_task_internal_core(
         .map_err(config_store_error_to_string)?;
     let (task, warnings, next_tasks) =
         prepare_patched_sync_task_and_collect_history_warnings(update, state)?;
+    ensure_task_save_rule_exists(&task, state)?;
     let keychain_operations = build_keychain_credential_operations(
         &task.id,
         Some(&previous_task),
@@ -10216,6 +10538,12 @@ pub fn run() {
             list_supported_timezones,
             get_recurring_schedule_history,
             clear_recurring_schedule_history,
+            list_save_rule_templates,
+            create_save_rule_template,
+            update_save_rule_template,
+            delete_save_rule_template,
+            reset_save_rule_templates,
+            preview_save_rule_template,
             list_exclusion_sets,
             create_exclusion_set,
             update_exclusion_set,

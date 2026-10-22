@@ -36,6 +36,23 @@ When `watchmode` is enabled, SyncWatcher watches the Source folder and starts a 
 
 Choose file types that should be excluded from copying. Additional patterns can be added in `Settings`.
 
+## Save Rules
+
+Choose a **Save rule** in the task editor to sort copied files into folders and rename them instead of mirroring the source layout. The default, *Mirror source folder structure*, behaves exactly as before.
+
+Built-in templates:
+
+- **Camera: by file type** - `Proxy/`, `Video/`, `RAW/`, `Photo/`, `Metadata/`, `Other/` folders, original file names.
+- **Camera: by capture date, then type** - `2026-10-22/RAW/DSC00001.ARW`.
+- **Camera: by capture date** - `2026/2026-10-22/DSC00001.ARW`, all types together.
+- **Camera: dated folders and file names** - `2026-10-22/RAW/20261022_140355_DSC00001.ARW`.
+
+Templates are edited in `Settings` > `Save Rule Templates`. A template is an ordered list of rules; each rule matches file types (proxy, video, RAW, photo, metadata, other) and/or extensions and defines a folder template and a file name template. The first matching rule wins and unmatched files keep their original relative path. Tokens such as `{yyyy}`, `{MM}`, `{dd}`, `{HH}`, `{mm}`, `{ss}`, `{datetime}`, `{name}`, `{ext}`, `{category}`, `{camera}`, `{iso}`, `{fnumber}` and `{shutter}` are filled from the capture date and EXIF data; the editor shows a live preview on sample files.
+
+Capture time and camera values are read from JPEG, HEIF/HEIC and TIFF-based RAW files (ARW, NEF, CR2, DNG, ORF, RW2, RAF and similar). MP4/MOV clips use the Sony XML sidecar when present, otherwise the file header. Formats without supported metadata (CR3, MXF, AVI and others) fall back to the file's modified time.
+
+Dry Run and sync results show `→ target path` next to files whose destination differs from the source path, and the orphan finder understands the mapped layout.
+
 ## Task Card Controls
 
 1. Checksum mode indicator

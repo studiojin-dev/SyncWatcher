@@ -124,7 +124,10 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed",
-      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing.",
+      "saveRule": "儲存規則",
+      "saveRuleMirror": "保持來源資料夾結構（預設）",
+      "saveRuleHint": "依此範本將檔案分類到資料夾並重新命名儲存。可在設定中編輯範本。"
     },
     "recurringSchedules": {
       "title": "定期執行",
@@ -266,7 +269,8 @@
       "colType": "類型",
       "colSourceSize": "來源檔案大小",
       "colTargetSize": "目標大小",
-      "scanning": "掃描中..."
+      "scanning": "掃描中...",
+      "savedAs": "儲存為 {{path}}"
     },
     "orphan": {
       "title": "孤立檔案",
@@ -667,6 +671,53 @@
         "transportSerial": "讀卡機（USB）序號相符",
         "cameraBodySerial": "相機機身序號相符：{{value}}",
         "cameraFolderStructure": "相機資料夾結構相符（PRIVATE/DCIM）"
+      }
+    },
+    "saveRules": {
+      "title": "儲存規則範本",
+      "intro": "儲存規則範本決定每個複製檔案的目標資料夾與檔名：可依檔案類型（代理、影片、RAW、照片、中繼資料）、拍攝日期或 EXIF 值。請在任務設定中選擇範本。",
+      "builtIn": "內建",
+      "duplicate": "複製",
+      "confirmDelete": "刪除範本「{{name}}」？",
+      "anyType": "任何類型",
+      "addTemplate": "新增儲存規則範本",
+      "reset": "還原內建範本",
+      "resetHint": "還原內建範本；你自己建立的範本會保留。",
+      "resetDone": "已還原內建範本。",
+      "saved": "儲存規則範本已儲存。",
+      "copySuffix": "副本",
+      "ruleNumber": "規則 {{index}}",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "removeRule": "刪除規則",
+      "matchCategories": "檔案類型（留空 = 全部）",
+      "matchExtensions": "副檔名（留空 = 全部）",
+      "folderTemplate": "資料夾範本",
+      "fileNameTemplate": "檔名範本",
+      "templateName": "範本名稱",
+      "templateNamePlaceholder": "我的相機整理規則",
+      "description": "說明",
+      "dateSource": "日期代碼依據",
+      "dateSourceCapture": "拍攝時間（EXIF / 影片），否則為檔案修改時間",
+      "dateSourceModified": "僅檔案修改時間",
+      "videoTimestamp": "MP4/MOV 建立時間視為",
+      "videoTimestampLocal": "記錄值即本地時間（多數相機）",
+      "videoTimestampUtc": "UTC，轉換為本機時區",
+      "categoryNames": "{category} 使用的資料夾名稱",
+      "rules": "規則（第一個符合者生效）",
+      "addRule": "新增規則",
+      "unmatchedHint": "不符合任何規則的檔案保持原相對路徑。",
+      "tokensTitle": "代碼",
+      "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 日期/時間 · {name} 原檔名（不含副檔名） · {ext}/{EXT}/{ext_lower} 副檔名 · {folder} 來源資料夾名 · {path} 來源子路徑 · {category} 上方的資料夾名稱 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} 來自 EXIF。缺少的值會留空；一律保留原副檔名。",
+      "metadataCoverage": "拍攝時間與相機資訊來自 JPEG、HEIF/HEIC 以及 TIFF 類 RAW（ARW、NEF、CR2、DNG、ORF、RW2、RAF…）。MP4/MOV 使用 Sony XML 附屬檔或檔案標頭。其他格式（CR3、MXF、AVI…）改用檔案修改時間。",
+      "preview": "預覽（範例檔案）",
+      "category": {
+        "proxy": "代理",
+        "video": "影片",
+        "raw": "RAW",
+        "image": "照片",
+        "metadata": "中繼資料",
+        "other": "其他"
       }
     }
   }

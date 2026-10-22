@@ -220,6 +220,7 @@ export function useSyncTaskActions({
           source: task.source,
           target: task.target,
           excludePatterns,
+          saveRuleId: task.saveRuleId ?? null,
         });
       } catch (error) {
         showToast(getErrorMessage(error), 'error');
@@ -489,6 +490,7 @@ export function useSyncTaskActions({
             : {}),
           checksumMode: formData.get('checksumMode') === 'on',
           exclusionSets: form.selectedSets,
+          saveRuleId: form.saveRuleId || null,
           watchMode: form.watchMode,
           autoUnmount: shouldEnableAutoUnmount({
             source: finalSource,
@@ -651,6 +653,7 @@ export function useSyncTaskActions({
                 checksumMode: task.checksumMode,
                 verifyAfterCopy: task.verifyAfterCopy ?? true,
                 excludePatterns: getPatternsForSets(task.exclusionSets || []),
+                saveRuleId: task.saveRuleId ?? null,
                 fileBatchChannel,
               });
         showTargetPreflightToast(execution.targetPreflight, showToast, t);
@@ -957,6 +960,7 @@ export function useSyncTaskActions({
           target: task.target,
           checksumMode: task.checksumMode,
           excludePatterns: getPatternsForSets(task.exclusionSets || []),
+          saveRuleId: task.saveRuleId ?? null,
           diffBatchChannel,
         });
         store.completeDryRunSession(task.id, result);

@@ -30,6 +30,7 @@ interface SyncTaskListProps {
   conflictSessionsLoading: boolean;
   dataUnitSystem: DataUnitSystem;
   getPatternsForSets: (setIds: string[]) => string[];
+  getSaveRuleName?: (id: string | null | undefined) => string | null;
   t: TranslateFn;
   onRefreshConflictSessions: () => void;
   onOpenConflictSession: (sessionId: string) => void;
@@ -147,6 +148,7 @@ function SyncTaskList({
   conflictSessionsLoading,
   dataUnitSystem,
   getPatternsForSets,
+  getSaveRuleName,
   t,
   onRefreshConflictSessions,
   onOpenConflictSession,
@@ -211,6 +213,17 @@ function SyncTaskList({
                       >
                         <IconDisc size={12} stroke={3} />
                       </span>
+                      {task.saveRuleId ? (
+                        <span
+                          className="px-1.5 py-0.5 text-[10px] font-bold border-2 border-black bg-[var(--accent-info)] text-white truncate max-w-[160px]"
+                          title={`${t('syncTasks.saveRule', {
+                            defaultValue: 'Save rule',
+                          })}: ${getSaveRuleName?.(task.saveRuleId) ?? task.saveRuleId}`}
+                          data-testid={`save-rule-badge-${task.id}`}
+                        >
+                          {getSaveRuleName?.(task.saveRuleId) ?? task.saveRuleId}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex gap-2 pb-2 shrink-0 md:self-start self-end mt-2 md:mt-0">

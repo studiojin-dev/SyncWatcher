@@ -106,6 +106,7 @@ export default function SyncResultView({
     () =>
       result.entries.map((entry) => ({
         path: entry.path,
+        targetPath: entry.target_path ?? null,
         typeLabel:
           entry.status === 'failed'
             ? t('sync.fileFailed', { defaultValue: 'Failed' })

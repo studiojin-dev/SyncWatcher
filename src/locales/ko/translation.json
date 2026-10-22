@@ -132,7 +132,10 @@
       "autoUnmountConfirmedStatus": "Unmount 확인 완료",
       "autoUnmountSuppressedStatus": "이번 세션에서는 auto-unmount가 비활성화되어 마운트를 유지합니다.",
       "autoUnmountFailedStatus": "Unmount 실패",
-      "dryRunSyncRequiresRerun": "Dry Run 결과가 오래되었거나 재사용할 수 없습니다. 먼저 Dry Run을 다시 실행하세요."
+      "dryRunSyncRequiresRerun": "Dry Run 결과가 오래되었거나 재사용할 수 없습니다. 먼저 Dry Run을 다시 실행하세요.",
+      "saveRule": "저장 규칙",
+      "saveRuleMirror": "원본 폴더 구조 그대로 (기본)",
+      "saveRuleHint": "이 템플릿에 따라 파일을 폴더별로 나누고 이름을 바꿔 저장합니다. 템플릿은 설정에서 편집합니다."
     },
     "recurringSchedules": {
       "title": "정기 실행",
@@ -274,7 +277,8 @@
       "colType": "유형",
       "colSourceSize": "소스 크기",
       "colTargetSize": "대상 크기",
-      "scanning": "검사 중..."
+      "scanning": "검사 중...",
+      "savedAs": "저장 경로: {{path}}"
     },
     "orphan": {
       "title": "삭제 후보 파일",
@@ -676,6 +680,53 @@
         "transportSerial": "카드 리더(USB) 시리얼 일치",
         "cameraBodySerial": "카메라 바디 시리얼 일치: {{value}}",
         "cameraFolderStructure": "카메라 폴더 구조 일치 (PRIVATE/DCIM 구성)"
+      }
+    },
+    "saveRules": {
+      "title": "저장 규칙 템플릿",
+      "intro": "저장 규칙 템플릿은 복사되는 파일마다 타깃 폴더와 파일명을 정합니다. 파일 종류(프록시·동영상·RAW·사진·메타데이터), 촬영 날짜, EXIF 값을 기준으로 할 수 있습니다. 작업 설정에서 템플릿을 고르세요.",
+      "builtIn": "기본 제공",
+      "duplicate": "복제",
+      "confirmDelete": "\"{{name}}\" 템플릿을 삭제할까요?",
+      "anyType": "모든 종류",
+      "addTemplate": "저장 규칙 템플릿 추가",
+      "reset": "기본 템플릿 복원",
+      "resetHint": "기본 제공 템플릿을 원래대로 되돌립니다. 직접 만든 템플릿은 유지됩니다.",
+      "resetDone": "기본 템플릿을 복원했습니다.",
+      "saved": "저장 규칙 템플릿을 저장했습니다.",
+      "copySuffix": "복사본",
+      "ruleNumber": "규칙 {{index}}",
+      "moveUp": "위로",
+      "moveDown": "아래로",
+      "removeRule": "규칙 삭제",
+      "matchCategories": "파일 종류 (비우면 전체)",
+      "matchExtensions": "확장자 (비우면 전체)",
+      "folderTemplate": "폴더 템플릿",
+      "fileNameTemplate": "파일명 템플릿",
+      "templateName": "템플릿 이름",
+      "templateNamePlaceholder": "내 카메라 정리 규칙",
+      "description": "설명",
+      "dateSource": "날짜 토큰 기준",
+      "dateSourceCapture": "촬영 시각(EXIF/영상), 없으면 파일 수정 시각",
+      "dateSourceModified": "파일 수정 시각만 사용",
+      "videoTimestamp": "MP4/MOV 생성 시각 해석",
+      "videoTimestampLocal": "기록된 값을 현지 시각으로 (대부분의 카메라)",
+      "videoTimestampUtc": "UTC로 보고 이 Mac의 시간대로 변환",
+      "categoryNames": "{category} 토큰에 쓸 폴더 이름",
+      "rules": "규칙 (먼저 일치하는 규칙 적용)",
+      "addRule": "규칙 추가",
+      "unmatchedHint": "어느 규칙에도 맞지 않는 파일은 원본 상대 경로를 그대로 유지합니다.",
+      "tokensTitle": "토큰",
+      "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 날짜/시각 · {name} 원본 파일명(확장자 제외) · {ext}/{EXT}/{ext_lower} 확장자 · {folder} 원본 폴더명 · {path} 원본 하위 경로 · {category} 위의 폴더 이름 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} EXIF 값. 값이 없으면 비워지고, 원본 확장자는 항상 유지됩니다.",
+      "metadataCoverage": "촬영 시각과 카메라 정보는 JPEG, HEIF/HEIC, TIFF 계열 RAW(ARW, NEF, CR2, DNG, ORF, RW2, RAF…)에서 읽습니다. MP4/MOV는 Sony XML 사이드카 또는 파일 헤더를 사용합니다. 그 외 형식(CR3, MXF, AVI…)은 파일 수정 시각을 씁니다.",
+      "preview": "미리보기 (샘플 파일)",
+      "category": {
+        "proxy": "프록시",
+        "video": "동영상",
+        "raw": "RAW",
+        "image": "사진",
+        "metadata": "메타데이터",
+        "other": "기타"
       }
     }
   }

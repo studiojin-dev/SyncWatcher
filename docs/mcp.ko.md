@@ -74,6 +74,7 @@ Task payload는 앱 백엔드가 사용하는 필드를 그대로 따르며, 대
 - checksumMode
 - verifyAfterCopy
 - exclusionSets
+- saveRuleId (저장 규칙 템플릿 ID. 생략하거나 null이면 원본 구조 미러링)
 - watchMode
 - autoUnmount
 - sourceType

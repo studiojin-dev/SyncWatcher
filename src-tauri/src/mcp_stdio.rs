@@ -72,6 +72,8 @@ struct CreateSyncTaskInput {
     source_sub_path: Option<String>,
     #[serde(default)]
     recurring_schedules: Vec<RecurringScheduleRecord>,
+    /// Save rule template id (managed in Settings > Save Rule Templates). Omit to mirror the source layout.
+    save_rule_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -91,6 +93,21 @@ struct UpdateSyncTaskInput {
     source_uuid_type: Option<String>,
     source_sub_path: Option<String>,
     recurring_schedules: Option<Vec<RecurringScheduleRecord>>,
+    /// Save rule template id. Pass null to go back to mirroring the source layout; omit to keep.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    save_rule_id: Option<Option<String>>,
+}
+
+/// JSON `null`을 `Some(None)`(해제)으로, 필드 생략을 `None`(유지)으로 구분한다.
+fn deserialize_double_option<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 fn default_verify_after_copy() -> bool {

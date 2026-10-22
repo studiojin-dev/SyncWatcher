@@ -40,6 +40,8 @@ interface UseSyncTaskFormControllerOptions {
 export interface SyncTaskFormController {
   selectedSets: string[];
   setSelectedSets: Dispatch<SetStateAction<string[]>>;
+  saveRuleId: string | null;
+  setSaveRuleId: Dispatch<SetStateAction<string | null>>;
   sourcePath: string;
   setSourcePath: Dispatch<SetStateAction<string>>;
   sourceBookmark: string | null;
@@ -85,6 +87,7 @@ export function useSyncTaskFormController({
   t,
 }: UseSyncTaskFormControllerOptions): SyncTaskFormController {
   const [selectedSets, setSelectedSets] = useState<string[]>([]);
+  const [saveRuleId, setSaveRuleId] = useState<string | null>(null);
   const [sourcePath, setSourcePath] = useState('');
   const [sourceBookmark, setSourceBookmark] = useState<string | null>(null);
   const [sourceNetworkMount, setSourceNetworkMount] = useState<SyncTaskNetworkMount | null>(null);
@@ -212,6 +215,7 @@ export function useSyncTaskFormController({
       );
 
       setSelectedSets(editingTask.exclusionSets || []);
+      setSaveRuleId(editingTask.saveRuleId ?? null);
       setSourcePath(editingTask.source || '');
       setSourceBookmark(editingTask.sourceBookmark ?? null);
       setSourceNetworkMount(editingTask.sourceNetworkMount ?? null);
@@ -241,6 +245,7 @@ export function useSyncTaskFormController({
     }
 
     setSelectedSets([]);
+    setSaveRuleId(null);
     setSourcePath('');
     setSourceBookmark(null);
     setSourceNetworkMount(null);
@@ -452,6 +457,8 @@ export function useSyncTaskFormController({
   return {
     selectedSets,
     setSelectedSets,
+    saveRuleId,
+    setSaveRuleId,
     sourcePath,
     setSourcePath,
     sourceBookmark,

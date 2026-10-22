@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+pub use crate::save_rules::SaveRuleTemplateRecord;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FileDiffKind {
@@ -16,12 +18,23 @@ pub enum SyncFileStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileDiff {
+    /// 소스 루트 기준 상대 경로
     pub path: PathBuf,
     pub kind: FileDiffKind,
     pub source_size: Option<u64>,
     pub target_size: Option<u64>,
     pub checksum_source: Option<String>,
     pub checksum_target: Option<String>,
+    /// 저장 규칙으로 바뀐 타깃 상대 경로. `None`이면 `path`와 같다.
+    #[serde(default)]
+    pub target_path: Option<PathBuf>,
+}
+
+impl FileDiff {
+    /// 타깃 루트 기준 상대 경로.
+    pub fn target_relative_path(&self) -> &Path {
+        self.target_path.as_deref().unwrap_or(&self.path)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +45,9 @@ pub struct SyncFileEntry {
     pub source_size: Option<u64>,
     pub target_size: Option<u64>,
     pub error: Option<String>,
+    /// 저장 규칙으로 바뀐 타깃 상대 경로. `None`이면 `path`와 같다.
+    #[serde(default)]
+    pub target_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +57,9 @@ pub struct SyncOptions {
     pub preserve_times: bool,
     pub verify_after_copy: bool,
     pub exclude_patterns: Vec<String>,
+    /// 규칙 기반 저장 템플릿. `None`이면 원본 상대 경로를 그대로 미러링한다.
+    #[serde(default)]
+    pub save_rule: Option<SaveRuleTemplateRecord>,
 }
 
 impl Default for SyncOptions {
@@ -51,6 +70,7 @@ impl Default for SyncOptions {
             preserve_times: true,
             verify_after_copy: false,
             exclude_patterns: Vec::new(),
+            save_rule: None,
         }
     }
 }
@@ -85,9 +105,13 @@ pub struct ConflictFileSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TargetNewerConflictCandidate {
+    /// 소스 루트 기준 상대 경로
     pub path: PathBuf,
     pub source_path: PathBuf,
     pub target_path: PathBuf,
+    /// 타깃 루트 기준 상대 경로 (저장 규칙 적용 후)
+    #[serde(default)]
+    pub target_relative_path: Option<PathBuf>,
     pub source: ConflictFileSnapshot,
     pub target: ConflictFileSnapshot,
 }

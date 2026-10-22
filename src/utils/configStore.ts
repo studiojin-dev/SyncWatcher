@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type ConfigStoreScope = 'settings' | 'syncTasks' | 'exclusionSets' | 'all';
+export type ConfigStoreScope = 'settings' | 'syncTasks' | 'exclusionSets' | 'saveRuleTemplates' | 'all';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -20,6 +20,12 @@ const CONFIG_STORE_SCOPE_ALIASES: Record<string, ConfigStoreScope> = {
     exclusionsets: 'exclusionSets',
     exclusions: 'exclusionSets',
     'exclusion_sets.yaml': 'exclusionSets',
+    'save-rule-templates': 'saveRuleTemplates',
+    save_rule_templates: 'saveRuleTemplates',
+    saveruletemplates: 'saveRuleTemplates',
+    'save-rules': 'saveRuleTemplates',
+    saverules: 'saveRuleTemplates',
+    'save_rule_templates.yaml': 'saveRuleTemplates',
 };
 
 function isRecord(value: unknown): value is UnknownRecord {

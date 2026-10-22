@@ -124,7 +124,10 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed",
-      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing.",
+      "saveRule": "保存规则",
+      "saveRuleMirror": "保持源文件夹结构（默认）",
+      "saveRuleHint": "按此模板将文件分类到文件夹并重命名保存。可在设置中编辑模板。"
     },
     "recurringSchedules": {
       "title": "定期执行",
@@ -266,7 +269,8 @@
       "colType": "类型",
       "colSourceSize": "源文件大小",
       "colTargetSize": "目标大小",
-      "scanning": "扫描中..."
+      "scanning": "扫描中...",
+      "savedAs": "保存为 {{path}}"
     },
     "orphan": {
       "title": "孤立文件",
@@ -667,6 +671,53 @@
         "transportSerial": "读卡器（USB）序列号匹配",
         "cameraBodySerial": "相机机身序列号匹配：{{value}}",
         "cameraFolderStructure": "相机文件夹结构匹配（PRIVATE/DCIM）"
+      }
+    },
+    "saveRules": {
+      "title": "保存规则模板",
+      "intro": "保存规则模板决定每个复制文件的目标文件夹和文件名：可按文件类型（代理、视频、RAW、照片、元数据）、拍摄日期或 EXIF 值。请在任务设置中选择模板。",
+      "builtIn": "内置",
+      "duplicate": "复制",
+      "confirmDelete": "删除模板“{{name}}”？",
+      "anyType": "任意类型",
+      "addTemplate": "添加保存规则模板",
+      "reset": "恢复内置模板",
+      "resetHint": "恢复内置模板；你自己创建的模板将保留。",
+      "resetDone": "已恢复内置模板。",
+      "saved": "保存规则模板已保存。",
+      "copySuffix": "副本",
+      "ruleNumber": "规则 {{index}}",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "removeRule": "删除规则",
+      "matchCategories": "文件类型（留空 = 全部）",
+      "matchExtensions": "扩展名（留空 = 全部）",
+      "folderTemplate": "文件夹模板",
+      "fileNameTemplate": "文件名模板",
+      "templateName": "模板名称",
+      "templateNamePlaceholder": "我的相机整理规则",
+      "description": "说明",
+      "dateSource": "日期令牌依据",
+      "dateSourceCapture": "拍摄时间（EXIF / 视频），否则为文件修改时间",
+      "dateSourceModified": "仅文件修改时间",
+      "videoTimestamp": "MP4/MOV 创建时间视为",
+      "videoTimestampLocal": "记录值即本地时间（多数相机）",
+      "videoTimestampUtc": "UTC，转换为本机时区",
+      "categoryNames": "{category} 使用的文件夹名",
+      "rules": "规则（首个匹配生效）",
+      "addRule": "添加规则",
+      "unmatchedHint": "不匹配任何规则的文件保持原相对路径。",
+      "tokensTitle": "令牌",
+      "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 日期/时间 · {name} 原文件名（不含扩展名） · {ext}/{EXT}/{ext_lower} 扩展名 · {folder} 源文件夹名 · {path} 源子路径 · {category} 上方的文件夹名 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} 来自 EXIF。缺失值渲染为空；始终保留原扩展名。",
+      "metadataCoverage": "拍摄时间和相机信息来自 JPEG、HEIF/HEIC 以及 TIFF 类 RAW（ARW、NEF、CR2、DNG、ORF、RW2、RAF…）。MP4/MOV 使用 Sony XML 边车文件或文件头。其他格式（CR3、MXF、AVI…）回退为文件修改时间。",
+      "preview": "预览（示例文件）",
+      "category": {
+        "proxy": "代理",
+        "video": "视频",
+        "raw": "RAW",
+        "image": "照片",
+        "metadata": "元数据",
+        "other": "其他"
       }
     }
   }

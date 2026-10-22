@@ -1,5 +1,24 @@
 [
   {
+    "id": "ADR-20261022-0037-SRL",
+    "title": "Rule-based save templates and target path mapping",
+    "tags": [
+      "sync-task",
+      "save-rules",
+      "templates",
+      "exif",
+      "camera",
+      "config-store",
+      "sync-engine",
+      "macos",
+      "tauri"
+    ],
+    "status": "Accepted",
+    "date": "2026-10-22",
+    "tldr": "Add user-editable \"save rule templates\" that map each source file to a target folder and file name by media category, capture date, and EXIF values; keep mirroring as the default; make the engine compare, copy, cache, and orphan-scan by the mapped target path.",
+    "path": "docs/adr/ADR-20261022-0037-SRL-rule-based-save-templates-and-target-path-mapping.md"
+  },
+  {
     "id": "ADR-20260927-0036-LCK",
     "title": "Commit Rust lockfile and lock release builds",
     "tags": [

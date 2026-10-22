@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch, Select } from '@mantine/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
+import { SaveRuleTemplatesManager } from '../components/settings/SaveRuleTemplatesManager';
 import { useDistribution } from '../hooks/useDistribution';
 import { useSettings } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -241,6 +242,8 @@ function SettingsView() {
                 </section>
 
                 <ExclusionSetsManager />
+
+                <SaveRuleTemplatesManager />
 
                 {/* Behavior Section */}
                 <section>

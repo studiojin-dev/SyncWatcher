@@ -10,6 +10,7 @@ import { useSyncTaskStatusStore } from './hooks/useSyncTaskStatus';
 import { SettingsProvider } from './context/SettingsContext';
 import { useSyncTasksContext, SyncTasksProvider } from './context/SyncTasksContext';
 import { useExclusionSetsContext, ExclusionSetsProvider } from './context/ExclusionSetsContext';
+import { SaveRuleTemplatesProvider } from './context/SaveRuleTemplatesContext';
 import StartupProgressOverlay from './components/ui/StartupProgressOverlay';
 import { PageTransition } from './components/ui/Animations';
 import { ToastProvider } from './components/ui/Toast';
@@ -1071,9 +1072,11 @@ function App() {
         <SettingsProvider>
           <SyncTasksProvider>
             <ExclusionSetsProvider>
-              <ToastProvider>
-                <AppContent />
-              </ToastProvider>
+              <SaveRuleTemplatesProvider>
+                <ToastProvider>
+                  <AppContent />
+                </ToastProvider>
+              </SaveRuleTemplatesProvider>
             </ExclusionSetsProvider>
           </SyncTasksProvider>
         </SettingsProvider>

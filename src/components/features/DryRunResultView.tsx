@@ -87,6 +87,7 @@ export default function DryRunResultView({
     () =>
       result.diffs.map((diff) => ({
         path: diff.path,
+        targetPath: diff.target_path ?? null,
         typeLabel:
           diff.kind === 'New'
             ? t('dryRun.newFile')

@@ -152,6 +152,22 @@ vi.mock('./context/ExclusionSetsContext', () => ({
   ExclusionSetsProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
+vi.mock('./context/SaveRuleTemplatesContext', () => ({
+  useSaveRuleTemplatesContext: () => ({
+    templates: [],
+    loaded: true,
+    error: null,
+    addTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn(),
+    resetTemplates: vi.fn(),
+    previewTemplate: vi.fn(async () => []),
+    getTemplateById: () => null,
+    reload: vi.fn(),
+  }),
+  SaveRuleTemplatesProvider: ({ children }: { children: ReactNode }) => children,
+}));
+
 vi.mock('./components/layout/AppShell', () => ({
   default: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));

@@ -127,7 +127,21 @@ const ResultTreeRowView = memo(function ResultTreeRowView({
         ) : (
           fileIcon(entry?.icon ?? 'modified')
         )}
-        <span className="break-all">{node.name}</span>
+        <span className="break-all">
+          {node.name}
+          {entry?.targetPath ? (
+            <span
+              className="ml-2 text-[var(--accent-info)] break-all"
+              title={t('dryRun.savedAs', {
+                path: entry.targetPath,
+                defaultValue: 'Saved as {{path}}',
+              })}
+              data-testid="result-tree-target-path"
+            >
+              → {entry.targetPath}
+            </span>
+          ) : null}
+        </span>
       </div>
       <div className="truncate text-[var(--text-secondary)]">
         {node.isDir ? node.aggregateCount : entry?.typeLabel ?? '-'}

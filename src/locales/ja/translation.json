@@ -124,7 +124,10 @@
       "autoUnmountConfirmedStatus": "Unmount confirmed",
       "autoUnmountSuppressedStatus": "Auto unmount is disabled for this session (kept mounted)",
       "autoUnmountFailedStatus": "Unmount failed",
-      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing."
+      "dryRunSyncRequiresRerun": "Dry Run result is stale or unavailable. Run Dry Run again before syncing.",
+      "saveRule": "保存ルール",
+      "saveRuleMirror": "ソースのフォルダー構造をそのまま (既定)",
+      "saveRuleHint": "このテンプレートに従ってファイルをフォルダー分けし、名前を変えて保存します。テンプレートは設定で編集できます。"
     },
     "recurringSchedules": {
       "title": "定期実行",
@@ -266,7 +269,8 @@
       "colType": "種類",
       "colSourceSize": "ソースサイズ",
       "colTargetSize": "ターゲットサイズ",
-      "scanning": "スキャン中..."
+      "scanning": "スキャン中...",
+      "savedAs": "保存先: {{path}}"
     },
     "orphan": {
       "title": "孤立ファイル",
@@ -667,6 +671,53 @@
         "transportSerial": "カードリーダー（USB）のシリアルが一致",
         "cameraBodySerial": "カメラ本体のシリアルが一致: {{value}}",
         "cameraFolderStructure": "カメラのフォルダー構成が一致（PRIVATE/DCIM）"
+      }
+    },
+    "saveRules": {
+      "title": "保存ルールテンプレート",
+      "intro": "保存ルールテンプレートは、コピーする各ファイルの保存先フォルダーとファイル名を決めます。ファイル種別（プロキシ・動画・RAW・写真・メタデータ）、撮影日、EXIF 値を基準にできます。タスク設定でテンプレートを選択してください。",
+      "builtIn": "組み込み",
+      "duplicate": "複製",
+      "confirmDelete": "テンプレート「{{name}}」を削除しますか？",
+      "anyType": "すべての種別",
+      "addTemplate": "保存ルールテンプレートを追加",
+      "reset": "組み込みを復元",
+      "resetHint": "組み込みテンプレートを元に戻します。自作テンプレートは残ります。",
+      "resetDone": "組み込みテンプレートを復元しました。",
+      "saved": "保存ルールテンプレートを保存しました。",
+      "copySuffix": "コピー",
+      "ruleNumber": "ルール {{index}}",
+      "moveUp": "上へ",
+      "moveDown": "下へ",
+      "removeRule": "ルールを削除",
+      "matchCategories": "ファイル種別（空 = すべて）",
+      "matchExtensions": "拡張子（空 = すべて）",
+      "folderTemplate": "フォルダーテンプレート",
+      "fileNameTemplate": "ファイル名テンプレート",
+      "templateName": "テンプレート名",
+      "templateNamePlaceholder": "マイカメラ整理ルール",
+      "description": "説明",
+      "dateSource": "日付トークンの基準",
+      "dateSourceCapture": "撮影時刻（EXIF / 動画）、なければ更新日時",
+      "dateSourceModified": "ファイル更新日時のみ",
+      "videoTimestamp": "MP4/MOV の作成時刻の扱い",
+      "videoTimestampLocal": "記録値を現地時刻として扱う（多くのカメラ）",
+      "videoTimestampUtc": "UTC として扱い、この Mac のタイムゾーンへ変換",
+      "categoryNames": "{category} に使うフォルダー名",
+      "rules": "ルール（最初に一致したものを適用）",
+      "addRule": "ルールを追加",
+      "unmatchedHint": "どのルールにも一致しないファイルは元の相対パスを維持します。",
+      "tokensTitle": "トークン",
+      "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 日付/時刻 · {name} 元のファイル名（拡張子なし） · {ext}/{EXT}/{ext_lower} 拡張子 · {folder} 元のフォルダー名 · {path} 元のサブパス · {category} 上記のフォルダー名 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} EXIF 値。値がない場合は空になり、元の拡張子は常に維持されます。",
+      "metadataCoverage": "撮影時刻とカメラ情報は JPEG、HEIF/HEIC、TIFF 系 RAW（ARW、NEF、CR2、DNG、ORF、RW2、RAF…）から読み取ります。MP4/MOV は Sony の XML サイドカーまたはファイルヘッダーを使います。その他の形式（CR3、MXF、AVI…）はファイル更新日時を使います。",
+      "preview": "プレビュー（サンプルファイル）",
+      "category": {
+        "proxy": "プロキシ",
+        "video": "動画",
+        "raw": "RAW",
+        "image": "写真",
+        "metadata": "メタデータ",
+        "other": "その他"
       }
     }
   }

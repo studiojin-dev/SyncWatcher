@@ -516,7 +516,7 @@ function BackendRuntimeBridge({
 
         void refreshRuntimeState();
 
-        const unlistenPromise = listenConfigStoreChanged(['settings', 'syncTasks', 'exclusionSets'], () => {
+        const unlistenPromise = listenConfigStoreChanged(['settings', 'syncTasks', 'exclusionSets', 'saveRuleTemplates'], () => {
             if (!cancelled) {
                 void refreshRuntimeState();
             }
