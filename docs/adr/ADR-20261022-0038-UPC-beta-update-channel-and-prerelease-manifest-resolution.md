@@ -26,13 +26,15 @@ An ADR is required for this decision.
 4. **Fallback.** If the GitHub API call fails or no eligible release exists, the command logs the reason and checks the stable endpoint instead of failing, so a rate-limited or offline beta tester still receives stable updates. The returned metadata reports `channel: stable` in that case.
 5. **No downgrade on channel switch.** Switching from `beta` back to `stable` only changes which manifest is consulted. The updater never downgrades, so an installed beta stays until a stable version with a higher semver is published. The settings description states this.
 6. **Release process.** No workflow change is needed: pushing `vX.Y.Z-beta.N` (or `-rcN`) already produces a signed, notarized pre-release with DMGs, updater bundles, `latest.json`, checksums, and SBOMs. Beta versions are set in `tauri.conf.json` and `Cargo.toml` (and therefore `Cargo.lock`) exactly like stable ones. The download badge and the studiojin-home release-notes sync continue to ignore pre-releases.
-7. **`semver` becomes a direct dependency.** It adds no new crate to `Cargo.lock`; it only makes the already-present crate available to the app so the channel resolver orders versions exactly like the updater does.
+7. **Pre-release versions never reach the Mac App Store.** `tauri.appstore.conf.json` inherits `version` from `tauri.conf.json`, and App Store Connect rejects a `CFBundleShortVersionString` with a pre-release suffix. `scripts/release/local-mac-app-store-build.sh` therefore refuses to build unless the version is a plain `X.Y.Z`; the stable bump that follows a beta cycle restores App Store eligibility.
+8. **`semver` becomes a direct dependency.** It adds no new crate to `Cargo.lock`; it only makes the already-present crate available to the app so the channel resolver orders versions exactly like the updater does.
 
 ## Consequences
 
 - Opt-in testers get beta builds through the same signed updater flow as stable users; stable users see no behavioural change because the stable path still uses the fixed `releases/latest` endpoint.
 - The beta check adds one unauthenticated GitHub API request (60/hour/IP limit) per check; auto-checks run once per launch, so the limit is not a practical concern. Failures degrade to the stable check.
-- The App Store build keeps its App Store-only update policy: no setting, no command path, no updater plugin.
+- The App Store build keeps its App Store-only update policy: no setting, no command path, no updater plugin. While the tree carries a beta version, the local App Store packaging script fails fast instead of producing an invalid package.
+- The frontend caches the channel the backend actually used; a beta request that fell back to stable is retried on the next manual check, and switching channels discards the cached update.
 - `latest.json` for a pre-release is reachable at a tag-bound, immutable URL, consistent with ADR-20260812-0034-RSH; nothing mutates published releases.
 - Tag naming now matters for channel membership: only semver-parsable `vX.Y.Z[-pre]` tags with a `latest.json` asset are candidates.
 

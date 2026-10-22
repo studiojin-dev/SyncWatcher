@@ -58,18 +58,36 @@ export function isPrereleaseVersion(version: string): boolean {
     return /^\d+\.\d+\.\d+-/.test(version.trim().replace(/^v/, ''));
 }
 
-export async function checkForSelfUpdate(channel: UpdateChannel): Promise<Update | null> {
+export interface SelfUpdateCheckResult {
+    update: Update;
+    /** 백엔드가 실제로 조회한 채널. 베타 해석 실패 시 `stable`로 대체될 수 있다. */
+    channel: UpdateChannel;
+}
+
+export async function checkForSelfUpdate(channel: UpdateChannel): Promise<SelfUpdateCheckResult | null> {
     const metadata = await invoke<AppUpdateMetadata | null>('check_for_app_update', { channel });
     if (!metadata) {
         return null;
     }
-    return new Update({
-        rid: metadata.rid,
-        currentVersion: metadata.currentVersion,
-        version: metadata.version,
-        date: metadata.date ?? undefined,
-        body: metadata.body ?? undefined,
-        rawJson: metadata.rawJson,
+    return {
+        update: new Update({
+            rid: metadata.rid,
+            currentVersion: metadata.currentVersion,
+            version: metadata.version,
+            date: metadata.date ?? undefined,
+            body: metadata.body ?? undefined,
+            rawJson: metadata.rawJson,
+        }),
+        channel: metadata.channel === 'beta' ? 'beta' : 'stable',
+    };
+}
+
+function releaseUpdateResource(update: Update | null) {
+    if (!update) {
+        return;
+    }
+    void update.close().catch((err) => {
+        console.warn('[UpdateChecker] Failed to release update resource', err);
     });
 }
 
@@ -95,8 +113,10 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     const [dismissed, setDismissed] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const updateRef = useRef<Update | null>(null);
-    /** `updateRef`의 Update를 찾았을 때의 채널. 채널이 바뀌면 캐시를 버리고 다시 조회한다. */
-    const cachedUpdateChannelRef = useRef<UpdateChannel | null>(null);
+    /** `updateRef`를 조회할 때 설정돼 있던 채널. 채널이 바뀌면 캐시를 버리고 다시 조회한다. */
+    const cachedRequestedChannelRef = useRef<UpdateChannel | null>(null);
+    /** 백엔드가 실제로 조회한 채널. 베타 요청이 안정으로 대체됐다면 수동 확인 때 다시 시도한다. */
+    const cachedEffectiveChannelRef = useRef<UpdateChannel | null>(null);
     const autoCheckStartedRef = useRef(false);
     const lastHandledManualCheckRef = useRef(0);
     const fallbackStoreUrl = (distribution.appStoreUrl ?? appStoreListingUrl) || null;
@@ -113,7 +133,8 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
             mode === 'manual'
             && updateRef.current
             && state === 'available'
-            && cachedUpdateChannelRef.current === updateChannel
+            && cachedRequestedChannelRef.current === updateChannel
+            && cachedEffectiveChannelRef.current === updateChannel
         ) {
             setDismissed(false);
             return;
@@ -167,11 +188,16 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 return;
             }
 
-            const update = await checkForSelfUpdate(updateChannel);
+            const result = await checkForSelfUpdate(updateChannel);
 
-            if (update) {
+            if (result) {
+                const { update } = result;
+                if (updateRef.current !== update) {
+                    releaseUpdateResource(updateRef.current);
+                }
                 updateRef.current = update;
-                cachedUpdateChannelRef.current = updateChannel;
+                cachedRequestedChannelRef.current = updateChannel;
+                cachedEffectiveChannelRef.current = result.channel;
                 setUpdateInfo({
                     version: update.version,
                     body: update.body ?? null,
@@ -181,8 +207,10 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 setDismissed(false);
                 setState('available');
             } else {
+                releaseUpdateResource(updateRef.current);
                 updateRef.current = null;
-                cachedUpdateChannelRef.current = null;
+                cachedRequestedChannelRef.current = null;
+                cachedEffectiveChannelRef.current = null;
                 setUpdateInfo(null);
                 setState('idle');
                 if (mode === 'manual') {
@@ -191,8 +219,10 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
             }
         } catch (err) {
             console.error('[UpdateChecker] Failed to check for updates:', err);
+            releaseUpdateResource(updateRef.current);
             updateRef.current = null;
-            cachedUpdateChannelRef.current = null;
+            cachedRequestedChannelRef.current = null;
+            cachedEffectiveChannelRef.current = null;
             setUpdateInfo(null);
             setState('idle');
             if (mode === 'manual') {
@@ -248,7 +278,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     // 다운로드·설치 중이 아닐 때만 캐시를 닫고 모달을 접어, 다음 확인이 새 채널을 조회하게 한다.
     useEffect(() => {
         const cached = updateRef.current;
-        if (!cached || cachedUpdateChannelRef.current === updateChannel) {
+        if (!cached || cachedRequestedChannelRef.current === updateChannel) {
             return;
         }
         if (state === 'downloading' || state === 'installing') {
@@ -256,10 +286,9 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
         }
 
         updateRef.current = null;
-        cachedUpdateChannelRef.current = null;
-        void cached.close().catch((err) => {
-            console.warn('[UpdateChecker] Failed to release stale update resource', err);
-        });
+        cachedRequestedChannelRef.current = null;
+        cachedEffectiveChannelRef.current = null;
+        releaseUpdateResource(cached);
         setUpdateInfo(null);
         setState((current) => (current === 'available' ? 'idle' : current));
         setDismissed(false);
