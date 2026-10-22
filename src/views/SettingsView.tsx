@@ -4,8 +4,9 @@ import { Switch, Select } from '@mantine/core';
 import { ExclusionSetsManager } from '../components/settings/ExclusionSetsManager';
 import { SaveRuleTemplatesManager } from '../components/settings/SaveRuleTemplatesManager';
 import { useDistribution } from '../hooks/useDistribution';
-import { useSettings } from '../hooks/useSettings';
+import { useSettings, type UpdateChannel } from '../hooks/useSettings';
 import { open } from '@tauri-apps/plugin-dialog';
+import { emit } from '@tauri-apps/api/event';
 import { DataUnitSystem } from '../utils/formatBytes';
 import { capturePathAccess } from '../utils/pathAccess';
 import { getDistributionPolicy } from '../utils/distributionPolicy';
@@ -32,6 +33,16 @@ function SettingsView() {
     const { settings, updateSettings, setLaunchAtLogin, resetSettings, loaded } = useSettings();
     const [showLicenseModal, setShowLicenseModal] = useState(false);
     const policy = getDistributionPolicy(distribution);
+    const canChooseUpdateChannel = distributionLoaded && policy.supportsSelfUpdate;
+    const updateChannels = [
+        { value: 'stable', label: t('settings.updateChannelStable') },
+        { value: 'beta', label: t('settings.updateChannelBeta') },
+    ];
+    const requestUpdateCheck = () => {
+        void emit('app-check-for-updates-requested').catch((error) => {
+            console.error('Failed to request an update check:', error);
+        });
+    };
     const canShowExternalCheckout =
         distributionLoaded && policy.supportsExternalCheckout && !!lemonSqueezyCheckoutUrl;
     const themes = [
@@ -221,6 +232,54 @@ function SettingsView() {
                                 className="neo-input w-full"
                             />
                         </div>
+
+                        {canChooseUpdateChannel && (
+                            <div
+                                data-testid="update-channel-row"
+                                className="flex justify-between items-center gap-4 py-2 border-t border-dashed border-[var(--border-main)]"
+                            >
+                                <div className="pr-4">
+                                    <div className="font-bold">{t('settings.updateChannel')}</div>
+                                    <div className="text-xs text-[var(--text-secondary)]">
+                                        {t('settings.updateChannelDesc')}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Select
+                                        aria-label={t('settings.updateChannel')}
+                                        value={settings.updateChannel}
+                                        onChange={(value) => value && updateSettings({
+                                            updateChannel: value as UpdateChannel,
+                                        })}
+                                        data={updateChannels}
+                                        styles={{
+                                            input: {
+                                                background: 'var(--bg-primary)',
+                                                color: 'var(--text-primary)',
+                                                border: '3px solid var(--border-main)',
+                                                borderRadius: 0,
+                                                fontFamily: 'var(--font-heading)',
+                                                fontWeight: 'bold',
+                                                minHeight: '42px',
+                                                minWidth: '160px',
+                                            },
+                                            dropdown: {
+                                                border: '3px solid var(--border-main)',
+                                                borderRadius: 0,
+                                                boxShadow: '4px 4px 0 0 black',
+                                            },
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={requestUpdateCheck}
+                                        className="px-3 py-2 text-xs font-bold uppercase border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] whitespace-nowrap"
+                                    >
+                                        {t('settings.updateChannelCheckNow')}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         <div className="flex justify-between items-center py-2 border-t border-dashed border-[var(--border-main)]">
                             <div className="pr-4">

@@ -22,6 +22,7 @@ function createDistributionInfo(
 
 const {
   distributionState,
+  emitMock,
   updateSettingsMock,
   setLaunchAtLoginMock,
   resetSettingsMock,
@@ -30,9 +31,14 @@ const {
     loaded: true,
     info: createDistributionInfo(),
   },
+  emitMock: vi.fn(async () => undefined),
   updateSettingsMock: vi.fn(),
   setLaunchAtLoginMock: vi.fn(),
   resetSettingsMock: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  emit: emitMock,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -66,6 +72,7 @@ vi.mock('../hooks/useSettings', () => ({
       isRegistered: false,
       launchAtLogin: false,
       mcpEnabled: false,
+      updateChannel: 'stable',
     },
     loaded: true,
     updateSettings: updateSettingsMock,
@@ -174,6 +181,35 @@ describe('SettingsView', () => {
 
     expect(screen.queryByRole('link', { name: 'about.purchaseLicense' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'license.appStorePurchase' })).toBeInTheDocument();
+  });
+
+  it('lets GitHub-channel users pick the beta update channel and request a check', async () => {
+    renderWithMantine();
+
+    const row = screen.getByTestId('update-channel-row');
+    expect(row).toBeInTheDocument();
+
+    const select = screen.getByRole('textbox', { name: 'settings.updateChannel' });
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole('option', { name: 'settings.updateChannelBeta' }));
+    expect(updateSettingsMock).toHaveBeenCalledWith({ updateChannel: 'beta' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.updateChannelCheckNow' }));
+    expect(emitMock).toHaveBeenCalledWith('app-check-for-updates-requested');
+  });
+
+  it('hides the update channel selector in the App Store channel', () => {
+    distributionState.info = createDistributionInfo({
+      channel: 'app_store',
+      purchaseProvider: 'app_store',
+      canSelfUpdate: false,
+      appStoreAppId: '123456789',
+      appStoreUrl: 'https://apps.apple.com/us/app/id123456789',
+    });
+
+    renderWithMantine();
+
+    expect(screen.queryByTestId('update-channel-row')).not.toBeInTheDocument();
   });
 
   it('renders the MCP stdio config example using the installed executable path', async () => {

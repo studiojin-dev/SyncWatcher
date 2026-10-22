@@ -365,7 +365,12 @@
       "termsLink": "利用規約",
       "privacyLink": "プライバシーポリシー",
       "saveSettings": "設定を保存",
-      "resetDefaults": "初期設定に戻す"
+      "resetDefaults": "初期設定に戻す",
+      "updateChannel": "アップデートチャンネル",
+      "updateChannelDesc": "ベータを選ぶと、GitHub Releases のプレリリース版を安定版より先に受け取ります。安定版に戻してもインストール済みのベータは戻らず、より新しい安定版が出るまでそのまま使います。",
+      "updateChannelStable": "安定版",
+      "updateChannelBeta": "ベータ",
+      "updateChannelCheckNow": "今すぐ確認"
     },
     "startup": {
       "title": "SyncWatcher を起動中",
@@ -606,7 +611,8 @@
       "updateNow": "今すぐアップデート",
       "appStoreAvailable": "Mac App Store で v{{version}} を利用できます",
       "appStoreDescription": "Mac App Store ビルドの SyncWatcher ではアプリ内から直接アップデートをインストールできません。App Store を開いて更新してください。",
-      "openAppStore": "App Store を開く"
+      "openAppStore": "App Store を開く",
+      "prereleaseNotice": "これはベータ版です。未完成の機能や不具合が含まれる場合があります。"
     },
     "license": {
       "title": "サポーター状態を有効化",

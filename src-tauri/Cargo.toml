@@ -1,6 +1,6 @@
 [package]
 name = "syncwatcher"
-version = "2.1.0"
+version = "2.2.0-beta.1"
 description = "SyncWatcher is a high-performance, native-feeling macOS file synchronization application that detects SD cards and USB drives automatically when inserted and performs real-time directory watching for instant backup."
 authors = ["Kim Jeongjin"]
 license = "Apache-2.0"
@@ -48,6 +48,7 @@ reqwest = { version = "0.12", features = ["json"] }
 hostname = "0.4"
 rmcp = { version = "~2.1.0", features = ["transport-io", "schemars"] }
 schemars = "1.2.1"
+semver = "1"
 cron = "0.16.0"
 
 [dev-dependencies]

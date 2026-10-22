@@ -4361,7 +4361,7 @@ dependencies = [
 
 [[package]]
 name = "syncwatcher"
-version = "2.1.0"
+version = "2.2.0-beta.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4378,6 +4378,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rmcp",
  "schemars 1.2.2",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",

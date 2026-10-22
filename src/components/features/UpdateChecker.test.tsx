@@ -31,10 +31,12 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-const { checkMock, relaunchMock, showToastMock } = vi.hoisted(() => ({
+const { checkMock, downloadAndInstallMock, relaunchMock, showToastMock, settingsState } = vi.hoisted(() => ({
   checkMock: vi.fn(),
+  downloadAndInstallMock: vi.fn(),
   relaunchMock: vi.fn(),
   showToastMock: vi.fn(),
+  settingsState: { updateChannel: 'stable' as 'stable' | 'beta' },
 }));
 const distributionState = vi.hoisted(() => {
   const distributionState = {
@@ -56,8 +58,59 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
-  check: checkMock,
+  Update: class Update {
+    rid: number;
+    currentVersion: string;
+    version: string;
+    date?: string;
+    body?: string;
+    rawJson: Record<string, unknown>;
+
+    constructor(metadata: {
+      rid: number;
+      currentVersion: string;
+      version: string;
+      date?: string;
+      body?: string;
+      rawJson: Record<string, unknown>;
+    }) {
+      this.rid = metadata.rid;
+      this.currentVersion = metadata.currentVersion;
+      this.version = metadata.version;
+      this.date = metadata.date;
+      this.body = metadata.body;
+      this.rawJson = metadata.rawJson;
+    }
+
+    downloadAndInstall(onEvent?: (event: unknown) => void) {
+      return downloadAndInstallMock(onEvent);
+    }
+  },
 }));
+
+vi.mock('../../hooks/useSettings', () => ({
+  useSettings: () => ({
+    settings: { updateChannel: settingsState.updateChannel },
+    loaded: true,
+    updateSettings: vi.fn(),
+    setLaunchAtLogin: vi.fn(),
+    resetSettings: vi.fn(),
+  }),
+}));
+
+function createUpdateMetadata(overrides: Record<string, unknown> = {}) {
+  return {
+    rid: 7,
+    currentVersion: '1.0.0',
+    version: '1.2.3',
+    date: '2026-03-23T00:00:00Z',
+    body: 'Release notes',
+    rawJson: {},
+    channel: 'stable',
+    endpoint: 'https://github.com/studiojin-dev/SyncWatcher/releases/latest/download/latest.json',
+    ...overrides,
+  };
+}
 
 vi.mock('@tauri-apps/plugin-process', () => ({
   relaunch: relaunchMock,
@@ -103,6 +156,8 @@ vi.mock('react-i18next', () => ({
           return 'Failed to check for updates.';
         case 'update.appStoreDescription':
           return 'Open the App Store to install this update.';
+        case 'update.prereleaseNotice':
+          return 'This is a beta build.';
         case 'update.appStoreAvailable':
           return `App Store v${options?.version} is available`;
         case 'update.openAppStore':
@@ -121,9 +176,17 @@ describe('UpdateChecker', () => {
 
   beforeEach(() => {
     checkMock.mockReset();
+    downloadAndInstallMock.mockReset();
     relaunchMock.mockReset();
     showToastMock.mockReset();
     invokeMock.mockReset();
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === 'check_for_app_update') {
+        return checkMock(args);
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    settingsState.updateChannel = 'stable';
     distributionState.loaded = true;
     distributionState.info = createDistributionInfo();
     distributionState.resolvedInfo = { ...distributionState.info };
@@ -227,18 +290,44 @@ describe('UpdateChecker', () => {
     deferred.resolve(null);
   });
 
+  it('passes the configured update channel to the backend check', async () => {
+    settingsState.updateChannel = 'beta';
+    checkMock.mockResolvedValue(null);
+
+    render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('check_for_app_update', { channel: 'beta' });
+    });
+  });
+
+  it('marks pre-release versions in the update modal', async () => {
+    settingsState.updateChannel = 'beta';
+    checkMock.mockResolvedValue(createUpdateMetadata({ version: '2.2.0-beta.1', channel: 'beta' }));
+
+    render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    expect(await screen.findByText('v2.2.0-beta.1 is available')).toBeInTheDocument();
+    expect(screen.getByText('This is a beta build.')).toBeInTheDocument();
+  });
+
   it('keeps the existing install flow when an update is available', async () => {
-    const downloadAndInstallMock = vi.fn().mockImplementation(async (onEvent?: (event: unknown) => void) => {
+    downloadAndInstallMock.mockImplementation(async (onEvent?: (event: unknown) => void) => {
       onEvent?.({ event: 'Started', data: { contentLength: 10 } });
       onEvent?.({ event: 'Progress', data: { chunkLength: 10 } });
       onEvent?.({ event: 'Finished' });
     });
-    checkMock.mockResolvedValue({
-      version: '1.2.3',
-      body: 'Release notes',
-      date: '2026-03-23',
-      downloadAndInstall: downloadAndInstallMock,
-    });
+    checkMock.mockResolvedValue(createUpdateMetadata());
 
     render(
       <UpdateChecker
@@ -260,13 +349,8 @@ describe('UpdateChecker', () => {
   });
 
   it('shows install errors in the modal when installation fails', async () => {
-    const downloadAndInstallMock = vi.fn().mockRejectedValue(new Error('boom'));
-    checkMock.mockResolvedValue({
-      version: '1.2.3',
-      body: null,
-      date: '2026-03-23',
-      downloadAndInstall: downloadAndInstallMock,
-    });
+    downloadAndInstallMock.mockRejectedValue(new Error('boom'));
+    checkMock.mockResolvedValue(createUpdateMetadata({ body: null }));
 
     render(
       <UpdateChecker

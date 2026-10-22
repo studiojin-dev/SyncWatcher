@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { check } from '@tauri-apps/plugin-updater';
+import { Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { appStoreListingUrl } from '../../config/appLinks';
 import { useDistribution } from '../../hooks/useDistribution';
+import { useSettings, type UpdateChannel } from '../../hooks/useSettings';
 import { getDistributionPolicy } from '../../utils/distributionPolicy';
 import { useToast } from '../ui/Toast';
 
@@ -33,9 +34,43 @@ interface AppStoreUpdateCheckResult {
     error?: string | null;
 }
 
+/**
+ * `check_for_app_update` 명령이 돌려주는 메타데이터. updater 플러그인의 `Update` 생성자가
+ * 받는 형태와 같으므로 `new Update(metadata)`로 다운로드·설치 흐름을 그대로 재사용한다.
+ */
+interface AppUpdateMetadata {
+    rid: number;
+    currentVersion: string;
+    version: string;
+    date?: string | null;
+    body?: string | null;
+    rawJson: Record<string, unknown>;
+    channel: UpdateChannel;
+    endpoint: string;
+}
+
 interface UpdateCheckerProps {
     autoCheckEnabled: boolean;
     manualCheckRequestNonce: number;
+}
+
+export function isPrereleaseVersion(version: string): boolean {
+    return /^\d+\.\d+\.\d+-/.test(version.trim().replace(/^v/, ''));
+}
+
+export async function checkForSelfUpdate(channel: UpdateChannel): Promise<Update | null> {
+    const metadata = await invoke<AppUpdateMetadata | null>('check_for_app_update', { channel });
+    if (!metadata) {
+        return null;
+    }
+    return new Update({
+        rid: metadata.rid,
+        currentVersion: metadata.currentVersion,
+        version: metadata.version,
+        date: metadata.date ?? undefined,
+        body: metadata.body ?? undefined,
+        rawJson: metadata.rawJson,
+    });
 }
 
 /**
@@ -52,12 +87,14 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
         resolve: resolveDistribution,
     } = useDistribution();
     const { showToast } = useToast();
+    const { settings } = useSettings();
+    const updateChannel = settings.updateChannel;
     const [state, setState] = useState<UpdateState>('idle');
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
     const [progress, setProgress] = useState(0);
     const [dismissed, setDismissed] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
-    const updateRef = useRef<Awaited<ReturnType<typeof check>> | null>(null);
+    const updateRef = useRef<Update | null>(null);
     const autoCheckStartedRef = useRef(false);
     const lastHandledManualCheckRef = useRef(0);
     const fallbackStoreUrl = (distribution.appStoreUrl ?? appStoreListingUrl) || null;
@@ -123,7 +160,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 return;
             }
 
-            const update = await check();
+            const update = await checkForSelfUpdate(updateChannel);
 
             if (update) {
                 updateRef.current = update;
@@ -152,7 +189,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 showToast(t('update.checkFailed'), 'error');
             }
         }
-    }, [distribution, distributionLoaded, resolveDistribution, showToast, state, t]);
+    }, [distribution, distributionLoaded, resolveDistribution, showToast, state, t, updateChannel]);
 
     const handleUpdate = useCallback(async () => {
         const update = updateRef.current;
@@ -238,12 +275,21 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                                 <p className="text-xs text-[var(--text-secondary)]">
                                     {t('update.appStoreDescription')}
                                 </p>
-                            ) : updateInfo.body && (
-                                <div className="max-h-32 overflow-y-auto border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3">
-                                    <p className="whitespace-pre-wrap font-mono text-xs text-[var(--text-secondary)]">
-                                        {updateInfo.body}
-                                    </p>
-                                </div>
+                            ) : (
+                                <>
+                                    {isPrereleaseVersion(updateInfo.version) && (
+                                        <p className="text-xs font-bold text-[var(--accent-warning)]">
+                                            {t('update.prereleaseNotice')}
+                                        </p>
+                                    )}
+                                    {updateInfo.body && (
+                                        <div className="max-h-32 overflow-y-auto border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-3">
+                                            <p className="whitespace-pre-wrap font-mono text-xs text-[var(--text-secondary)]">
+                                                {updateInfo.body}
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </>
                     )}
