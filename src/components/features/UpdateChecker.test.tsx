@@ -31,8 +31,9 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-const { checkMock, downloadAndInstallMock, relaunchMock, showToastMock, settingsState } = vi.hoisted(() => ({
+const { checkMock, closeMock, downloadAndInstallMock, relaunchMock, showToastMock, settingsState } = vi.hoisted(() => ({
   checkMock: vi.fn(),
+  closeMock: vi.fn(async (_rid: number) => undefined),
   downloadAndInstallMock: vi.fn(),
   relaunchMock: vi.fn(),
   showToastMock: vi.fn(),
@@ -84,6 +85,10 @@ vi.mock('@tauri-apps/plugin-updater', () => ({
 
     downloadAndInstall(onEvent?: (event: unknown) => void) {
       return downloadAndInstallMock(onEvent);
+    }
+
+    close() {
+      return closeMock(this.rid);
     }
   },
 }));
@@ -176,6 +181,7 @@ describe('UpdateChecker', () => {
 
   beforeEach(() => {
     checkMock.mockReset();
+    closeMock.mockClear();
     downloadAndInstallMock.mockReset();
     relaunchMock.mockReset();
     showToastMock.mockReset();
@@ -304,6 +310,60 @@ describe('UpdateChecker', () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('check_for_app_update', { channel: 'beta' });
     });
+  });
+
+  it('discards a dismissed stable update and re-queries when the channel switches to beta', async () => {
+    checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1' }));
+
+    const { rerender } = render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    expect(await screen.findByText('v2.1.1 is available')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
+    expect(screen.queryByText('Update')).not.toBeInTheDocument();
+
+    settingsState.updateChannel = 'beta';
+    checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.2.0-beta.1', channel: 'beta' }));
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={1}
+      />,
+    );
+
+    expect(await screen.findByText('v2.2.0-beta.1 is available')).toBeInTheDocument();
+    expect(closeMock).toHaveBeenCalledWith(7);
+    expect(invokeMock).toHaveBeenLastCalledWith('check_for_app_update', { channel: 'beta' });
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('reopens the cached update on a manual check when the channel is unchanged', async () => {
+    checkMock.mockResolvedValueOnce(createUpdateMetadata({ version: '2.1.1' }));
+
+    const { rerender } = render(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={0}
+      />,
+    );
+
+    expect(await screen.findByText('v2.1.1 is available')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
+
+    rerender(
+      <UpdateChecker
+        autoCheckEnabled
+        manualCheckRequestNonce={1}
+      />,
+    );
+
+    expect(await screen.findByText('v2.1.1 is available')).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(closeMock).not.toHaveBeenCalled();
   });
 
   it('marks pre-release versions in the update modal', async () => {

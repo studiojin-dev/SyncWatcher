@@ -95,6 +95,8 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
     const [dismissed, setDismissed] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const updateRef = useRef<Update | null>(null);
+    /** `updateRef`의 Update를 찾았을 때의 채널. 채널이 바뀌면 캐시를 버리고 다시 조회한다. */
+    const cachedUpdateChannelRef = useRef<UpdateChannel | null>(null);
     const autoCheckStartedRef = useRef(false);
     const lastHandledManualCheckRef = useRef(0);
     const fallbackStoreUrl = (distribution.appStoreUrl ?? appStoreListingUrl) || null;
@@ -107,7 +109,12 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
             return;
         }
 
-        if (mode === 'manual' && updateRef.current && state === 'available') {
+        if (
+            mode === 'manual'
+            && updateRef.current
+            && state === 'available'
+            && cachedUpdateChannelRef.current === updateChannel
+        ) {
             setDismissed(false);
             return;
         }
@@ -164,6 +171,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
 
             if (update) {
                 updateRef.current = update;
+                cachedUpdateChannelRef.current = updateChannel;
                 setUpdateInfo({
                     version: update.version,
                     body: update.body ?? null,
@@ -174,6 +182,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
                 setState('available');
             } else {
                 updateRef.current = null;
+                cachedUpdateChannelRef.current = null;
                 setUpdateInfo(null);
                 setState('idle');
                 if (mode === 'manual') {
@@ -183,6 +192,7 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
         } catch (err) {
             console.error('[UpdateChecker] Failed to check for updates:', err);
             updateRef.current = null;
+            cachedUpdateChannelRef.current = null;
             setUpdateInfo(null);
             setState('idle');
             if (mode === 'manual') {
@@ -233,6 +243,27 @@ function UpdateChecker({ autoCheckEnabled, manualCheckRequestNonce }: UpdateChec
         autoCheckStartedRef.current = true;
         void checkForUpdates('auto');
     }, [autoCheckEnabled, checkForUpdates, distributionLoaded]);
+
+    // 채널이 바뀌면 이전 채널에서 찾은 Update는 더 이상 유효한 후보가 아니다.
+    // 다운로드·설치 중이 아닐 때만 캐시를 닫고 모달을 접어, 다음 확인이 새 채널을 조회하게 한다.
+    useEffect(() => {
+        const cached = updateRef.current;
+        if (!cached || cachedUpdateChannelRef.current === updateChannel) {
+            return;
+        }
+        if (state === 'downloading' || state === 'installing') {
+            return;
+        }
+
+        updateRef.current = null;
+        cachedUpdateChannelRef.current = null;
+        void cached.close().catch((err) => {
+            console.warn('[UpdateChecker] Failed to release stale update resource', err);
+        });
+        setUpdateInfo(null);
+        setState((current) => (current === 'available' ? 'idle' : current));
+        setDismissed(false);
+    }, [state, updateChannel]);
 
     useEffect(() => {
         if (manualCheckRequestNonce === 0 || lastHandledManualCheckRef.current === manualCheckRequestNonce) {
