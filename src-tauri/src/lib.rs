@@ -9903,6 +9903,7 @@ pub fn run() {
                             restore_main_window(app);
                         }
                         "tray_quit" => {
+                            restore_main_window(app);
                             let _ = app.emit("tray-quit-requested", ());
                         }
                         _ => {}

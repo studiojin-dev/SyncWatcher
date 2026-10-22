@@ -2,7 +2,7 @@
 Status: Accepted
 Date: 2026-04-01
 Tags: app-store, distribution, storekit, sandbox, bookmarks, updater, macos, tauri
-TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional supporter purchases provider-specific, submit the App Store build locally instead of through GitHub release automation, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.
+TL;DR: Ship GitHub DMG and universal Mac App Store builds as separate channels, keep optional supporter purchases provider-specific, submit the App Store build locally instead of through GitHub release automation, use best-effort App Store update notices, and persist user-selected path access with security-scoped bookmarks.
 
 ## Context
 
@@ -51,6 +51,12 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
     private keys outside the repository checkout for both local release paths.
     Local release scripts must reject repo-local credential paths instead of
     relying only on `.gitignore`.
+11. Build Mac App Store submission packages as universal macOS binaries.
+    - Include Apple Silicon and Intel slices, matching the supported macOS
+      platforms of the GitHub DMG channel.
+    - Use Tauri's `universal-apple-darwin` target in the local submission script.
+    - Merge the secondary CLI slices before Tauri bundling, then remove that
+      executable from the submitted App Store bundle as before.
 
 ## Consequences
 
@@ -63,6 +69,8 @@ TL;DR: Ship GitHub DMG and Mac App Store as separate channels, keep optional sup
 - Local release operators must keep certificate, provisioning profile, and App
   Store Connect private key paths in an external secure location and pass them
   through environment variables.
+- Universal App Store builds take longer and require both Rust macOS targets,
+  but one submitted package supports Apple Silicon and Intel Macs.
 
 ## Alternatives Considered
 
