@@ -47,7 +47,11 @@ Built-in templates:
 - **Camera: by capture date** - `2026/2026-10-22/DSC00001.ARW`, all types together.
 - **Camera: dated folders and file names** - `2026-10-22/RAW/20261022_140355_DSC00001.ARW`.
 
-Templates are edited in `Settings` > `Save Rule Templates`. A template is an ordered list of rules; each rule matches file types (proxy, video, RAW, photo, metadata, other) and/or extensions and defines a folder template and a file name template. The first matching rule wins and unmatched files keep their original relative path. Tokens such as `{yyyy}`, `{MM}`, `{dd}`, `{HH}`, `{mm}`, `{ss}`, `{datetime}`, `{name}`, `{ext}`, `{category}`, `{camera}`, `{iso}`, `{fnumber}` and `{shutter}` are filled from the capture date and EXIF data; the editor shows a live preview on sample files.
+Built-in template names and descriptions are shown in the app language. If you edit a name or description, your text is shown as saved.
+
+Templates are edited in `Settings` > `Save Rule Templates`. A template is an ordered list of rules; each rule matches file types (proxy, video, RAW, photo, metadata, other) and/or extensions and defines a folder template and a file name template. The first matching rule wins and unmatched files keep their original relative path. Tokens such as `{yyyy}`, `{MM}`, `{dd}`, `{HH}`, `{mm}`, `{ss}`, `{date}`, `{datetime}`, `{name}`, `{ext}`, `{category}`, `{camera}`, `{iso}`, `{fnumber}` and `{shutter}` are filled from the capture date and EXIF data; the editor shows a live preview on sample files.
+
+Date tokens always use the year-first ISO order regardless of the system language or region: `{date}` is `yyyy-MM-dd`, `{time}` is `HHmmss`, and `{datetime}` is `yyyyMMdd_HHmmss`. Target paths therefore never change when you switch the Mac's language, so the next sync does not see files as new or as deletion candidates. If you want a day-month-year or month-day-year order, compose it yourself with `{dd}-{MM}-{yyyy}` or `{MM}-{dd}-{yyyy}`; note that only year-first folder names sort chronologically in the Finder.
 
 Capture time and camera values are read from JPEG, HEIF/HEIC and TIFF-based RAW files (ARW, NEF, CR2, DNG, ORF, RW2, RAF and similar). MP4/MOV clips use the Sony XML sidecar when present, otherwise the file header. Formats without supported metadata (CR3, MXF, AVI and others) fall back to the file's modified time.
 

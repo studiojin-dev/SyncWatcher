@@ -25,6 +25,10 @@ import {
 import { useSaveRuleTemplatesContext } from '../../context/SaveRuleTemplatesContext';
 import { useToast } from '../ui/Toast';
 import { getErrorMessage } from '../../views/sync-tasks/helpers';
+import {
+    localizeSaveRuleTemplateDescription,
+    localizeSaveRuleTemplateName,
+} from '../../utils/saveRuleTemplateDisplay';
 
 type TemplateDraft = Omit<SaveRuleTemplate, 'id' | 'builtIn'>;
 
@@ -178,7 +182,9 @@ function RuleEditor({ index, rule, total, categoryLabel, onChange, onMove, onRem
                         className="neo-input w-full font-mono text-xs"
                         value={rule.folder}
                         onChange={(event) => onChange({ ...rule, folder: event.target.value })}
-                        placeholder="{yyyy}-{MM}-{dd}/{category}"
+                        placeholder={t('saveRules.folderTemplatePlaceholder', {
+                            defaultValue: '{yyyy}-{MM}-{dd}/{category} or {dd}-{MM}-{yyyy}/{category}',
+                        })}
                         aria-label={t('saveRules.folderTemplate', { defaultValue: 'Folder template' })}
                     />
                 </div>
@@ -190,7 +196,9 @@ function RuleEditor({ index, rule, total, categoryLabel, onChange, onMove, onRem
                         className="neo-input w-full font-mono text-xs"
                         value={rule.fileName}
                         onChange={(event) => onChange({ ...rule, fileName: event.target.value })}
-                        placeholder="{datetime}_{name}.{ext}"
+                        placeholder={t('saveRules.fileNameTemplatePlaceholder', {
+                            defaultValue: '{datetime}_{name}.{ext} or {dd}-{MM}-{yyyy}_{name}.{ext}',
+                        })}
                         aria-label={t('saveRules.fileNameTemplate', { defaultValue: 'File name template' })}
                     />
                 </div>
@@ -396,6 +404,12 @@ function TemplateForm({ draft, onChange, onSave, onCancel, saving, preview, prev
                     })}
                 </p>
                 <p className="mt-1">
+                    {t('saveRules.tokensDateHelp', {
+                        defaultValue:
+                            '{date} = {yyyy}-{MM}-{dd}, {time} = {HH}{mm}{ss}, {datetime} = {yyyy}{MM}{dd}_{HH}{mm}{ss}. Date tokens always use this year-first ISO order regardless of the system language, so target paths never change when you switch languages. For a regional order, combine tokens yourself, e.g. {dd}-{MM}-{yyyy} or {MM}-{dd}-{yyyy}; note that only year-first folder names sort chronologically in the Finder.',
+                    })}
+                </p>
+                <p className="mt-1">
                     {t('saveRules.metadataCoverage', {
                         defaultValue:
                             'Capture time and camera data come from JPEG, HEIF/HEIC and TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, RAF…). MP4/MOV use the Sony XML sidecar or the file header. Other formats (CR3, MXF, AVI…) fall back to the file modified time.',
@@ -511,7 +525,7 @@ export function SaveRuleTemplatesManager() {
             base
                 ? {
                     ...draftFromTemplate(base),
-                    name: `${base.name} (${t('saveRules.copySuffix', { defaultValue: 'copy' })})`,
+                    name: `${localizeSaveRuleTemplateName(base, t)} (${t('saveRules.copySuffix', { defaultValue: 'copy' })})`,
                 }
                 : emptyDraft(),
         );
@@ -596,7 +610,10 @@ export function SaveRuleTemplatesManager() {
                     })}
                 </p>
                 <div className="space-y-4">
-                    {templates.map((template) => (
+                    {templates.map((template) => {
+                        const displayName = localizeSaveRuleTemplateName(template, t);
+                        const displayDescription = localizeSaveRuleTemplateDescription(template, t);
+                        return (
                         <div
                             key={template.id}
                             className="border-2 border-[var(--border-main)] p-4 bg-[var(--bg-primary)]"
@@ -617,16 +634,16 @@ export function SaveRuleTemplatesManager() {
                                     <div className="flex justify-between items-start mb-2 gap-2">
                                         <div className="min-w-0">
                                             <h3 className="font-bold uppercase truncate">
-                                                {template.name}
+                                                {displayName}
                                                 {template.builtIn ? (
                                                     <span className="ml-2 text-[10px] px-1 border border-[var(--border-main)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] align-middle">
                                                         {t('saveRules.builtIn', { defaultValue: 'BUILT-IN' })}
                                                     </span>
                                                 ) : null}
                                             </h3>
-                                            {template.description ? (
+                                            {displayDescription ? (
                                                 <p className="text-xs text-[var(--text-secondary)] font-mono">
-                                                    {template.description}
+                                                    {displayDescription}
                                                 </p>
                                             ) : null}
                                         </div>
@@ -636,7 +653,7 @@ export function SaveRuleTemplatesManager() {
                                                 onClick={() => startEditing(template)}
                                                 className="p-1 hover:text-[var(--accent-main)]"
                                                 title={t('common.edit')}
-                                                aria-label={`${t('common.edit')} ${template.name}`}
+                                                aria-label={`${t('common.edit')} ${displayName}`}
                                             >
                                                 <IconEdit size={18} />
                                             </button>
@@ -645,7 +662,7 @@ export function SaveRuleTemplatesManager() {
                                                 onClick={() => startCreating(template)}
                                                 className="p-1 hover:text-[var(--accent-main)]"
                                                 title={t('saveRules.duplicate', { defaultValue: 'Duplicate' })}
-                                                aria-label={`${t('saveRules.duplicate', { defaultValue: 'Duplicate' })} ${template.name}`}
+                                                aria-label={`${t('saveRules.duplicate', { defaultValue: 'Duplicate' })} ${displayName}`}
                                             >
                                                 <IconCopy size={18} />
                                             </button>
@@ -655,7 +672,7 @@ export function SaveRuleTemplatesManager() {
                                                     onClick={() => setConfirmDeleteId(template.id)}
                                                     className="p-1 hover:text-[var(--color-accent-error)]"
                                                     title={t('common.delete')}
-                                                    aria-label={`${t('common.delete')} ${template.name}`}
+                                                    aria-label={`${t('common.delete')} ${displayName}`}
                                                 >
                                                     <IconTrash size={18} />
                                                 </button>
@@ -666,7 +683,7 @@ export function SaveRuleTemplatesManager() {
                                         <div className="flex items-center gap-2 text-xs font-mono border-l-2 border-[var(--color-accent-error)] pl-2 mb-2">
                                             <span>
                                                 {t('saveRules.confirmDelete', {
-                                                    name: template.name,
+                                                    name: displayName,
                                                     defaultValue: 'Delete template "{{name}}"?',
                                                 })}
                                             </span>
@@ -714,7 +731,8 @@ export function SaveRuleTemplatesManager() {
                                 </div>
                             )}
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 {isCreating ? (

@@ -716,6 +716,27 @@
       "tokensTitle": "トークン",
       "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 日付/時刻 · {name} 元のファイル名（拡張子なし） · {ext}/{EXT}/{ext_lower} 拡張子 · {folder} 元のフォルダー名 · {path} 元のサブパス · {category} 上記のフォルダー名 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} EXIF 値。値がない場合は空になり、元の拡張子は常に維持されます。",
       "metadataCoverage": "撮影時刻とカメラ情報は JPEG、HEIF/HEIC、TIFF 系 RAW（ARW、NEF、CR2、DNG、ORF、RW2、RAF…）から読み取ります。MP4/MOV は Sony の XML サイドカーまたはファイルヘッダーを使います。その他の形式（CR3、MXF、AVI…）はファイル更新日時を使います。",
+      "tokensDateHelp": "{date} = {yyyy}-{MM}-{dd}、{time} = {HH}{mm}{ss}、{datetime} = {yyyy}{MM}{dd}_{HH}{mm}{ss}。日付トークンはシステム言語に関係なく常に年が先頭の ISO 順で固定されるため、言語を切り替えても保存先パスは変わりません。地域別の順序が必要な場合は {dd}-{MM}-{yyyy} や {MM}-{dd}-{yyyy} のようにトークンを組み合わせてください。なお、Finder で日付順に並ぶのは年が先頭のフォルダー名だけです。",
+      "folderTemplatePlaceholder": "{yyyy}-{MM}-{dd}/{category} または {dd}-{MM}-{yyyy}/{category}",
+      "fileNameTemplatePlaceholder": "{datetime}_{name}.{ext} または {dd}-{MM}-{yyyy}_{name}.{ext}",
+      "presets": {
+        "camera-by-type": {
+          "name": "カメラ: ファイル種別ごと",
+          "description": "Proxy / Video / RAW / Photo / Metadata フォルダー、元のファイル名を維持。"
+        },
+        "camera-by-date-type": {
+          "name": "カメラ: 撮影日ごと、その中で種別ごと",
+          "description": "撮影日に基づく YYYY-MM-DD/<種別>/ フォルダー、元のファイル名を維持。"
+        },
+        "camera-by-date": {
+          "name": "カメラ: 撮影日ごと",
+          "description": "撮影日に基づく YYYY/YYYY-MM-DD/ フォルダー、すべての種別をまとめて保存。"
+        },
+        "camera-dated-filenames": {
+          "name": "カメラ: 日付フォルダー + 日付ファイル名",
+          "description": "YYYY-MM-DD/<種別>/ フォルダー、ファイル名を YYYYMMDD_HHMMSS_<元の名前> に変更。"
+        }
+      },
       "preview": "プレビュー（サンプルファイル）",
       "category": {
         "proxy": "プロキシ",

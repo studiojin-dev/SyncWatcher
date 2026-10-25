@@ -716,6 +716,27 @@
       "tokensTitle": "令牌",
       "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 日期/时间 · {name} 原文件名（不含扩展名） · {ext}/{EXT}/{ext_lower} 扩展名 · {folder} 源文件夹名 · {path} 源子路径 · {category} 上方的文件夹名 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} 来自 EXIF。缺失值渲染为空；始终保留原扩展名。",
       "metadataCoverage": "拍摄时间和相机信息来自 JPEG、HEIF/HEIC 以及 TIFF 类 RAW（ARW、NEF、CR2、DNG、ORF、RW2、RAF…）。MP4/MOV 使用 Sony XML 边车文件或文件头。其他格式（CR3、MXF、AVI…）回退为文件修改时间。",
+      "tokensDateHelp": "{date} = {yyyy}-{MM}-{dd}，{time} = {HH}{mm}{ss}，{datetime} = {yyyy}{MM}{dd}_{HH}{mm}{ss}。日期标记始终使用年份在前的 ISO 顺序，与系统语言无关，因此切换语言不会改变目标路径。如需地区习惯的顺序，请自行组合标记，例如 {dd}-{MM}-{yyyy} 或 {MM}-{dd}-{yyyy}；注意只有年份在前的文件夹名才能在 Finder 中按日期排序。",
+      "folderTemplatePlaceholder": "{yyyy}-{MM}-{dd}/{category} 或 {dd}-{MM}-{yyyy}/{category}",
+      "fileNameTemplatePlaceholder": "{datetime}_{name}.{ext} 或 {dd}-{MM}-{yyyy}_{name}.{ext}",
+      "presets": {
+        "camera-by-type": {
+          "name": "相机：按文件类型",
+          "description": "Proxy / Video / RAW / Photo / Metadata 文件夹，保留原文件名。"
+        },
+        "camera-by-date-type": {
+          "name": "相机：按拍摄日期，再按类型",
+          "description": "按拍摄日期建立 YYYY-MM-DD/<类型>/ 文件夹，保留原文件名。"
+        },
+        "camera-by-date": {
+          "name": "相机：按拍摄日期",
+          "description": "按拍摄日期建立 YYYY/YYYY-MM-DD/ 文件夹，所有类型放在一起。"
+        },
+        "camera-dated-filenames": {
+          "name": "相机：日期文件夹 + 日期文件名",
+          "description": "YYYY-MM-DD/<类型>/ 文件夹；文件重命名为 YYYYMMDD_HHMMSS_<原名>。"
+        }
+      },
       "preview": "预览（示例文件）",
       "category": {
         "proxy": "代理",

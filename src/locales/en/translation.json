@@ -725,6 +725,27 @@
       "tokensTitle": "Tokens",
       "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} date/time · {name} original stem · {ext}/{EXT}/{ext_lower} extension · {folder} source folder · {path} source sub-path · {category} folder name above · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} from EXIF. Missing values render empty; the original extension is kept.",
       "metadataCoverage": "Capture time and camera data come from JPEG, HEIF/HEIC and TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, RAF…). MP4/MOV use the Sony XML sidecar or the file header. Other formats (CR3, MXF, AVI…) fall back to the file modified time.",
+      "tokensDateHelp": "{date} = {yyyy}-{MM}-{dd}, {time} = {HH}{mm}{ss}, {datetime} = {yyyy}{MM}{dd}_{HH}{mm}{ss}. Date tokens always use this year-first ISO order regardless of the system language, so target paths never change when you switch languages. For a regional order, combine tokens yourself, e.g. {dd}-{MM}-{yyyy} or {MM}-{dd}-{yyyy}; note that only year-first folder names sort chronologically in the Finder.",
+      "folderTemplatePlaceholder": "{yyyy}-{MM}-{dd}/{category} or {dd}-{MM}-{yyyy}/{category}",
+      "fileNameTemplatePlaceholder": "{datetime}_{name}.{ext} or {dd}-{MM}-{yyyy}_{name}.{ext}",
+      "presets": {
+        "camera-by-type": {
+          "name": "Camera: by file type",
+          "description": "Proxy / Video / RAW / Photo / Metadata folders, original file names."
+        },
+        "camera-by-date-type": {
+          "name": "Camera: by capture date, then type",
+          "description": "YYYY-MM-DD/<type>/ folders from the capture date, original file names."
+        },
+        "camera-by-date": {
+          "name": "Camera: by capture date",
+          "description": "YYYY/YYYY-MM-DD/ folders from the capture date, all types together."
+        },
+        "camera-dated-filenames": {
+          "name": "Camera: dated folders and file names",
+          "description": "YYYY-MM-DD/<type>/ folders; files renamed to YYYYMMDD_HHMMSS_<original>."
+        }
+      },
       "preview": "Preview (sample files)",
       "category": {
         "proxy": "Proxy",

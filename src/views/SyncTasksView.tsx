@@ -27,6 +27,10 @@ import {
 } from './sync-tasks/helpers';
 import { useSyncTaskActions } from './sync-tasks/useSyncTaskActions';
 import { useSyncTaskFormController } from './sync-tasks/useSyncTaskFormController';
+import {
+  localizeSaveRuleTemplateDescription,
+  localizeSaveRuleTemplateName,
+} from '../utils/saveRuleTemplateDisplay';
 
 interface SyncTasksViewProps {
   requestedEditTaskId?: string | null;
@@ -45,6 +49,16 @@ function SyncTasksView({
   const { sets, getPatternsForSets } = useExclusionSetsContext();
   const { templates: saveRuleTemplates, getTemplateById: getSaveRuleTemplate } =
     useSaveRuleTemplatesContext();
+  // 편집되지 않은 기본 템플릿의 이름·설명을 UI 언어로 보여준다 (저장된 값은 그대로).
+  const localizedSaveRuleTemplates = useMemo(
+    () =>
+      saveRuleTemplates.map((template) => ({
+        id: template.id,
+        name: localizeSaveRuleTemplateName(template, t),
+        description: localizeSaveRuleTemplateDescription(template, t),
+      })),
+    [saveRuleTemplates, t],
+  );
   const { settings } = useSettings();
   const { showToast } = useToast();
   const [showForm, setShowForm] = useState(false);
@@ -326,7 +340,7 @@ function SyncTasksView({
         editingTask={editingTask}
         form={form}
         sets={sets}
-        saveRuleTemplates={saveRuleTemplates}
+        saveRuleTemplates={localizedSaveRuleTemplates}
         savingTask={savingTask}
         onClose={closeForm}
         onSubmit={handleSubmit}
@@ -404,7 +418,10 @@ function SyncTasksView({
           conflictSessionsLoading={conflictSessionsLoading}
           dataUnitSystem={settings.dataUnitSystem}
           getPatternsForSets={getPatternsForSets}
-          getSaveRuleName={(id) => getSaveRuleTemplate(id)?.name ?? null}
+          getSaveRuleName={(id) => {
+            const template = getSaveRuleTemplate(id);
+            return template ? localizeSaveRuleTemplateName(template, t) : null;
+          }}
           t={t}
           onRefreshConflictSessions={() => {
             void loadConflictSessions();

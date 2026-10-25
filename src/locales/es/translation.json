@@ -717,6 +717,27 @@
       "tokensTitle": "Tokens",
       "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} fecha/hora · {name} nombre original sin extensión · {ext}/{EXT}/{ext_lower} extensión · {folder} carpeta de origen · {path} subruta de origen · {category} nombre de carpeta de arriba · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} desde EXIF. Los valores ausentes quedan vacíos; la extensión original se conserva.",
       "metadataCoverage": "La hora de captura y los datos de cámara provienen de JPEG, HEIF/HEIC y RAW basados en TIFF (ARW, NEF, CR2, DNG, ORF, RW2, RAF…). MP4/MOV usan el XML lateral de Sony o la cabecera del archivo. Otros formatos (CR3, MXF, AVI…) usan la fecha de modificación.",
+      "tokensDateHelp": "{date} = {yyyy}-{MM}-{dd}, {time} = {HH}{mm}{ss}, {datetime} = {yyyy}{MM}{dd}_{HH}{mm}{ss}. Los tokens de fecha usan siempre este orden ISO con el año primero, sea cual sea el idioma del sistema, así que las rutas de destino no cambian al cambiar de idioma. Para un orden regional, combina los tokens tú mismo, p. ej. {dd}-{MM}-{yyyy} o {MM}-{dd}-{yyyy}; ten en cuenta que solo las carpetas con el año primero se ordenan cronológicamente en el Finder.",
+      "folderTemplatePlaceholder": "{yyyy}-{MM}-{dd}/{category} o {dd}-{MM}-{yyyy}/{category}",
+      "fileNameTemplatePlaceholder": "{datetime}_{name}.{ext} o {dd}-{MM}-{yyyy}_{name}.{ext}",
+      "presets": {
+        "camera-by-type": {
+          "name": "Cámara: por tipo de archivo",
+          "description": "Carpetas Proxy / Video / RAW / Photo / Metadata, nombres de archivo originales."
+        },
+        "camera-by-date-type": {
+          "name": "Cámara: por fecha de captura y luego tipo",
+          "description": "Carpetas YYYY-MM-DD/<tipo>/ según la fecha de captura, nombres de archivo originales."
+        },
+        "camera-by-date": {
+          "name": "Cámara: por fecha de captura",
+          "description": "Carpetas YYYY/YYYY-MM-DD/ según la fecha de captura, todos los tipos juntos."
+        },
+        "camera-dated-filenames": {
+          "name": "Cámara: carpetas y nombres con fecha",
+          "description": "Carpetas YYYY-MM-DD/<tipo>/; archivos renombrados a YYYYMMDD_HHMMSS_<original>."
+        }
+      },
       "preview": "Vista previa (archivos de ejemplo)",
       "category": {
         "proxy": "Proxy",

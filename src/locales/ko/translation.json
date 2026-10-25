@@ -725,6 +725,27 @@
       "tokensTitle": "토큰",
       "tokensHelp": "{yyyy}{MM}{dd} {HH}{mm}{ss} 날짜/시각 · {name} 원본 파일명(확장자 제외) · {ext}/{EXT}/{ext_lower} 확장자 · {folder} 원본 폴더명 · {path} 원본 하위 경로 · {category} 위의 폴더 이름 · {camera}/{make}/{model}/{serial}/{iso}/{fnumber}/{aperture}/{shutter}/{focal} EXIF 값. 값이 없으면 비워지고, 원본 확장자는 항상 유지됩니다.",
       "metadataCoverage": "촬영 시각과 카메라 정보는 JPEG, HEIF/HEIC, TIFF 계열 RAW(ARW, NEF, CR2, DNG, ORF, RW2, RAF…)에서 읽습니다. MP4/MOV는 Sony XML 사이드카 또는 파일 헤더를 사용합니다. 그 외 형식(CR3, MXF, AVI…)은 파일 수정 시각을 씁니다.",
+      "tokensDateHelp": "{date} = {yyyy}-{MM}-{dd}, {time} = {HH}{mm}{ss}, {datetime} = {yyyy}{MM}{dd}_{HH}{mm}{ss}. 날짜 토큰은 시스템 언어와 관계없이 항상 연도가 먼저 오는 ISO 순서로 고정되어, 언어를 바꿔도 타깃 경로가 달라지지 않습니다. 지역별 순서가 필요하면 {dd}-{MM}-{yyyy}, {MM}-{dd}-{yyyy}처럼 토큰을 직접 조합하세요. 단, Finder에서 날짜순으로 정렬되는 것은 연도가 먼저 오는 폴더명만입니다.",
+      "folderTemplatePlaceholder": "{yyyy}-{MM}-{dd}/{category} 또는 {dd}-{MM}-{yyyy}/{category}",
+      "fileNameTemplatePlaceholder": "{datetime}_{name}.{ext} 또는 {dd}-{MM}-{yyyy}_{name}.{ext}",
+      "presets": {
+        "camera-by-type": {
+          "name": "카메라: 파일 종류별",
+          "description": "Proxy / Video / RAW / Photo / Metadata 폴더, 원본 파일명 유지."
+        },
+        "camera-by-date-type": {
+          "name": "카메라: 촬영 날짜별, 그 안에서 종류별",
+          "description": "촬영 날짜 기준 YYYY-MM-DD/<종류>/ 폴더, 원본 파일명 유지."
+        },
+        "camera-by-date": {
+          "name": "카메라: 촬영 날짜별",
+          "description": "촬영 날짜 기준 YYYY/YYYY-MM-DD/ 폴더, 모든 종류를 함께 저장."
+        },
+        "camera-dated-filenames": {
+          "name": "카메라: 날짜 폴더 + 날짜 파일명",
+          "description": "YYYY-MM-DD/<종류>/ 폴더, 파일명을 YYYYMMDD_HHMMSS_<원본>으로 변경."
+        }
+      },
       "preview": "미리보기 (샘플 파일)",
       "category": {
         "proxy": "프록시",
