@@ -28,6 +28,9 @@ pub struct FileDiff {
     /// 저장 규칙으로 바뀐 타깃 상대 경로. `None`이면 `path`와 같다.
     #[serde(default)]
     pub target_path: Option<PathBuf>,
+    /// 추가 소스의 정규화된 루트. `None`이면 기본(첫 번째) 소스다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_root: Option<PathBuf>,
 }
 
 impl FileDiff {
@@ -48,6 +51,9 @@ pub struct SyncFileEntry {
     /// 저장 규칙으로 바뀐 타깃 상대 경로. `None`이면 `path`와 같다.
     #[serde(default)]
     pub target_path: Option<PathBuf>,
+    /// 추가 소스의 정규화된 루트. `None`이면 기본(첫 번째) 소스다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -88,6 +88,12 @@ pub fn activate_sync_task_path_access(
     if let Some(target_bookmark) = task.target_bookmark.as_deref() {
         let _ = manager.activate_bookmark(target_bookmark)?;
     }
+    // 추가 소스는 연결되지 않았을 수 있으므로 실패해도 실행을 막지 않는다 (ADR-0039).
+    for extra in &task.extra_sources {
+        if let Some(bookmark) = extra.source_bookmark.as_deref() {
+            let _ = manager.activate_bookmark(bookmark);
+        }
+    }
     Ok(())
 }
 

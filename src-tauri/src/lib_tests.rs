@@ -49,12 +49,12 @@ mod integration_tests {
         prune_auto_unmount_session_disabled_tasks, read_current_conflict_file_info,
         record_runtime_validation_issue, refresh_uuid_source_identity,
         remove_runtime_sync_task_state, resolve_conflict_items_internal,
-        resolve_runtime_exclude_patterns, resolve_save_rule_by_id, runtime_desired_watch_sources,
-        runtime_find_watch_task, runtime_get_state_internal, runtime_validation_issue_log_message,
-        runtime_watch_bootstrap_task_ids, runtime_watch_restart_task_ids,
-        runtime_watch_task_needs_restart, select_runtime_dispatch_candidate,
-        set_auto_unmount_session_disabled_internal, should_include_check_for_updates_menu,
-        should_reconcile_runtime_watchers_for_volume_change,
+        resolve_runtime_exclude_patterns, resolve_save_rule_by_id, resolve_task_run_sources,
+        runtime_desired_watch_sources, runtime_find_watch_task, runtime_get_state_internal,
+        runtime_validation_issue_log_message, runtime_watch_bootstrap_task_ids,
+        runtime_watch_restart_task_ids, runtime_watch_task_needs_restart,
+        select_runtime_dispatch_candidate, set_auto_unmount_session_disabled_internal,
+        should_include_check_for_updates_menu, should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_control_plane_auth,
         validate_dry_run_artifact, validate_legacy_config_store_file_path, validate_runtime_tasks,
@@ -106,6 +106,7 @@ mod integration_tests {
             id: id.to_string(),
             name: format!("task-{id}"),
             source: source.to_string(),
+            extra_sources: Vec::new(),
             target: "/tmp/target".to_string(),
             checksum_mode: false,
             watch_mode,
@@ -245,6 +246,7 @@ mod integration_tests {
             id: id.to_string(),
             name: format!("task-{id}"),
             source: source.to_string(),
+            extra_sources: Vec::new(),
             target: target.to_string(),
             checksum_mode: false,
             watch_mode,
@@ -317,6 +319,7 @@ mod integration_tests {
             source_identity,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         }
     }
 
@@ -1038,6 +1041,7 @@ mod integration_tests {
                 checksum_source: None,
                 checksum_target: None,
                 target_path: None,
+                source_root: None,
             }],
             target_preflight: None,
         };
@@ -1076,6 +1080,7 @@ mod integration_tests {
                 checksum_source: None,
                 checksum_target: None,
                 target_path: None,
+                source_root: None,
             }],
             target_preflight: None,
         };
@@ -1107,6 +1112,7 @@ mod integration_tests {
                 target_size: Some(0),
                 error: None,
                 target_path: None,
+                source_root: None,
             }],
         };
 
@@ -1211,6 +1217,7 @@ mod integration_tests {
                     retention_count: 20,
                 }],
                 save_rule_id: None,
+                extra_sources: Default::default(),
             },
             None,
             None,
@@ -1262,6 +1269,7 @@ mod integration_tests {
                     retention_count: 20,
                 }],
                 save_rule_id: None,
+                extra_sources: Default::default(),
             },
             None,
             None,
@@ -1312,6 +1320,7 @@ mod integration_tests {
                 source_identity: None,
                 recurring_schedules: Vec::new(),
                 save_rule_id: None,
+                extra_sources: Default::default(),
             },
             None,
             None,
@@ -1417,6 +1426,7 @@ mod integration_tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         }])
         .expect("repair content should serialize");
 
@@ -1509,6 +1519,7 @@ mod integration_tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         };
         state
             .config_store
@@ -1604,6 +1615,7 @@ mod integration_tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         };
         state
             .config_store
@@ -1684,6 +1696,7 @@ mod integration_tests {
                     retention_count: 5,
                 }],
                 save_rule_id: None,
+                extra_sources: Default::default(),
             }])
             .expect("tasks should save");
 
@@ -2556,6 +2569,7 @@ mod integration_tests {
             id: "task-1".to_string(),
             name: "task-1".to_string(),
             source: "/tmp/source".to_string(),
+            extra_sources: Vec::new(),
             target: "/tmp/target".to_string(),
             checksum_mode: false,
             watch_mode: true,
@@ -2885,6 +2899,7 @@ mod integration_tests {
                     source_identity: None,
                     recurring_schedules: Vec::new(),
                     save_rule_id: None,
+                    extra_sources: Default::default(),
                 },
                 SyncTaskRecord {
                     id: "task-b".to_string(),
@@ -2907,6 +2922,7 @@ mod integration_tests {
                     source_identity: None,
                     recurring_schedules: Vec::new(),
                     save_rule_id: None,
+                    extra_sources: Default::default(),
                 },
             ])
             .expect("tasks should save");
@@ -2927,6 +2943,93 @@ mod integration_tests {
             .err()
             .unwrap_or_default()
             .contains("Orphan scan blocked"));
+    }
+
+    #[test]
+    fn test_resolve_task_run_sources_skips_any_missing_card_and_requires_all_for_orphans() {
+        let root = tempfile::TempDir::new().expect("temp dir");
+        let card_a = root.path().join("card-a-not-mounted");
+        let card_b = root.path().join("card-b");
+        let card_c = root.path().join("card-c");
+        let target = root.path().join("archive");
+        std::fs::create_dir_all(&card_b).expect("card b");
+        std::fs::create_dir_all(&card_c).expect("card c");
+
+        let extra = |path: &std::path::Path| crate::config_store::ExtraSourceRecord {
+            source: path.to_string_lossy().to_string(),
+            source_bookmark: None,
+            source_type: Some(crate::config_store::SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+        };
+        let mut task = build_uuid_task("multi", SourceUuidType::Disk, "slot-a", "/", None);
+        let card_a_source = card_a.to_string_lossy().to_string();
+        task.source = card_a_source.clone();
+        task.extra_sources = vec![extra(&card_b), extra(&card_c)];
+
+        // 첫 번째 카드가 빠져도 연결된 첫 카드(b)가 기본 소스가 되고 순서는 유지된다.
+        let resolved = resolve_task_run_sources(&task, &card_a_source, &target, false)
+            .expect("missing first source should be skipped");
+        assert_eq!(resolved.primary, card_b);
+        assert_eq!(resolved.primary_position, 1);
+        assert_eq!(resolved.extras.len(), 1);
+        assert_eq!(resolved.extras[0].position, 2);
+        assert_eq!(resolved.extras[0].path, card_c);
+        assert_eq!(resolved.skipped, vec![card_a_source.clone()]);
+
+        let error = resolve_task_run_sources(&task, &card_a_source, &target, true)
+            .expect_err("orphan flows need every source");
+        assert!(error.starts_with("Source not connected:"));
+
+        task.extra_sources = Vec::new();
+        let error = resolve_task_run_sources(&task, &card_a_source, &target, false)
+            .expect_err("no connected source at all");
+        assert!(error.starts_with("Source not connected:"));
+
+        let b_source = card_b.to_string_lossy().to_string();
+        std::fs::create_dir_all(card_b.join("DCIM")).expect("nested dir");
+        task.extra_sources = vec![extra(&card_b.join("DCIM"))];
+        assert!(resolve_task_run_sources(&task, &b_source, &target, false).is_err());
+
+        std::fs::create_dir_all(&target).expect("target");
+        task.extra_sources = vec![extra(&target)];
+        assert!(resolve_task_run_sources(&task, &b_source, &target, false).is_err());
+    }
+
+    #[test]
+    fn test_runtime_validation_checks_every_source_of_a_multi_source_task() {
+        let mut task = build_runtime_task_with_paths("a", "/cards/a", "/archive", false);
+        task.extra_sources = vec!["/cards/b".to_string()];
+        assert!(validate_runtime_tasks(std::slice::from_ref(&task)).is_ok());
+        assert!(find_runtime_task_validation_issue(std::slice::from_ref(&task)).is_none());
+
+        let mut target_overlap = task.clone();
+        target_overlap.extra_sources = vec!["/archive/inbox".to_string()];
+        let issue = find_runtime_task_validation_issue(std::slice::from_ref(&target_overlap))
+            .expect("extra source inside target should be rejected");
+        assert_eq!(issue.code, RuntimeTaskValidationCode::SourceTargetOverlap);
+        assert_eq!(issue.source.as_deref(), Some("/archive/inbox"));
+        assert!(validate_runtime_tasks(&[target_overlap]).is_err());
+
+        let mut source_overlap = task.clone();
+        source_overlap.extra_sources = vec!["/cards/a/DCIM".to_string()];
+        let issue = find_runtime_task_validation_issue(std::slice::from_ref(&source_overlap))
+            .expect("nested sources should be rejected");
+        assert_eq!(issue.code, RuntimeTaskValidationCode::SourceSourceOverlap);
+        assert!(validate_runtime_tasks(&[source_overlap]).is_err());
+    }
+
+    #[test]
+    fn test_watch_chain_edge_uses_any_source_of_downstream_task() {
+        let upstream = build_runtime_task_with_paths("up", "/cards/a", "/ingest", true);
+        let mut downstream = build_runtime_task_with_paths("down", "/other", "/nas", true);
+        downstream.extra_sources = vec!["/ingest".to_string()];
+        let validated =
+            build_validated_runtime_tasks(&[upstream, downstream]).expect("tasks should validate");
+        let upstreams = build_runtime_watch_upstreams(&validated);
+        assert!(upstreams.get("down").is_some_and(|ids| ids.contains("up")));
     }
 
     #[test]
@@ -3371,8 +3474,10 @@ mod integration_tests {
         let queued_set = HashSet::from([String::from("watch-a")]);
         let syncing = HashSet::new();
         let watch_upstreams = HashMap::new();
-        let source_keys =
-            HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
+        let source_keys = HashMap::from([(
+            String::from("watch-a"),
+            vec![String::from("/media/incoming")],
+        )]);
         let active_producers = HashMap::from([(
             String::from("sync:manual:task-b"),
             RuntimeActiveProducer {
@@ -3404,8 +3509,10 @@ mod integration_tests {
         let queued_set = HashSet::from([String::from("watch-a")]);
         let syncing = HashSet::new();
         let watch_upstreams = HashMap::new();
-        let source_keys =
-            HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]);
+        let source_keys = HashMap::from([(
+            String::from("watch-a"),
+            vec![String::from("/media/incoming")],
+        )]);
         let active_producers = HashMap::from([(
             String::from("conflict:force-copy:session-1:item-1"),
             RuntimeActiveProducer {
@@ -3436,8 +3543,11 @@ mod integration_tests {
         let syncing = HashSet::new();
         let watch_upstreams = HashMap::new();
         let source_keys = HashMap::from([
-            (String::from("watch-a"), String::from("/media/incoming")),
-            (String::from("watch-b"), String::from("/other/source")),
+            (
+                String::from("watch-a"),
+                vec![String::from("/media/incoming")],
+            ),
+            (String::from("watch-b"), vec![String::from("/other/source")]),
         ]);
         let active_producers = HashMap::new();
         let future_deadline = Instant::now() + Duration::from_millis(200);
@@ -3462,7 +3572,10 @@ mod integration_tests {
             &HashSet::from([String::from("watch-a")]),
             &HashSet::new(),
             &HashMap::new(),
-            &HashMap::from([(String::from("watch-a"), String::from("/media/incoming"))]),
+            &HashMap::from([(
+                String::from("watch-a"),
+                vec![String::from("/media/incoming")],
+            )]),
             &HashMap::new(),
             &HashMap::from([(
                 String::from("watch-a"),
@@ -3489,8 +3602,8 @@ mod integration_tests {
         let queued_set = HashSet::from([String::from("watch-b"), String::from("watch-a")]);
         let syncing = HashSet::new();
         let source_keys = HashMap::from([
-            (String::from("watch-a"), String::from("/sdcard")),
-            (String::from("watch-b"), String::from("/camera")),
+            (String::from("watch-a"), vec![String::from("/sdcard")]),
+            (String::from("watch-b"), vec![String::from("/camera")]),
         ]);
 
         let selection = select_runtime_dispatch_candidate(
@@ -4254,6 +4367,7 @@ mod integration_tests {
             checksum_source: None,
             checksum_target: None,
             target_path: None,
+            source_root: None,
         };
         let diff_b = FileDiff {
             path: PathBuf::from("a.txt"),
@@ -4263,6 +4377,7 @@ mod integration_tests {
             checksum_source: None,
             checksum_target: None,
             target_path: None,
+            source_root: None,
         };
 
         assert!(live
@@ -4305,6 +4420,7 @@ mod integration_tests {
                 checksum_source: None,
                 checksum_target: None,
                 target_path: None,
+                source_root: None,
             };
             batch = live.record_diff(diff, progress.clone(), Instant::now());
         }
@@ -4329,6 +4445,7 @@ mod integration_tests {
                     target_size: Some(0),
                     error: None,
                     target_path: None,
+                    source_root: None,
                 },
                 base,
             )
@@ -4343,6 +4460,7 @@ mod integration_tests {
                 target_size: Some(1),
                 error: Some("copy failed".to_string()),
                 target_path: None,
+                source_root: None,
             },
             base + Duration::from_millis(250),
         );
@@ -4366,6 +4484,7 @@ mod integration_tests {
                     target_size: Some(0),
                     error: None,
                     target_path: None,
+                    source_root: None,
                 },
                 Instant::now(),
             );
@@ -4388,6 +4507,7 @@ mod integration_tests {
                     target_size: Some(0),
                     error: None,
                     target_path: None,
+                    source_root: None,
                 },
                 Instant::now(),
             )
@@ -4567,6 +4687,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4584,6 +4705,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4602,6 +4724,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4642,6 +4765,7 @@ mod integration_tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: save_rule_id.map(str::to_string),
+            extra_sources: Default::default(),
         };
 
         let error =
@@ -4700,6 +4824,7 @@ mod integration_tests {
                 source_identity: None,
                 recurring_schedules: Vec::new(),
                 save_rule_id: Some(save_rules::PRESET_CAMERA_BY_TYPE.to_string()),
+                extra_sources: Default::default(),
             }])
             .expect("tasks should save");
 
@@ -4752,6 +4877,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4767,6 +4893,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4784,6 +4911,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4816,6 +4944,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &missing_target,
             false,
             &[],
@@ -4834,6 +4963,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &missing_target,
             false,
             &[],
@@ -4875,6 +5005,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],
@@ -4893,6 +5024,7 @@ mod integration_tests {
             &source_raw,
             &target_raw,
             &source,
+            &[],
             &target,
             false,
             &[],

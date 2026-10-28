@@ -10,7 +10,7 @@ import {
   type SetStateAction,
 } from 'react';
 import { fetchDistributionInfo } from '../../context/DistributionContext';
-import type { SyncTask } from '../../hooks/useSyncTasks';
+import type { SyncTask, SyncTaskExtraSource } from '../../hooks/useSyncTasks';
 import { useSyncTaskStatusStore, type TaskStatus } from '../../hooks/useSyncTaskStatus';
 import { toRuntimeTask } from '../../types/runtime';
 import { getDistributionPolicy } from '../../utils/distributionPolicy';
@@ -35,6 +35,7 @@ import type {
   RuntimeTaskValidationResult,
 } from '../../types/runtime';
 import {
+  buildUuidOptionValue,
   buildUuidSourceToken,
   inferUuidTypeFromVolumes,
   isSourceUuidType,
@@ -463,6 +464,65 @@ export function useSyncTaskActions({
         targetPath = capturedTarget.path;
         targetBookmark = capturedTarget.bookmark;
 
+        // 추가 소스 (ADR-0039). 비어 있는 행은 무시한다.
+        const extraSources: SyncTaskExtraSource[] = [];
+        for (const [index, draft] of form.extraSources.entries()) {
+          const label = t('syncTasks.extraSourceLabel', {
+            letter: String.fromCharCode('b'.charCodeAt(0) + index).toUpperCase(),
+            defaultValue: `Source ${index + 2}`,
+          });
+          if (draft.sourceType === 'path') {
+            if (!draft.sourcePath.trim()) {
+              continue;
+            }
+            const captured = await ensureBookmarkAccess(
+              draft.sourcePath,
+              draft.sourceBookmark,
+              label,
+            );
+            if (!captured) {
+              return;
+            }
+            const bookmark = normalizeBookmarkForSubmission(captured.bookmark);
+            extraSources.push({
+              source: captured.path,
+              sourceType: 'path',
+              ...(bookmark ? { sourceBookmark: bookmark } : {}),
+            });
+            continue;
+          }
+
+          if (!draft.sourceUuid || !draft.sourceTokenType) {
+            continue;
+          }
+          const subPath = normalizeUuidSubPath(draft.sourceSubPath);
+          const mountPoint =
+            form.uuidSourceOptions.find(
+              (option) =>
+                option.value ===
+                buildUuidOptionValue(draft.sourceTokenType || 'disk', draft.sourceUuid),
+            )?.mountPoint ?? null;
+          let bookmark = draft.sourceBookmark ?? draft.saved?.sourceBookmark ?? '';
+          if (mountPoint) {
+            const captured = await ensureBookmarkAccess(mountPoint, bookmark, label);
+            if (!captured) {
+              return;
+            }
+            bookmark = captured.bookmark;
+          }
+          const normalizedBookmark = normalizeBookmarkForSubmission(bookmark);
+          extraSources.push({
+            source: buildUuidSourceToken(draft.sourceTokenType, draft.sourceUuid, subPath),
+            sourceType: 'uuid',
+            sourceUuid: draft.sourceUuid,
+            ...(isSourceUuidType(draft.sourceTokenType)
+              ? { sourceUuidType: draft.sourceTokenType }
+              : {}),
+            sourceSubPath: subPath,
+            ...(normalizedBookmark ? { sourceBookmark: normalizedBookmark } : {}),
+          });
+        }
+
         const normalizedSourceBookmark =
           normalizeBookmarkForSubmission(sourceBookmark);
         const normalizedTargetBookmark =
@@ -491,6 +551,7 @@ export function useSyncTaskActions({
           checksumMode: formData.get('checksumMode') === 'on',
           exclusionSets: form.selectedSets,
           saveRuleId: form.saveRuleId || null,
+          extraSources,
           watchMode: form.watchMode,
           autoUnmount: shouldEnableAutoUnmount({
             source: finalSource,

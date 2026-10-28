@@ -77,6 +77,10 @@ export function getValidationSummary(
       return t('syncTasks.errors.sourceEqualsTarget', {
         defaultValue: 'Source and target cannot overlap.',
       });
+    case 'sourceSourceOverlap':
+      return t('syncTasks.errors.sourceSourceOverlap', {
+        defaultValue: 'Sources of one task cannot overlap.',
+      });
     case 'duplicateTarget':
       return t('syncTasks.errors.duplicateTarget', {
         defaultValue: 'Target conflicts with another task target.',
@@ -106,6 +110,11 @@ export function getValidationRuleDescription(
       return t('syncTasks.validationModal.ruleDescriptions.sourceTargetOverlap', {
         defaultValue:
           'Within one task, source and target cannot point to the same path or parent/child paths.',
+      });
+    case 'sourceSourceOverlap':
+      return t('syncTasks.validationModal.ruleDescriptions.sourceSourceOverlap', {
+        defaultValue:
+          'Sources of one task cannot be the same path or parent/child paths, or files would be copied twice.',
       });
     case 'duplicateTarget':
       return t(

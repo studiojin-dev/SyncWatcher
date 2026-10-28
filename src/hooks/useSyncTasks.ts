@@ -51,6 +51,18 @@ export interface SyncTask {
     recurringSchedules?: RecurringSchedule[];
     /** 저장 규칙 템플릿 ID. null/undefined면 원본 폴더 구조를 그대로 미러링 */
     saveRuleId?: string | null;
+    /** 같은 대상으로 함께 동기화할 추가 소스 (ADR-0039). 연결된 것만 동기화된다. */
+    extraSources?: SyncTaskExtraSource[];
+}
+
+/** 추가 소스 하나. 기본 소스와 같은 필드를 쓰되 SMB 자동 마운트는 없다. */
+export interface SyncTaskExtraSource {
+    source: string;
+    sourceBookmark?: string | null;
+    sourceType?: 'path' | 'uuid';
+    sourceUuid?: string;
+    sourceUuidType?: 'disk' | 'volume' | 'sdcard';
+    sourceSubPath?: string;
 }
 
 export interface SyncTaskNetworkMount {
@@ -114,6 +126,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         sourceIdentity: task.sourceIdentity,
         recurringSchedules: normalizeRecurringSchedules(task.recurringSchedules),
         saveRuleId: task.saveRuleId ?? null,
+        extraSources: task.extraSources ?? [],
     };
 
     normalizedTask.autoUnmount = shouldEnableAutoUnmount(normalizedTask);

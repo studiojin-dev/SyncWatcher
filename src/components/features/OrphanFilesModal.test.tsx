@@ -184,4 +184,48 @@ describe('OrphanFilesModal', () => {
     const lastToastArgs = showToastMock.mock.calls[showToastMock.mock.calls.length - 1];
     expect(lastToastArgs?.[0]).toContain('Deleted files 2, dirs 1');
   });
+
+  it('shows a notice instead of an empty result when a source card is not connected', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'find_orphan_files') {
+        throw 'Source not connected: [SD_CARD_CID:3:SD256:-442236285]/';
+      }
+      return null;
+    });
+    render(
+      <OrphanFilesModal
+        taskId="task-1"
+        source="/source"
+        target="/target"
+        excludePatterns={[]}
+        onBack={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText(/Connect every source card/)).toBeInTheDocument();
+    expect(screen.queryByText('No orphan files found.')).not.toBeInTheDocument();
+    expect(showToastMock).not.toHaveBeenCalled();
+  });
+
+  it('shows other scan failures in the result area and as an error toast', async () => {
+    mockInvoke.mockImplementation(async (command: string) => {
+      if (command === 'find_orphan_files') {
+        throw 'Permission denied';
+      }
+      return null;
+    });
+    render(
+      <OrphanFilesModal
+        taskId="task-1"
+        source="/source"
+        target="/target"
+        excludePatterns={[]}
+        onBack={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Permission denied')).toBeInTheDocument();
+    expect(screen.queryByText('No orphan files found.')).not.toBeInTheDocument();
+    expect(showToastMock).toHaveBeenCalledWith('Permission denied', 'error');
+  });
 });

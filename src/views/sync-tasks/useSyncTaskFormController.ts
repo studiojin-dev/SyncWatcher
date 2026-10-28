@@ -12,7 +12,11 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { formatBytes, type DataUnitSystem } from '../../utils/formatBytes';
 import { captureNetworkMount, capturePathAccess } from '../../utils/pathAccess';
 import { shouldEnableAutoUnmount } from '../../utils/autoUnmount';
-import type { SyncTask, SyncTaskNetworkMount } from '../../hooks/useSyncTasks';
+import type {
+  SyncTask,
+  SyncTaskExtraSource,
+  SyncTaskNetworkMount,
+} from '../../hooks/useSyncTasks';
 import {
   buildUuidOptionValue,
   buildUuidSourceOptions,
@@ -28,6 +32,58 @@ import {
   type UuidSourceOption,
 } from '../syncTaskUuid';
 import { getErrorMessage, type ShowToastFn, type TranslateFn, type VolumeInfo } from './helpers';
+
+/** 편집 중인 추가 소스 하나 (ADR-0039). */
+export interface ExtraSourceDraft {
+  key: string;
+  sourceType: 'path' | 'uuid';
+  sourcePath: string;
+  sourceBookmark: string | null;
+  sourceUuid: string;
+  sourceTokenType: UuidTokenType | '';
+  sourceSubPath: string;
+  /** 편집 전에 저장돼 있던 값. 연결되지 않은 UUID 소스를 그대로 유지할 때 쓴다. */
+  saved: SyncTaskExtraSource | null;
+}
+
+let extraSourceKeySeq = 0;
+function nextExtraSourceKey(): string {
+  extraSourceKeySeq += 1;
+  return `extra-source-${extraSourceKeySeq}`;
+}
+
+function emptyExtraSourceDraft(): ExtraSourceDraft {
+  return {
+    key: nextExtraSourceKey(),
+    sourceType: 'uuid',
+    sourcePath: '',
+    sourceBookmark: null,
+    sourceUuid: '',
+    sourceTokenType: '',
+    sourceSubPath: '',
+    saved: null,
+  };
+}
+
+function extraSourceDraftFromTask(extra: SyncTaskExtraSource): ExtraSourceDraft {
+  const parsed = parseUuidSourceToken(extra.source || '');
+  const sourceType: 'path' | 'uuid' =
+    extra.sourceType || (parsed ? 'uuid' : 'path');
+  return {
+    key: nextExtraSourceKey(),
+    sourceType,
+    sourcePath: sourceType === 'path' ? extra.source : '',
+    sourceBookmark: extra.sourceBookmark ?? null,
+    sourceUuid: sourceType === 'uuid' ? extra.sourceUuid || parsed?.uuid || '' : '',
+    sourceTokenType:
+      sourceType === 'uuid' ? parsed?.tokenType || extra.sourceUuidType || '' : '',
+    sourceSubPath:
+      sourceType === 'uuid'
+        ? normalizeUuidSubPath(extra.sourceSubPath ?? parsed?.subPath ?? '/')
+        : '',
+    saved: extra,
+  };
+}
 
 interface UseSyncTaskFormControllerOptions {
   editingTask: SyncTask | null;
@@ -77,6 +133,14 @@ export interface SyncTaskFormController {
   handleUuidOptionChange: (value: string | null) => void;
   browseDirectory: (type: 'source' | 'target') => Promise<void>;
   browseSourceSubPath: () => Promise<void>;
+  extraSources: ExtraSourceDraft[];
+  addExtraSource: () => void;
+  removeExtraSource: (key: string) => void;
+  updateExtraSource: (key: string, patch: Partial<ExtraSourceDraft>) => void;
+  extraSourceUuidOptions: (draft: ExtraSourceDraft) => UuidSourceOption[];
+  selectExtraSourceUuid: (key: string, value: string | null) => void;
+  browseExtraSourceDirectory: (key: string) => Promise<void>;
+  browseExtraSourceSubPath: (key: string) => Promise<void>;
 }
 
 export function useSyncTaskFormController({
@@ -107,6 +171,7 @@ export function useSyncTaskFormController({
   const [sourceSubPath, setSourceSubPath] = useState('');
   const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
   const [loadingVolumes, setLoadingVolumes] = useState(false);
+  const [extraSources, setExtraSources] = useState<ExtraSourceDraft[]>([]);
 
   const formatVolumeSize = useCallback(
     (volume: VolumeInfo): string => {
@@ -241,6 +306,7 @@ export function useSyncTaskFormController({
       setSourceSubPath(
         resolvedSourceType === 'uuid' ? resolvedSourceSubPath : '',
       );
+      setExtraSources((editingTask.extraSources ?? []).map(extraSourceDraftFromTask));
       return;
     }
 
@@ -261,6 +327,7 @@ export function useSyncTaskFormController({
     setSourceUuidType('');
     setSourceTokenType('');
     setSourceSubPath('');
+    setExtraSources([]);
   }, [editingTask, showForm]);
 
   useEffect(() => {
@@ -454,6 +521,160 @@ export function useSyncTaskFormController({
     t,
   ]);
 
+  const updateExtraSource = useCallback(
+    (key: string, patch: Partial<ExtraSourceDraft>) => {
+      setExtraSources((prev) =>
+        prev.map((draft) => (draft.key === key ? { ...draft, ...patch } : draft)),
+      );
+    },
+    [],
+  );
+
+  const addExtraSource = useCallback(() => {
+    setExtraSources((prev) => [...prev, emptyExtraSourceDraft()]);
+  }, []);
+
+  const removeExtraSource = useCallback((key: string) => {
+    setExtraSources((prev) => prev.filter((draft) => draft.key !== key));
+  }, []);
+
+  const extraSourceUuidOptions = useCallback(
+    (draft: ExtraSourceDraft): UuidSourceOption[] => {
+      if (!draft.sourceUuid || !draft.sourceTokenType) {
+        return mountedUuidSourceOptions;
+      }
+      const value = buildUuidOptionValue(draft.sourceTokenType, draft.sourceUuid);
+      if (mountedUuidSourceOptions.some((option) => option.value === value)) {
+        return mountedUuidSourceOptions;
+      }
+      const savedOption: UuidSourceOption = {
+        value,
+        label: `${t('syncTasks.savedUuidSourceLabel', {
+          defaultValue: 'Saved UUID source (not mounted)',
+        })} [${uuidTypeLabel(draft.sourceTokenType, {
+          sdCardLabel: t('syncTasks.sdCardSerial', {
+            defaultValue: 'SD Card Serial',
+          }),
+        })}: ${draft.sourceUuid}]`,
+        uuidType: draft.sourceTokenType,
+        uuid: draft.sourceUuid,
+        mountPoint: null,
+        mounted: false,
+      };
+      return [savedOption, ...mountedUuidSourceOptions];
+    },
+    [mountedUuidSourceOptions, t],
+  );
+
+  const selectExtraSourceUuid = useCallback(
+    (key: string, value: string | null) => {
+      const parsedOption = value ? parseUuidOptionValue(value) : null;
+      if (!parsedOption) {
+        updateExtraSource(key, {
+          sourceUuid: '',
+          sourceTokenType: '',
+          sourceBookmark: null,
+        });
+        return;
+      }
+      updateExtraSource(key, {
+        sourceUuid: parsedOption.uuid,
+        sourceTokenType: parsedOption.uuidType,
+        sourceBookmark: null,
+      });
+      const option = mountedUuidSourceOptions.find(
+        (candidate) => candidate.value === value,
+      );
+      if (!option?.mounted || !option.mountPoint) {
+        return;
+      }
+      void capturePathAccess(option.mountPoint)
+        .then((captured) => {
+          updateExtraSource(key, { sourceBookmark: captured.bookmark ?? null });
+        })
+        .catch((error) => {
+          console.error('Failed to capture extra source volume access:', error);
+          showToast(getErrorMessage(error), 'error');
+        });
+    },
+    [mountedUuidSourceOptions, showToast, updateExtraSource],
+  );
+
+  const browseExtraSourceDirectory = useCallback(
+    async (key: string) => {
+      try {
+        const selected = await open({
+          directory: true,
+          multiple: false,
+          title: 'Select Source Directory',
+        });
+        if (selected && typeof selected === 'string') {
+          const captured = await capturePathAccess(selected);
+          updateExtraSource(key, {
+            sourcePath: captured.path,
+            sourceBookmark: captured.bookmark ?? null,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to open directory picker:', error);
+        showToast('Failed to open directory picker', 'error');
+      }
+    },
+    [showToast, updateExtraSource],
+  );
+
+  const browseExtraSourceSubPath = useCallback(
+    async (key: string) => {
+      const draft = extraSources.find((candidate) => candidate.key === key);
+      if (!draft || !draft.sourceUuid || !draft.sourceTokenType) {
+        return;
+      }
+      const value = buildUuidOptionValue(draft.sourceTokenType, draft.sourceUuid);
+      const mountPoint = mountedUuidSourceOptions.find(
+        (option) => option.value === value,
+      )?.mountPoint;
+      if (!mountPoint) {
+        showToast(
+          t('syncTasks.volumeNotMounted', {
+            defaultValue: '볼륨이 마운트되지 않음',
+          }),
+          'warning',
+        );
+        return;
+      }
+
+      const normalizedSubPath = draft.sourceSubPath.replace(/^\/+/, '');
+      try {
+        const selected = await open({
+          directory: true,
+          multiple: false,
+          title: t('syncTasks.subPath', { defaultValue: '하위 경로' }),
+          defaultPath: normalizedSubPath
+            ? `${mountPoint}/${normalizedSubPath}`
+            : mountPoint,
+        });
+        if (!selected || typeof selected !== 'string') {
+          return;
+        }
+        const resolvedSubPath = toUuidSubPath(mountPoint, selected);
+        if (resolvedSubPath === null) {
+          showToast(
+            t('syncTasks.subPathOutsideVolume', {
+              defaultValue: '선택한 경로가 현재 볼륨 내부가 아닙니다.',
+            }),
+            'warning',
+          );
+          return;
+        }
+        updateExtraSource(key, { sourceSubPath: resolvedSubPath });
+      } catch (error) {
+        console.error('Failed to open sub path picker:', error);
+        showToast('Failed to open directory picker', 'error');
+      }
+    },
+    [extraSources, mountedUuidSourceOptions, showToast, t, updateExtraSource],
+  );
+
   return {
     selectedSets,
     setSelectedSets,
@@ -494,5 +715,13 @@ export function useSyncTaskFormController({
     handleUuidOptionChange,
     browseDirectory,
     browseSourceSubPath,
+    extraSources,
+    addExtraSource,
+    removeExtraSource,
+    updateExtraSource,
+    extraSourceUuidOptions,
+    selectExtraSourceUuid,
+    browseExtraSourceDirectory,
+    browseExtraSourceSubPath,
   };
 }

@@ -16,6 +16,20 @@ function buildTask(overrides: Partial<SyncTask> = {}): SyncTask {
 }
 
 describe('toRuntimeTask', () => {
+    it('passes extra source values to the runtime payload', () => {
+        const runtimeTask = toRuntimeTask(
+            buildTask({
+                extraSources: [
+                    { source: '[DISK_UUID:slot-b]/DCIM', sourceType: 'uuid' },
+                    { source: '/Volumes/CARD3', sourceType: 'path' },
+                ],
+            })
+        );
+
+        expect(runtimeTask.extraSources).toEqual(['[DISK_UUID:slot-b]/DCIM', '/Volumes/CARD3']);
+        expect(toRuntimeTask(buildTask()).extraSources).toEqual([]);
+    });
+
     it('forces autoUnmount false for normal path source', () => {
         const runtimeTask = toRuntimeTask(
             buildTask({

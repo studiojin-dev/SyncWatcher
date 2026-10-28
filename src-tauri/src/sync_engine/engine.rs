@@ -23,6 +23,78 @@ use walkdir::WalkDir; // Import Context trait
 pub struct SyncEngine {
     source: PathBuf,
     target: PathBuf,
+    /// 기본 소스의 작업 내 순서. 첫 번째 소스가 빠져 다른 소스가 기본이 되면 0이 아니다 (ADR-0039).
+    source_position: usize,
+    /// 기본 소스 뒤에 이어지는 추가 소스들 (ADR-0039).
+    extra_sources: Vec<ExtraSourcePath>,
+}
+
+/// 이번 실행에 쓸 추가 소스 하나.
+#[derive(Debug, Clone)]
+pub struct ExtraSourcePath {
+    /// 작업에 정의된 소스 순서 (기본 소스 = 0). 빠진 소스가 있어도 충돌 접미사 글자가 바뀌지 않게 한다.
+    pub position: usize,
+    pub path: PathBuf,
+}
+
+/// 정규화된 소스 루트 하나와 그 스캔 결과.
+struct ScannedSource {
+    position: usize,
+    root: PathBuf,
+    files: Vec<FileMetadata>,
+}
+
+/// 타깃에 쓸 소스 파일 하나: `sources[source_index].files[file_index]` → `target_relative`.
+struct PlannedFile {
+    source_index: usize,
+    file_index: usize,
+    target_relative: PathBuf,
+}
+
+/// 소스 순서 글자. 기본 소스가 `a`, 두 번째가 `b` …
+fn source_letter(index: usize) -> String {
+    if index < 26 {
+        char::from(b'a' + index as u8).to_string()
+    } else {
+        format!("s{}", index + 1)
+    }
+}
+
+/// `dir/name.ext` → `dir/name{suffix}.ext`
+fn with_file_name_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let extension = path
+        .extension()
+        .map(|value| format!(".{}", value.to_string_lossy()))
+        .unwrap_or_default();
+    let name = format!("{stem}{suffix}{extension}");
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(name),
+        _ => PathBuf::from(name),
+    }
+}
+
+/// 다른 소스가 이미 차지한 타깃 경로를 피해 소스 글자 접미사(`_b`)를, 그것도 차 있으면 `_b_2` …를 붙인다.
+fn resolve_cross_source_collision(
+    base: &Path,
+    source_position: usize,
+    taken: &HashSet<PathBuf>,
+) -> PathBuf {
+    let letter = source_letter(source_position);
+    let lettered = with_file_name_suffix(base, &format!("_{letter}"));
+    if !taken.contains(&lettered) {
+        return lettered;
+    }
+    for index in 2u32.. {
+        let candidate = with_file_name_suffix(base, &format!("_{letter}_{index}"));
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("cross-source collision resolver exhausted u32 range")
 }
 
 const HARD_IGNORED_ROOT_METADATA_DIRS: [&str; 4] = [
@@ -98,7 +170,240 @@ async fn reject_symlink_destination_under_root(root: &Path, target: &Path) -> Re
 
 impl SyncEngine {
     pub fn new(source: PathBuf, target: PathBuf) -> Self {
-        Self { source, target }
+        Self {
+            source,
+            target,
+            source_position: 0,
+            extra_sources: Vec::new(),
+        }
+    }
+
+    /// 기본 소스의 작업 내 순서를 지정한다. 충돌 접미사 글자가 이 순서를 따른다.
+    pub fn with_source_position(mut self, position: usize) -> Self {
+        self.source_position = position;
+        self
+    }
+
+    /// 추가 소스를 지정한다. 호출자는 이번 실행에 쓸 수 있는 소스만 넘긴다.
+    pub fn with_extra_sources(mut self, extra_sources: Vec<ExtraSourcePath>) -> Self {
+        self.extra_sources = extra_sources;
+        self
+    }
+
+    /// (소스 순서, 경로) 목록. 기본 소스가 먼저다.
+    fn all_source_paths(&self) -> impl Iterator<Item = (usize, &PathBuf)> {
+        std::iter::once((self.source_position, &self.source)).chain(
+            self.extra_sources
+                .iter()
+                .map(|extra| (extra.position, &extra.path)),
+        )
+    }
+
+    async fn canonical_source_dir(path: &Path) -> Result<PathBuf> {
+        let canonical = tokio::fs::canonicalize(path)
+            .await
+            .with_context(|| format!("Failed to canonicalize source: {:?}", path))?;
+        let meta = tokio::fs::metadata(&canonical).await.with_context(|| {
+            format!(
+                "Failed to access source after canonicalization: {:?}",
+                canonical
+            )
+        })?;
+        if !meta.is_dir() {
+            anyhow::bail!("Source path is not a directory: {:?}", canonical);
+        }
+        Ok(canonical)
+    }
+
+    async fn scan_sources<P>(
+        &self,
+        exclude_patterns: &[String],
+        cancel_token: Option<CancellationToken>,
+        progress_callback: Arc<StdMutex<P>>,
+    ) -> Result<Vec<ScannedSource>>
+    where
+        P: FnMut(DryRunProgress) + Send + 'static,
+    {
+        let mut scanned = Vec::new();
+        for (position, source) in self.all_source_paths() {
+            let root = Self::canonical_source_dir(source).await?;
+            let files = self
+                .read_directory(
+                    &root,
+                    DryRunPhase::ScanningSource,
+                    exclude_patterns,
+                    cancel_token.clone(),
+                    progress_callback.clone(),
+                )
+                .await
+                .context("Failed to read source directory")?;
+            scanned.push(ScannedSource {
+                position,
+                root,
+                files,
+            });
+        }
+        Ok(scanned)
+    }
+
+    async fn cached_checksum(
+        &self,
+        cache: &mut HashMap<(usize, usize), String>,
+        sources: &[ScannedSource],
+        source_index: usize,
+        file_index: usize,
+    ) -> Result<String> {
+        if let Some(hash) = cache.get(&(source_index, file_index)) {
+            return Ok(hash.clone());
+        }
+        let source = &sources[source_index];
+        let hash = self
+            .calculate_checksum(&source.root.join(&source.files[file_index].path))
+            .await?;
+        cache.insert((source_index, file_index), hash.clone());
+        Ok(hash)
+    }
+
+    /// 모든 소스 파일의 타깃 상대 경로를 정한다 (ADR-0039).
+    /// 소스 순서대로, 소스 안에서는 경로 순서대로 처리해 결과가 결정적이다.
+    /// 앞선 소스와 같은 타깃 경로가 나오면 내용(xxHash)이 같을 때는 건너뛰고,
+    /// 다르면 소스 글자 접미사를 붙인다.
+    async fn plan_target_paths(
+        &self,
+        sources: &[ScannedSource],
+        save_rule: Option<&SaveRuleTemplateRecord>,
+        cancel_token: Option<CancellationToken>,
+        on_progress: &(dyn Fn(DryRunProgress) + Sync),
+    ) -> Result<Vec<PlannedFile>> {
+        let multi_source = sources.len() > 1;
+        let total_files = sources
+            .iter()
+            .flat_map(|source| source.files.iter())
+            .filter(|file| file.is_file)
+            .count() as u64;
+        let mut planned_files = 0u64;
+        let mut last_emit_at = std::time::Instant::now() - std::time::Duration::from_millis(100);
+        let mut planned = Vec::new();
+        let mut taken: HashSet<PathBuf> = HashSet::new();
+        let mut claimants: HashMap<PathBuf, Vec<(usize, usize)>> = HashMap::new();
+        let mut hash_cache: HashMap<(usize, usize), String> = HashMap::new();
+
+        for (source_index, scanned) in sources.iter().enumerate() {
+            let mapping = match save_rule {
+                Some(rule) => Some(
+                    Self::build_target_mapping(
+                        &scanned.root,
+                        &scanned.files,
+                        rule,
+                        cancel_token.clone(),
+                    )
+                    .await?,
+                ),
+                None => None,
+            };
+            let mut order: Vec<usize> = (0..scanned.files.len())
+                .filter(|&index| scanned.files[index].is_file)
+                .collect();
+            order.sort_by(|a, b| scanned.files[*a].path.cmp(&scanned.files[*b].path));
+
+            for file_index in order {
+                if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                    anyhow::bail!("Operation cancelled while planning target paths");
+                }
+                let file = &scanned.files[file_index];
+                planned_files += 1;
+                let base = mapping
+                    .as_ref()
+                    .and_then(|mapping| mapping.get(&file.path).cloned())
+                    .unwrap_or_else(|| file.path.clone());
+
+                if !multi_source {
+                    planned.push(PlannedFile {
+                        source_index,
+                        file_index,
+                        target_relative: base,
+                    });
+                    continue;
+                }
+
+                if !taken.contains(&base) {
+                    taken.insert(base.clone());
+                    claimants
+                        .entry(base.clone())
+                        .or_default()
+                        .push((source_index, file_index));
+                    planned.push(PlannedFile {
+                        source_index,
+                        file_index,
+                        target_relative: base,
+                    });
+                    continue;
+                }
+
+                let earlier: Vec<(usize, usize)> = claimants
+                    .get(&base)
+                    .map(|list| {
+                        list.iter()
+                            .copied()
+                            .filter(|(other_source, _)| *other_source != source_index)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // 소스 간 중복 확인은 해시를 읽으므로 진행 상황을 알린다.
+                let now = std::time::Instant::now();
+                if now.duration_since(last_emit_at) >= std::time::Duration::from_millis(100) {
+                    last_emit_at = now;
+                    on_progress(SyncEngine::build_dry_run_progress(
+                        DryRunPhase::Comparing,
+                        format!(
+                            "Checking duplicates across sources: {}",
+                            file.path.to_string_lossy()
+                        ),
+                        planned_files,
+                        total_files,
+                        0,
+                        0,
+                        DryRunSummary {
+                            total_files: total_files as usize,
+                            ..DryRunSummary::default()
+                        },
+                    ));
+                }
+                let mut duplicate = false;
+                for (other_source, other_file) in earlier {
+                    if sources[other_source].files[other_file].size != file.size {
+                        continue;
+                    }
+                    let other_hash = self
+                        .cached_checksum(&mut hash_cache, sources, other_source, other_file)
+                        .await?;
+                    let own_hash = self
+                        .cached_checksum(&mut hash_cache, sources, source_index, file_index)
+                        .await?;
+                    if other_hash == own_hash {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if duplicate {
+                    continue;
+                }
+
+                claimants
+                    .entry(base.clone())
+                    .or_default()
+                    .push((source_index, file_index));
+                let resolved = resolve_cross_source_collision(&base, scanned.position, &taken);
+                taken.insert(resolved.clone());
+                planned.push(PlannedFile {
+                    source_index,
+                    file_index,
+                    target_relative: resolved,
+                });
+            }
+        }
+
+        Ok(planned)
     }
 
     fn system_time_to_unix_ms(value: Option<SystemTime>) -> Option<i64> {
@@ -396,33 +701,6 @@ impl SyncEngine {
             }
         };
 
-        // 1. Canonicalize source to resolve symlinks and .. (TOCTOU protection)
-        let source_canonical = tokio::fs::canonicalize(&self.source)
-            .await
-            .with_context(|| format!("Failed to canonicalize source: {:?}", self.source))?;
-
-        // 2. Verify it's still a directory after canonicalization
-        let source_meta = tokio::fs::metadata(&source_canonical)
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to access source after canonicalization: {:?}",
-                    source_canonical
-                )
-            })?;
-
-        if !source_meta.is_dir() {
-            anyhow::bail!("Source path is not a directory: {:?}", source_canonical);
-        }
-
-        // 3. Warn if symlink (safe to continue since we canonicalized)
-        if source_meta.file_type().is_symlink() {
-            eprintln!(
-                "Warning: Source path is a symlink: {:?} -> {:?}",
-                self.source, source_canonical
-            );
-        }
-
         // 4. Handle target path similarly
         let target_canonical = if self.target.exists() {
             let target_meta = tokio::fs::metadata(&self.target)
@@ -446,16 +724,13 @@ impl SyncEngine {
         };
 
         // 5. Use canonicalized paths for all operations
-        let source_files = self
-            .read_directory(
-                &source_canonical,
-                DryRunPhase::ScanningSource,
+        let sources = self
+            .scan_sources(
                 &options.exclude_patterns,
                 cancel_token.clone(),
                 progress_callback.clone(),
             )
-            .await
-            .context("Failed to read source directory")?;
+            .await?;
 
         let target_files = if let Some(ref target) = target_canonical {
             self.read_directory(
@@ -471,14 +746,19 @@ impl SyncEngine {
             Vec::new()
         };
 
-        let total_files = source_files.iter().filter(|f| f.is_file).count();
-        let total_bytes = source_files
+        let total_files = sources
             .iter()
+            .flat_map(|source| source.files.iter())
+            .filter(|f| f.is_file)
+            .count();
+        let total_bytes = sources
+            .iter()
+            .flat_map(|source| source.files.iter())
             .filter(|f| f.is_file)
             .map(|file| file.size)
             .sum();
 
-        let target_mapping = if let Some(save_rule) = options.save_rule.as_ref() {
+        if options.save_rule.is_some() {
             emit_progress(SyncEngine::build_dry_run_progress(
                 DryRunPhase::Comparing,
                 "Applying save rules...".to_string(),
@@ -491,18 +771,15 @@ impl SyncEngine {
                     ..DryRunSummary::default()
                 },
             ));
-            Some(
-                Self::build_target_mapping(
-                    &source_canonical,
-                    &source_files,
-                    save_rule,
-                    cancel_token.clone(),
-                )
-                .await?,
+        }
+        let planned = self
+            .plan_target_paths(
+                &sources,
+                options.save_rule.as_ref(),
+                cancel_token.clone(),
+                &emit_progress,
             )
-        } else {
-            None
-        };
+            .await?;
 
         let mut compare_summary = DryRunSummary {
             total_files,
@@ -516,12 +793,7 @@ impl SyncEngine {
             std::time::Instant::now() - std::time::Duration::from_millis(100);
         let compare_emit_interval = std::time::Duration::from_millis(100);
 
-        let mut source_map: HashMap<PathBuf, &FileMetadata> = HashMap::new();
         let mut target_map: HashMap<PathBuf, &FileMetadata> = HashMap::new();
-
-        for file in &source_files {
-            source_map.insert(file.path.clone(), file);
-        }
 
         for file in &target_files {
             target_map.insert(file.path.clone(), file);
@@ -530,8 +802,6 @@ impl SyncEngine {
         let mut diffs = Vec::new();
         let mut bytes_to_copy = 0u64;
         let mut target_newer_conflicts = Vec::new();
-        let mut compare_paths: Vec<PathBuf> = source_map.keys().cloned().collect();
-        compare_paths.sort();
 
         emit_progress(SyncEngine::build_dry_run_progress(
             DryRunPhase::Comparing,
@@ -543,14 +813,13 @@ impl SyncEngine {
             compare_summary.clone(),
         ));
 
-        for path in compare_paths {
-            let Some(source_meta) = source_map.get(&path) else {
-                continue;
-            };
-            let target_relative: PathBuf = target_mapping
-                .as_ref()
-                .and_then(|mapping| mapping.get(&path).cloned())
-                .unwrap_or_else(|| path.clone());
+        for planned_file in planned {
+            let scanned = &sources[planned_file.source_index];
+            let source_meta = &scanned.files[planned_file.file_index];
+            let path = source_meta.path.clone();
+            let source_canonical = &scanned.root;
+            let source_root = (planned_file.source_index > 0).then(|| scanned.root.clone());
+            let target_relative = planned_file.target_relative;
             let mapped_target_path = if target_relative != path {
                 Some(target_relative.clone())
             } else {
@@ -672,6 +941,7 @@ impl SyncEngine {
                             checksum_source: None,
                             checksum_target: None,
                             target_path: mapped_target_path.clone(),
+                            source_root: source_root.clone(),
                         };
                         on_diff(
                             diff.clone(),
@@ -702,6 +972,7 @@ impl SyncEngine {
                     checksum_source: None,
                     checksum_target: None,
                     target_path: mapped_target_path.clone(),
+                    source_root: source_root.clone(),
                 };
                 on_diff(
                     diff.clone(),
@@ -927,8 +1198,43 @@ impl SyncEngine {
 
         progress_callback(current_progress.clone());
 
+        // 캐시된 계획의 추가 소스 루트는 이 엔진에 지정된 추가 소스여야 한다.
+        let mut allowed_extra_roots = HashSet::new();
+        for extra in &self.extra_sources {
+            if let Ok(root) = tokio::fs::canonicalize(&extra.path).await {
+                allowed_extra_roots.insert(root);
+            }
+        }
+
         for diff in &dry_run.diffs {
-            let source_path = self.source.join(&diff.path);
+            let source_path = match diff.source_root.as_ref() {
+                None => self.source.join(&diff.path),
+                Some(root) if allowed_extra_roots.contains(root) => root.join(&diff.path),
+                Some(root) => {
+                    let message = format!(
+                        "Source root '{}' is not a source of this task",
+                        root.display()
+                    );
+                    result.errors.push(crate::sync_engine::types::SyncError {
+                        path: diff.path.clone(),
+                        message: message.clone(),
+                        kind: crate::sync_engine::types::SyncErrorKind::Other,
+                    });
+                    file_callback(SyncFileEntry {
+                        path: diff.path.clone(),
+                        kind: diff.kind.clone(),
+                        status: SyncFileStatus::Failed,
+                        source_size: diff.source_size,
+                        target_size: diff.target_size,
+                        error: Some(message),
+                        target_path: diff.target_path.clone(),
+                        source_root: Some(root.clone()),
+                    });
+                    current_progress.processed_files += 1;
+                    progress_callback(current_progress.clone());
+                    continue;
+                }
+            };
             let target_path = self.target.join(diff.target_relative_path());
 
             match diff.kind {
@@ -975,6 +1281,7 @@ impl SyncEngine {
                             target_size: diff.target_size,
                             error: Some(e.to_string()),
                             target_path: diff.target_path.clone(),
+                            source_root: diff.source_root.clone(),
                         };
                         file_callback(entry);
                     } else {
@@ -989,6 +1296,7 @@ impl SyncEngine {
                             target_size: diff.target_size.or(Some(0)),
                             error: None,
                             target_path: diff.target_path.clone(),
+                            source_root: diff.source_root.clone(),
                         };
                         file_callback(entry);
                     }
@@ -1060,15 +1368,9 @@ impl SyncEngine {
         cancel_token: Option<CancellationToken>,
         save_rule: Option<&SaveRuleTemplateRecord>,
     ) -> Result<Vec<OrphanFile>> {
-        let source_canonical = tokio::fs::canonicalize(&self.source)
-            .await
-            .with_context(|| format!("Failed to canonicalize source: {:?}", self.source))?;
-
-        let source_meta = tokio::fs::metadata(&source_canonical)
-            .await
-            .with_context(|| format!("Failed to access source: {:?}", source_canonical))?;
-        if !source_meta.is_dir() {
-            anyhow::bail!("Source path is not a directory: {:?}", source_canonical);
+        // 모든 소스가 있어야 한다. 빠진 소스의 파일은 전부 고아로 보이기 때문이다 (ADR-0039).
+        for (_, source) in self.all_source_paths() {
+            Self::canonical_source_dir(source).await?;
         }
 
         let target_canonical = match tokio::fs::metadata(&self.target).await {
@@ -1090,16 +1392,6 @@ impl SyncEngine {
             }
         };
 
-        let source_files = self
-            .read_directory(
-                &source_canonical,
-                DryRunPhase::ScanningSource,
-                exclude_patterns,
-                cancel_token.clone(),
-                Arc::new(StdMutex::new(|_: DryRunProgress| {})),
-            )
-            .await
-            .context("Failed to read source directory")?;
         let target_files = self
             .read_directory(
                 &target_canonical,
@@ -1111,17 +1403,21 @@ impl SyncEngine {
             .await
             .context("Failed to read target directory")?;
 
-        // 저장 규칙이 있으면 "소스에 존재하는 경로"는 매핑된 타깃 경로와 그 상위 폴더들이다.
-        let mapped_paths: Option<HashSet<PathBuf>> = if let Some(save_rule) = save_rule {
-            let mapping = Self::build_target_mapping(
-                &source_canonical,
-                &source_files,
-                save_rule,
-                cancel_token,
+        let sources = self
+            .scan_sources(
+                exclude_patterns,
+                cancel_token.clone(),
+                Arc::new(StdMutex::new(|_: DryRunProgress| {})),
             )
             .await?;
+        let planned = self
+            .plan_target_paths(&sources, save_rule, cancel_token, &|_| {})
+            .await?;
+
+        // 저장 규칙이 있으면 "소스에 존재하는 경로"는 매핑된 타깃 경로와 그 상위 폴더들이다.
+        let mapped_paths: Option<HashSet<PathBuf>> = if save_rule.is_some() {
             let mut expected = HashSet::new();
-            for target_relative in mapping.into_values() {
+            for target_relative in planned.iter().map(|file| file.target_relative.clone()) {
                 let mut ancestor = target_relative.parent().map(Path::to_path_buf);
                 while let Some(dir) = ancestor {
                     if dir.as_os_str().is_empty() {
@@ -1137,7 +1433,12 @@ impl SyncEngine {
             None
         };
 
-        let source_paths: HashSet<&PathBuf> = source_files.iter().map(|f| &f.path).collect();
+        // 미러링이면 모든 소스의 경로(폴더 포함)와, 소스 간 충돌로 접미사가 붙은 타깃 경로가 기대 경로다.
+        let mut source_paths: HashSet<&PathBuf> = sources
+            .iter()
+            .flat_map(|source| source.files.iter().map(|f| &f.path))
+            .collect();
+        source_paths.extend(planned.iter().map(|file| &file.target_relative));
         let is_expected = |path: &PathBuf| match &mapped_paths {
             Some(mapped) => mapped.contains(path),
             None => source_paths.contains(path),
@@ -2407,6 +2708,216 @@ mod tests {
             Some(Path::new("Photo/DSC00001.JPG"))
         );
         assert!(conflicts[0].target_path.ends_with("Photo/DSC00001.JPG"));
+        Ok(())
+    }
+
+    async fn write_file(root: &Path, relative: &str, content: &[u8]) -> Result<()> {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        fs::write(path, content).await?;
+        Ok(())
+    }
+
+    fn multi_source_engine(slots: &[&TempDir], target: &TempDir) -> SyncEngine {
+        SyncEngine::new(slots[0].path().to_path_buf(), target.path().to_path_buf())
+            .with_extra_sources(
+                slots[1..]
+                    .iter()
+                    .enumerate()
+                    .map(|(index, dir)| ExtraSourcePath {
+                        position: index + 1,
+                        path: dir.path().to_path_buf(),
+                    })
+                    .collect(),
+            )
+    }
+
+    #[tokio::test]
+    async fn multi_source_copies_identical_collision_once() -> Result<()> {
+        let slot_a = TempDir::new()?;
+        let slot_b = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_a.path(), "DCIM/100MSDCF/DSC00001.JPG", b"same photo").await?;
+        write_file(slot_b.path(), "DCIM/100MSDCF/DSC00001.JPG", b"same photo").await?;
+
+        let engine = multi_source_engine(&[&slot_a, &slot_b], &target);
+        let options = SyncOptions::default();
+        let dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 1);
+        assert!(dry_run.diffs[0].source_root.is_none());
+
+        engine.sync_files(&options, |_| {}, |_| {}).await?;
+        assert_eq!(
+            fs::read(target.path().join("DCIM/100MSDCF/DSC00001.JPG")).await?,
+            b"same photo"
+        );
+        assert!(!target.path().join("DCIM/100MSDCF/DSC00001_b.JPG").exists());
+
+        // 두 번째 실행은 할 일이 없어야 한다.
+        assert_eq!(engine.dry_run(&options).await?.files_to_copy, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multi_source_letters_differing_collision_by_source_position() -> Result<()> {
+        let slot_a = TempDir::new()?;
+        let slot_b = TempDir::new()?;
+        let slot_c = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_a.path(), "DCIM/DSC00001.JPG", b"card a").await?;
+        write_file(slot_b.path(), "DCIM/DSC00001.JPG", b"card b!").await?;
+        write_file(slot_c.path(), "DCIM/DSC00001.JPG", b"card b!").await?;
+        write_file(slot_c.path(), "DCIM/C0001.MP4", b"video").await?;
+
+        let engine = multi_source_engine(&[&slot_a, &slot_b, &slot_c], &target);
+        let options = SyncOptions::default();
+        let dry_run = engine.dry_run(&options).await?;
+        // a 원본, b는 내용이 달라 _b, c는 b와 같은 내용이라 건너뜀, c의 영상은 그대로.
+        assert_eq!(dry_run.files_to_copy, 3);
+
+        engine.sync_files(&options, |_| {}, |_| {}).await?;
+        assert_eq!(
+            fs::read(target.path().join("DCIM/DSC00001.JPG")).await?,
+            b"card a"
+        );
+        assert_eq!(
+            fs::read(target.path().join("DCIM/DSC00001_b.JPG")).await?,
+            b"card b!"
+        );
+        assert!(!target.path().join("DCIM/DSC00001_c.JPG").exists());
+        assert_eq!(
+            fs::read(target.path().join("DCIM/C0001.MP4")).await?,
+            b"video"
+        );
+
+        assert_eq!(engine.dry_run(&options).await?.files_to_copy, 0);
+        let orphans = engine.find_orphan_files(&[]).await?;
+        assert!(orphans.is_empty(), "unexpected orphans: {orphans:?}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multi_source_orphan_scan_uses_union_of_sources() -> Result<()> {
+        let slot_a = TempDir::new()?;
+        let slot_b = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_a.path(), "DCIM/A.JPG", b"a").await?;
+        write_file(slot_b.path(), "DCIM/B.ARW", b"b").await?;
+        write_file(target.path(), "DCIM/A.JPG", b"a").await?;
+        write_file(target.path(), "DCIM/B.ARW", b"b").await?;
+        write_file(target.path(), "DCIM/OLD.JPG", b"old").await?;
+
+        let engine = multi_source_engine(&[&slot_a, &slot_b], &target);
+        let orphans = engine.find_orphan_files(&[]).await?;
+        let paths: Vec<_> = orphans.iter().map(|o| o.path.clone()).collect();
+        assert_eq!(paths, vec![PathBuf::from("DCIM/OLD.JPG")]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multi_source_orphan_scan_refuses_missing_source() -> Result<()> {
+        let slot_a = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_a.path(), "DCIM/A.JPG", b"a").await?;
+        write_file(target.path(), "DCIM/B.ARW", b"b").await?;
+        let missing = slot_a.path().join("not-mounted");
+
+        let engine = SyncEngine::new(slot_a.path().to_path_buf(), target.path().to_path_buf())
+            .with_extra_sources(vec![ExtraSourcePath {
+                position: 1,
+                path: missing,
+            }]);
+        assert!(engine.find_orphan_files(&[]).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multi_source_copy_rejects_unknown_source_root() -> Result<()> {
+        let slot_a = TempDir::new()?;
+        let slot_b = TempDir::new()?;
+        let other = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_b.path(), "X.JPG", b"x").await?;
+        write_file(other.path(), "X.JPG", b"other").await?;
+
+        let engine = multi_source_engine(&[&slot_a, &slot_b], &target);
+        let options = SyncOptions::default();
+        let mut dry_run = engine.dry_run(&options).await?;
+        assert_eq!(dry_run.diffs.len(), 1);
+        dry_run.diffs[0].source_root = Some(fs::canonicalize(other.path()).await?);
+
+        let result = engine
+            .sync_files_from_dry_run(&dry_run, &options, |_| {}, |_| {})
+            .await?;
+        assert_eq!(result.files_copied, 0);
+        assert_eq!(result.errors.len(), 1);
+        assert!(!target.path().join("X.JPG").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn cross_source_collision_suffix_falls_back_to_number() {
+        let mut taken = HashSet::new();
+        taken.insert(PathBuf::from("DCIM/X.JPG"));
+        assert_eq!(
+            resolve_cross_source_collision(Path::new("DCIM/X.JPG"), 1, &taken),
+            PathBuf::from("DCIM/X_b.JPG")
+        );
+        taken.insert(PathBuf::from("DCIM/X_b.JPG"));
+        assert_eq!(
+            resolve_cross_source_collision(Path::new("DCIM/X.JPG"), 1, &taken),
+            PathBuf::from("DCIM/X_b_2.JPG")
+        );
+        assert_eq!(
+            resolve_cross_source_collision(Path::new("README"), 2, &HashSet::new()),
+            PathBuf::from("README_c")
+        );
+    }
+
+    #[tokio::test]
+    async fn multi_source_letters_hold_when_first_source_is_missing() -> Result<()> {
+        let slot_b = TempDir::new()?;
+        let slot_c = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_b.path(), "DCIM/X.JPG", b"b").await?;
+        write_file(slot_c.path(), "DCIM/X.JPG", b"c!").await?;
+
+        // 첫 번째 소스(a)가 빠져 b가 엔진의 기본 소스가 됐다.
+        let engine = SyncEngine::new(slot_b.path().to_path_buf(), target.path().to_path_buf())
+            .with_source_position(1)
+            .with_extra_sources(vec![ExtraSourcePath {
+                position: 2,
+                path: slot_c.path().to_path_buf(),
+            }]);
+        engine
+            .sync_files(&SyncOptions::default(), |_| {}, |_| {})
+            .await?;
+        assert_eq!(fs::read(target.path().join("DCIM/X.JPG")).await?, b"b");
+        assert_eq!(fs::read(target.path().join("DCIM/X_c.JPG")).await?, b"c!");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn multi_source_letter_follows_task_position_when_a_source_is_skipped() -> Result<()> {
+        let slot_a = TempDir::new()?;
+        let slot_c = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(slot_a.path(), "DCIM/X.JPG", b"a").await?;
+        write_file(slot_c.path(), "DCIM/X.JPG", b"c!").await?;
+
+        // 두 번째 소스(b)는 연결되지 않아 빠졌다.
+        let engine = SyncEngine::new(slot_a.path().to_path_buf(), target.path().to_path_buf())
+            .with_extra_sources(vec![ExtraSourcePath {
+                position: 2,
+                path: slot_c.path().to_path_buf(),
+            }]);
+        engine
+            .sync_files(&SyncOptions::default(), |_| {}, |_| {})
+            .await?;
+        assert_eq!(fs::read(target.path().join("DCIM/X_c.JPG")).await?, b"c!");
+        assert!(!target.path().join("DCIM/X_b.JPG").exists());
         Ok(())
     }
 }

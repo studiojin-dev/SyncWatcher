@@ -844,6 +844,12 @@ function AppContent() {
 
     try {
       await invoke('unmount_volume', { path: request.source });
+      for (const extraSource of request.extraSources ?? []) {
+        // 추가 카드는 이미 빠졌을 수 있으므로 실패해도 확인 흐름을 막지 않는다.
+        await invoke('unmount_volume', { path: extraSource }).catch((error) => {
+          console.warn('Failed to unmount extra source:', error);
+        });
+      }
       setTaskLastLog(
         request.taskId,
         t('syncTasks.autoUnmountConfirmedStatus', {

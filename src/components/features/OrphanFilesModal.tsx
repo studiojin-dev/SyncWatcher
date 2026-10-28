@@ -28,6 +28,13 @@ interface TreeNode {
     children: TreeNode[];
 }
 
+/** 백엔드 `SOURCE_NOT_CONNECTED_ERROR`와 같아야 한다. */
+const SOURCE_NOT_CONNECTED_ERROR_PREFIX = 'Source not connected:';
+
+function isSourceNotConnectedError(message: string): boolean {
+    return message.startsWith(SOURCE_NOT_CONNECTED_ERROR_PREFIX);
+}
+
 interface OrphanFilesModalProps {
     taskId: string;
     source: string;
@@ -204,6 +211,18 @@ export default function OrphanFilesModal({
     const [deleting, setDeleting] = useState(false);
     const [query, setQuery] = useState('');
     const [orphans, setOrphans] = useState<OrphanFile[]>([]);
+    /** 스캔 실패 원문. 있으면 '고아 파일 없음' 대신 이 사유를 보여 준다. */
+    const [scanError, setScanError] = useState<string | null>(null);
+
+    /** 원본 카드가 빠져 스캔/삭제를 막은 경우는 오류가 아니라 안내로 보여 준다 (ADR-0039). */
+    const describeOrphanError = (message: string): string =>
+        isSourceNotConnectedError(message)
+            ? t('orphan.sourceNotConnected', {
+                  source: message.slice(SOURCE_NOT_CONNECTED_ERROR_PREFIX.length).trim(),
+                  defaultValue:
+                      'Connect every source card of this task to find orphan files. Not connected: {{source}}',
+              })
+            : message;
     const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
     const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
     const excludePatternsKey = useMemo(() => JSON.stringify(excludePatterns), [excludePatterns]);
@@ -222,6 +241,7 @@ export default function OrphanFilesModal({
     const scanOrphans = useCallback(async () => {
         try {
             setLoading(true);
+            setScanError(null);
             const result = await invoke<OrphanFile[]>('find_orphan_files', {
                 taskId,
                 source,
@@ -232,7 +252,13 @@ export default function OrphanFilesModal({
             setOrphans(result);
             setSelectedPaths(new Set());
         } catch (error) {
-            showToast(String(error), 'error');
+            const message = String(error);
+            setOrphans([]);
+            setSelectedPaths(new Set());
+            setScanError(message);
+            if (!isSourceNotConnectedError(message)) {
+                showToast(message, 'error');
+            }
         } finally {
             setLoading(false);
         }
@@ -304,7 +330,11 @@ export default function OrphanFilesModal({
 
             await scanOrphans();
         } catch (error) {
-            showToast(String(error), 'error');
+            const message = String(error);
+            showToast(
+                describeOrphanError(message),
+                isSourceNotConnectedError(message) ? 'warning' : 'error',
+            );
         } finally {
             setDeleting(false);
         }
@@ -383,6 +413,8 @@ export default function OrphanFilesModal({
                     <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] p-2 overflow-auto min-h-[260px] max-h-[520px]">
                         {loading ? (
                             <div className="font-mono text-sm text-[var(--text-secondary)]">{t('orphan.scanning', { defaultValue: 'Scanning...' })}</div>
+                        ) : scanError ? (
+                            <div className="font-mono text-sm text-[var(--text-primary)] border-l-2 border-[var(--accent-warning)] pl-2 break-all">{describeOrphanError(scanError)}</div>
                         ) : filteredTree.length === 0 ? (
                             <div className="font-mono text-sm text-[var(--text-secondary)]">{t('orphan.noOrphans', { defaultValue: 'No orphan files found.' })}</div>
                         ) : (

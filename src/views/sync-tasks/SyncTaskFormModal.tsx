@@ -1,14 +1,181 @@
 import { MultiSelect, Select } from '@mantine/core';
-import { IconFolder } from '@tabler/icons-react';
+import { IconFolder, IconPlus, IconX } from '@tabler/icons-react';
 import type { FormEventHandler } from 'react';
 import { CardAnimation } from '../../components/ui/Animations';
 import type { SyncTask } from '../../hooks/useSyncTasks';
 import type { TranslateFn } from './helpers';
 import { uuidTypeLabel } from '../syncTaskUuid';
-import type { SyncTaskFormController } from './useSyncTaskFormController';
+import type {
+  ExtraSourceDraft,
+  SyncTaskFormController,
+} from './useSyncTaskFormController';
 
 /** Mantine Select는 빈 문자열 값을 안정적으로 다루지 않으므로 '미러링'에는 센티널 값을 쓴다. */
 const MIRROR_SAVE_RULE_VALUE = '__mirror__';
+
+/** 원본(하위 경로 포함)과 대상 등 폼 영역이 섞여 보이지 않도록 영역 사이에 긋는 구분선. */
+const SECTION_DIVIDER_CLASS = 'border-t-2 border-[var(--border-main)] pt-4';
+
+/** 추가 소스 순서 글자. 기본 소스가 A, 첫 추가 소스가 B … (엔진의 충돌 접미사와 같다) */
+function extraSourceLetter(index: number): string {
+  return String.fromCharCode('B'.charCodeAt(0) + index);
+}
+
+const SELECT_STYLES = {
+  input: {
+    border: '3px solid var(--border-main)',
+    borderRadius: 0,
+    fontFamily: 'var(--font-mono)',
+  },
+  dropdown: {
+    border: '3px solid var(--border-main)',
+    borderRadius: 0,
+    boxShadow: '4px 4px 0 0 black',
+  },
+};
+
+interface ExtraSourceRowProps {
+  draft: ExtraSourceDraft;
+  index: number;
+  form: SyncTaskFormController;
+  savingTask: boolean;
+  t: TranslateFn;
+}
+
+function ExtraSourceRow({ draft, index, form, savingTask, t }: ExtraSourceRowProps) {
+  const label = t('syncTasks.extraSourceLabel', {
+    letter: extraSourceLetter(index),
+    defaultValue: `Source ${extraSourceLetter(index)}`,
+  });
+  const uuidOptions = form.extraSourceUuidOptions(draft);
+  const selectedValue =
+    draft.sourceUuid && draft.sourceTokenType
+      ? uuidOptions.find(
+          (option) =>
+            option.uuid === draft.sourceUuid && option.uuidType === draft.sourceTokenType,
+        )?.value ?? null
+      : null;
+  const selectedOption = uuidOptions.find((option) => option.value === selectedValue);
+  const radioName = `extraSourceType-${draft.key}`;
+
+  return (
+    <div className="mt-3 p-3 border-2 border-dashed border-[var(--border-main)] space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold uppercase font-mono">{label}</span>
+        <button
+          type="button"
+          onClick={() => form.removeExtraSource(draft.key)}
+          disabled={savingTask}
+          className="p-1 hover:bg-[var(--bg-tertiary)]"
+          title={t('syncTasks.removeExtraSource', { defaultValue: 'Remove source' })}
+          aria-label={`${t('syncTasks.removeExtraSource', {
+            defaultValue: 'Remove source',
+          })} ${label}`}
+        >
+          <IconX size={16} />
+        </button>
+      </div>
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name={radioName}
+            checked={draft.sourceType === 'path'}
+            onChange={() => form.updateExtraSource(draft.key, { sourceType: 'path' })}
+            disabled={savingTask}
+            className="w-4 h-4"
+          />
+          <span className="text-sm font-mono">
+            📁 {t('syncTasks.sourceTypePath', { defaultValue: '디렉토리 경로' })}
+          </span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name={radioName}
+            checked={draft.sourceType === 'uuid'}
+            onChange={() => form.updateExtraSource(draft.key, { sourceType: 'uuid' })}
+            disabled={savingTask}
+            className="w-4 h-4"
+          />
+          <span className="text-sm font-mono">
+            💾 {t('syncTasks.sourceTypeUuid', { defaultValue: '볼륨 UUID' })}
+          </span>
+        </label>
+      </div>
+      {draft.sourceType === 'path' ? (
+        <div className="flex gap-2">
+          <input
+            value={draft.sourcePath}
+            onChange={(event) =>
+              form.updateExtraSource(draft.key, {
+                sourcePath: event.target.value,
+                sourceBookmark: null,
+              })
+            }
+            disabled={savingTask}
+            className="neo-input font-mono text-sm flex-1"
+            placeholder="/path/to/source"
+            aria-label={label}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              void form.browseExtraSourceDirectory(draft.key);
+            }}
+            disabled={savingTask}
+            className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
+            title="Browse..."
+          >
+            <IconFolder size={18} />
+          </button>
+        </div>
+      ) : (
+        <>
+          <Select
+            placeholder={t('syncTasks.selectVolume', { defaultValue: '볼륨 선택' })}
+            data={uuidOptions.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
+            value={selectedValue}
+            onChange={(value) => form.selectExtraSourceUuid(draft.key, value)}
+            searchable
+            disabled={savingTask}
+            aria-label={label}
+            styles={SELECT_STYLES}
+          />
+          <div className="flex gap-2">
+            <input
+              value={draft.sourceSubPath}
+              onChange={(event) =>
+                form.updateExtraSource(draft.key, { sourceSubPath: event.target.value })
+              }
+              disabled={savingTask}
+              className="neo-input font-mono text-sm flex-1"
+              placeholder={t('syncTasks.subPathPlaceholder', {
+                defaultValue:
+                  'Leave empty to sync the whole volume root (e.g. /DCIM)',
+              })}
+              aria-label={`${label} ${t('syncTasks.subPath', { defaultValue: '하위 경로' })}`}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void form.browseExtraSourceSubPath(draft.key);
+              }}
+              className="px-3 py-2 border-3 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center"
+              title={t('syncTasks.subPath', { defaultValue: '하위 경로' })}
+              disabled={savingTask || !selectedOption?.mounted}
+            >
+              <IconFolder size={18} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface SyncTaskFormModalProps {
   opened: boolean;
@@ -66,9 +233,14 @@ function SyncTaskFormModal({
               placeholder="MY_BACKUP_TASK"
             />
           </div>
-          <div>
+          <div className={SECTION_DIVIDER_CLASS}>
             <label className="block text-sm font-bold mb-1 uppercase font-mono">
-              {t('syncTasks.source')}
+              {form.extraSources.length > 0
+                ? t('syncTasks.extraSourceLabel', {
+                    letter: 'A',
+                    defaultValue: 'Source A',
+                  })
+                : t('syncTasks.source')}
             </label>
 
             <div className="flex gap-4 mb-2">
@@ -241,7 +413,8 @@ function SyncTaskFormModal({
                       disabled={savingTask}
                       className="neo-input font-mono text-sm flex-1"
                       placeholder={t('syncTasks.subPathPlaceholder', {
-                        defaultValue: '/DCIM/100MSDCF',
+                        defaultValue:
+                          'Leave empty to sync the whole volume root (e.g. /DCIM)',
                       })}
                     />
                     <button
@@ -261,8 +434,34 @@ function SyncTaskFormModal({
                 </div>
               </div>
             ) : null}
+
+            {form.extraSources.map((draft, index) => (
+              <ExtraSourceRow
+                key={draft.key}
+                draft={draft}
+                index={index}
+                form={form}
+                savingTask={savingTask}
+                t={t}
+              />
+            ))}
+            <button
+              type="button"
+              onClick={form.addExtraSource}
+              disabled={savingTask}
+              className="mt-3 px-3 py-1 border-2 border-[var(--border-main)] hover:bg-[var(--bg-tertiary)] flex items-center gap-1 text-xs font-bold uppercase font-mono"
+            >
+              <IconPlus size={14} />
+              {t('syncTasks.addExtraSource', { defaultValue: 'Add source' })}
+            </button>
+            <div className="mt-2 text-xs font-mono text-[var(--text-secondary)] border-l-2 border-[var(--accent-info)] pl-2">
+              {t('syncTasks.extraSourcesHint', {
+                defaultValue:
+                  'Collect several memory cards into one target. Identical files are copied once; files with the same name but different content get the source letter (_b, _c …). Sources that are not connected are skipped.',
+              })}
+            </div>
           </div>
-          <div>
+          <div className={SECTION_DIVIDER_CLASS}>
             <label className="block text-sm font-bold mb-1 uppercase font-mono">
               {t('syncTasks.target')}
             </label>
@@ -329,7 +528,7 @@ function SyncTaskFormModal({
               </div>
             ) : null}
           </div>
-          <div className="space-y-3 py-2">
+          <div className={`${SECTION_DIVIDER_CLASS} space-y-3`}>
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <div className="relative">
                 <input
@@ -404,7 +603,7 @@ function SyncTaskFormModal({
               </label>
             ) : null}
           </div>
-          <div>
+          <div className={SECTION_DIVIDER_CLASS}>
             <label className="block text-sm font-bold mb-1 uppercase font-mono">
               Exclusion Sets
             </label>
@@ -441,7 +640,7 @@ function SyncTaskFormModal({
               {t('syncTasks.systemMetadataAlwaysExcluded')}
             </div>
           </div>
-          <div>
+          <div className={SECTION_DIVIDER_CLASS}>
             <label className="block text-sm font-bold mb-1 uppercase font-mono">
               {t('syncTasks.saveRule', { defaultValue: 'Save rule' })}
             </label>

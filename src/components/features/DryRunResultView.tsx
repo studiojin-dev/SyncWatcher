@@ -10,7 +10,7 @@ import { useDryRunSession } from '../../hooks/useSyncTaskStatus';
 import type { ResultTreeEntry } from './ResultTreeTable';
 import ResultTreeTable from './ResultTreeTable';
 import { formatBytes } from '../../utils/formatBytes';
-import type { DryRunSessionState } from '../../types/syncEngine';
+import { resultTreePath, type DryRunSessionState } from '../../types/syncEngine';
 
 interface DryRunResultViewProps {
   taskId: string;
@@ -86,7 +86,7 @@ export default function DryRunResultView({
   const entries = useMemo<ResultTreeEntry[]>(
     () =>
       result.diffs.map((diff) => ({
-        path: diff.path,
+        path: resultTreePath(diff.path, diff.source_root),
         targetPath: diff.target_path ?? null,
         typeLabel:
           diff.kind === 'New'

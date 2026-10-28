@@ -101,7 +101,12 @@
       "savedUuidSourceLabel": "已保存的 UUID 源（未挂载）",
       "savedUuidSourceHint": "该任务保留已保存的 UUID 源。若要浏览其中内容，请重新挂载该介质或选择其他卷。",
       "subPath": "子路径",
-      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathPlaceholder": "留空则同步整个卷根目录（例如 /DCIM）",
+      "extraSources": "附加源",
+      "extraSourcesHint": "将多张存储卡汇集到同一目标。内容相同的文件只复制一次；同名但内容不同的文件会加上源顺序字母（_b、_c …）。未连接的源会被跳过。",
+      "addExtraSource": "添加源",
+      "removeExtraSource": "移除源",
+      "extraSourceLabel": "源 {{letter}}",
       "subPathOutsideVolume": "子路径必须位于所选卷内。",
       "volumeNotMounted": "卷未挂载",
       "smbAutoMountEnabled": "自动挂载此 SMB 共享", "smbUsernamePlaceholder": "SMB 用户名", "smbPasswordPlaceholder": "SMB 密码",
@@ -111,11 +116,12 @@
       "uuidCopied": "UUID 已复制到剪贴板",
       "errors": {
         "sourceEqualsTarget": "源路径与目标路径不能重叠。",
+        "sourceSourceOverlap": "同一任务的源路径不能重叠。",
         "targetIsSubdirOfSource": "目标不能位于源目录内部。",
         "duplicateTarget": "目标与其他任务目标路径冲突。",
         "targetSubdirConflict": "目标不能成为其他任务目标的父/子路径。", "watchCycle": "监视任务不能形成循环。", "invalidInput": "任务包含无效输入。"
       },
-      "validationModal": { "title": "同步任务验证", "affectedTasks": "受影响的任务", "source": "源", "target": "目标", "close": "关闭", "ruleDescriptions": { "sourceTargetOverlap": "源与目标路径不能重叠。", "duplicateTarget": "每个任务必须使用唯一目标。", "targetSubdirConflict": "任务目标不能互相包含。", "watchCycle": "监视任务不能形成循环。", "invalidInput": "请修正无效输入。" } },
+      "validationModal": { "title": "同步任务验证", "affectedTasks": "受影响的任务", "source": "源", "target": "目标", "close": "关闭", "ruleDescriptions": { "sourceTargetOverlap": "源与目标路径不能重叠。", "sourceSourceOverlap": "同一任务的源路径不能相同或互为父子路径，否则文件会被复制两次。", "duplicateTarget": "每个任务必须使用唯一目标。", "targetSubdirConflict": "任务目标不能互相包含。", "watchCycle": "监视任务不能形成循环。", "invalidInput": "请修正无效输入。" } },
       "warnings": {
         "targetInWatchedSource": "允许无环的 watch 链路，但 downstream watch sync 会等待重叠写入成功完成后再开始。"
       },
@@ -277,6 +283,7 @@
       "search": "搜索路径...",
       "scanning": "扫描中...",
       "noOrphans": "未发现孤立文件。",
+      "sourceNotConnected": "要查找孤立文件，请连接此任务的所有源存储卡。未连接：{{source}}",
       "foundCount": "检测到 {{count}} 项",
       "selectVisible": "选择可见项",
       "deselectAll": "清除选择",

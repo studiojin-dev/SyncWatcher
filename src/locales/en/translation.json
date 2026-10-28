@@ -101,7 +101,12 @@
       "savedUuidSourceLabel": "Saved UUID source (not mounted)",
       "savedUuidSourceHint": "This task keeps its saved UUID source. Mount the media again to browse inside it or pick a different volume.",
       "subPath": "Sub Path",
-      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathPlaceholder": "Leave empty to sync the whole volume root (e.g. /DCIM)",
+      "extraSources": "Additional sources",
+      "extraSourcesHint": "Collect several memory cards into one target. Identical files are copied once; files with the same name but different content get the source letter (_b, _c …). Sources that are not connected are skipped.",
+      "addExtraSource": "Add source",
+      "removeExtraSource": "Remove source",
+      "extraSourceLabel": "Source {{letter}}",
       "subPathOutsideVolume": "The sub path must stay inside the selected volume.",
       "volumeNotMounted": "Volume not mounted",
       "smbAutoMountEnabled": "Mount this SMB share automatically",
@@ -114,6 +119,7 @@
       "uuidCopied": "UUID copied to clipboard",
       "errors": {
         "sourceEqualsTarget": "Source and target cannot overlap.",
+        "sourceSourceOverlap": "Sources of one task cannot overlap.",
         "targetIsSubdirOfSource": "Target cannot be inside source.",
         "duplicateTarget": "Target conflicts with another task target.",
         "targetSubdirConflict": "Target cannot be parent/child of another task target.",
@@ -122,7 +128,7 @@
       },
       "validationModal": {
         "title": "Sync Task Validation", "affectedTasks": "Affected tasks", "source": "Source", "target": "Target", "close": "Close",
-        "ruleDescriptions": { "sourceTargetOverlap": "Source and target paths cannot overlap.", "duplicateTarget": "Each task must use a unique target.", "targetSubdirConflict": "Task targets cannot contain one another.", "watchCycle": "Watch-enabled tasks cannot form a cycle.", "invalidInput": "Correct the invalid task input." }
+        "ruleDescriptions": { "sourceTargetOverlap": "Source and target paths cannot overlap.", "sourceSourceOverlap": "Sources of one task cannot be the same path or parent/child paths, or files would be copied twice.", "duplicateTarget": "Each task must use a unique target.", "targetSubdirConflict": "Task targets cannot contain one another.", "watchCycle": "Watch-enabled tasks cannot form a cycle.", "invalidInput": "Correct the invalid task input." }
       },
       "warnings": {
         "targetInWatchedSource": "Acyclic watch chains are allowed, but downstream watch sync waits until overlapping writes complete successfully."
@@ -285,6 +291,7 @@
       "search": "Search path...",
       "scanning": "Scanning...",
       "noOrphans": "No orphan files found.",
+      "sourceNotConnected": "Connect every source card of this task to find orphan files. Not connected: {{source}}",
       "foundCount": "{{count}} items detected",
       "selectVisible": "Select visible",
       "deselectAll": "Clear selection",

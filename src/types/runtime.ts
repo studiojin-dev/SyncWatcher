@@ -8,6 +8,7 @@ export interface RuntimeSyncTask {
     id: string;
     name: string;
     source: string;
+    extraSources: string[];
     target: string;
     checksumMode: boolean;
     watchMode: boolean;
@@ -68,6 +69,8 @@ export interface RuntimeAutoUnmountRequestEvent {
     taskId: string;
     taskName: string;
     source: string;
+    /** 함께 unmount할 추가 UUID 소스들 */
+    extraSources?: string[];
     filesCopied: number;
     bytesCopied: number;
     reason: 'zero-copy' | string;
@@ -75,6 +78,7 @@ export interface RuntimeAutoUnmountRequestEvent {
 
 export type RuntimeTaskValidationCode =
     | 'sourceTargetOverlap'
+    | 'sourceSourceOverlap'
     | 'duplicateTarget'
     | 'targetSubdirConflict'
     | 'watchCycle'
@@ -104,6 +108,7 @@ export function toRuntimeTask(task: SyncTask): RuntimeSyncTask {
         id: task.id,
         name: task.name,
         source: task.source,
+        extraSources: (task.extraSources ?? []).map((extra) => extra.source),
         target: task.target,
         checksumMode: task.checksumMode,
         watchMode: task.watchMode ?? false,

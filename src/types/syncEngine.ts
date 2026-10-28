@@ -17,6 +17,13 @@ export interface FileDiff {
   checksum_target: string | null;
   /** 저장 규칙으로 바뀐 타깃 상대 경로. 없으면 path와 같다. */
   target_path?: string | null;
+  /** 추가 소스의 루트. 없으면 기본 소스다 (ADR-0039). */
+  source_root?: string | null;
+}
+
+/** 결과 트리 경로. 추가 소스의 파일은 기본 소스와 같은 상대 경로여도 섞이지 않게 루트 아래에 둔다. */
+export function resultTreePath(path: string, sourceRoot?: string | null): string {
+  return sourceRoot ? `${sourceRoot.replace(/^\/+|\/+$/g, '')}/${path}` : path;
 }
 
 export type TargetPreflightKind =
@@ -66,6 +73,8 @@ export interface SyncFileEntry {
   error?: string;
   /** 저장 규칙으로 바뀐 타깃 상대 경로. 없으면 path와 같다. */
   target_path?: string | null;
+  /** 추가 소스의 루트. 없으면 기본 소스다 (ADR-0039). */
+  source_root?: string | null;
 }
 
 export interface SyncFileBatchEvent {

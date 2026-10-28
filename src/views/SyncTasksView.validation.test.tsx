@@ -750,6 +750,49 @@ describe('SyncTasksView validation and orphan scan flows', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('saves additional sources added in the editor and ignores empty rows', async () => {
+    renderWithMantine(<SyncTasksView />);
+
+    fireEvent.click(screen.getByText('syncTasks.addTask'));
+    fireEvent.click(screen.getAllByRole('radio')[0]);
+    fireEvent.change(screen.getByPlaceholderText('MY_BACKUP_TASK'), {
+      target: { value: 'Dual Slot' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/source'), {
+      target: { value: '/tmp/card-a' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('/path/to/target'), {
+      target: { value: '/tmp/archive' },
+    });
+
+    fireEvent.click(screen.getByText('syncTasks.addExtraSource'));
+    fireEvent.click(screen.getByText('syncTasks.addExtraSource'));
+    // 첫 추가 소스는 디렉토리 경로로 바꿔 채우고, 두 번째는 비워 둔다.
+    fireEvent.click(screen.getAllByRole('radio')[2]);
+    fireEvent.change(screen.getAllByPlaceholderText('/path/to/source')[1], {
+      target: { value: '/tmp/card-b' },
+    });
+    fireEvent.click(screen.getByText('syncTasks.save'));
+
+    await waitFor(() => {
+      expect(addTaskMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: '/tmp/card-a',
+          target: '/tmp/archive',
+          extraSources: [{ source: '/tmp/card-b', sourceType: 'path' }],
+        }),
+      );
+    });
+    expect(invokeMock).toHaveBeenCalledWith(
+      'runtime_validate_tasks',
+      expect.objectContaining({
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ extraSources: ['/tmp/card-b'] }),
+        ]),
+      }),
+    );
+  });
+
   it('locks the whole form and prevents duplicate save clicks while save is pending', async () => {
     const validationDeferred = createDeferred<{ ok: boolean; issue: null }>();
     updateTaskMock.mockResolvedValue(undefined);

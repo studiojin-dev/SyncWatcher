@@ -253,6 +253,28 @@ pub struct SyncTaskRecord {
     /// 저장 규칙 템플릿 ID. `None`이면 원본 폴더 구조를 그대로 미러링한다.
     #[serde(default)]
     pub save_rule_id: Option<String>,
+    /// 같은 대상으로 함께 동기화할 추가 소스들 (ADR-0039).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_sources: Vec<ExtraSourceRecord>,
+}
+
+/// 추가 소스 하나 (ADR-0039). 기본 소스와 같은 필드를 쓰되 SMB 자동 마운트는 지원하지 않는다.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtraSourceRecord {
+    pub source: String,
+    #[serde(default)]
+    pub source_bookmark: Option<String>,
+    #[serde(default)]
+    pub source_type: Option<SourceType>,
+    #[serde(default)]
+    pub source_uuid: Option<String>,
+    #[serde(default)]
+    pub source_uuid_type: Option<SourceUuidType>,
+    #[serde(default)]
+    pub source_sub_path: Option<String>,
+    #[serde(default)]
+    pub source_identity: Option<SourceIdentitySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default, PartialEq, Eq)]
@@ -326,6 +348,8 @@ pub struct CreateSyncTaskRequest {
     pub recurring_schedules: Vec<RecurringScheduleRecord>,
     #[serde(default)]
     pub save_rule_id: Option<String>,
+    #[serde(default)]
+    pub extra_sources: Vec<ExtraSourceRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -353,6 +377,9 @@ pub struct UpdateSyncTaskRequest {
     /// `Some(Some(id))`로 설정, `Some(None)`으로 해제, `None`이면 유지.
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub save_rule_id: Option<Option<String>>,
+    /// `Some`이면 추가 소스 목록 전체를 바꾼다.
+    #[serde(default)]
+    pub extra_sources: Option<Vec<ExtraSourceRecord>>,
 }
 
 /// JSON `null`을 `Some(None)`(해제)으로, 필드 생략을 `None`(유지)으로 구분한다.
@@ -946,6 +973,11 @@ pub fn normalize_sync_task(task: SyncTaskRecord) -> Result<SyncTaskRecord, Confi
         .retain(|value| !value.trim().is_empty());
     normalized.save_rule_id =
         normalize_optional_string(normalized.save_rule_id).map(|value| value.trim().to_string());
+    normalized.extra_sources = normalized
+        .extra_sources
+        .into_iter()
+        .map(normalize_extra_source)
+        .collect::<Result<_, _>>()?;
     normalized.auto_unmount = should_enable_auto_unmount(&normalized);
 
     Ok(normalized)
@@ -976,6 +1008,7 @@ pub fn build_sync_task_record(
         source_identity: request.source_identity,
         recurring_schedules: request.recurring_schedules,
         save_rule_id: request.save_rule_id,
+        extra_sources: request.extra_sources,
     })?;
 
     validate_strict_recurring_schedule_ids(&task.recurring_schedules)
@@ -1067,6 +1100,7 @@ pub fn apply_sync_task_update(
             Some(value) => value.clone(),
             None => task.save_rule_id,
         },
+        extra_sources: update.extra_sources.clone().unwrap_or(task.extra_sources),
     };
     if update.source_identity.is_none() && source_changed {
         next.source_identity = None;
@@ -1728,20 +1762,69 @@ pub(crate) fn normalize_task_records(
 }
 
 fn normalize_task_source(task: &SyncTaskRecord) -> String {
-    if task.source_type == Some(SourceType::Uuid) {
-        if let (Some(uuid), Some(uuid_type)) = (&task.source_uuid, &task.source_uuid_type) {
-            let prefix = match uuid_type {
-                SourceUuidType::Disk => "[DISK_UUID:",
-                SourceUuidType::Volume => "[VOLUME_UUID:",
-                SourceUuidType::SdCard => "[SD_CARD_CID:",
-            };
-            return format!(
-                "{prefix}{uuid}]{}",
-                normalize_uuid_sub_path(task.source_sub_path.as_deref().unwrap_or("/"))
-            );
-        }
+    uuid_source_token(
+        task.source_type.as_ref(),
+        task.source_uuid.as_deref(),
+        task.source_uuid_type.as_ref(),
+        task.source_sub_path.as_deref(),
+    )
+    .unwrap_or_else(|| task.source.clone())
+}
+
+fn uuid_source_token(
+    source_type: Option<&SourceType>,
+    uuid: Option<&str>,
+    uuid_type: Option<&SourceUuidType>,
+    sub_path: Option<&str>,
+) -> Option<String> {
+    if source_type != Some(&SourceType::Uuid) {
+        return None;
     }
-    task.source.clone()
+    let (uuid, uuid_type) = (uuid?, uuid_type?);
+    let prefix = match uuid_type {
+        SourceUuidType::Disk => "[DISK_UUID:",
+        SourceUuidType::Volume => "[VOLUME_UUID:",
+        SourceUuidType::SdCard => "[SD_CARD_CID:",
+    };
+    Some(format!(
+        "{prefix}{uuid}]{}",
+        normalize_uuid_sub_path(sub_path.unwrap_or("/"))
+    ))
+}
+
+/// 기본 소스와 같은 규칙으로 추가 소스를 정규화한다.
+pub fn normalize_extra_source(
+    extra: ExtraSourceRecord,
+) -> Result<ExtraSourceRecord, ConfigStoreError> {
+    let mut normalized = extra;
+    if let Some(token) = uuid_source_token(
+        normalized.source_type.as_ref(),
+        normalized.source_uuid.as_deref(),
+        normalized.source_uuid_type.as_ref(),
+        normalized.source_sub_path.as_deref(),
+    ) {
+        normalized.source = token;
+    }
+    if normalized.source.trim().is_empty() {
+        return Err(ConfigStoreError::ValidationError {
+            message: "Extra task source cannot be empty".to_string(),
+        });
+    }
+    normalized.source_bookmark = normalize_optional_string(normalized.source_bookmark);
+    if normalized.source_type != Some(SourceType::Uuid) {
+        normalized.source_type = Some(SourceType::Path);
+        normalized.source_uuid = None;
+        normalized.source_uuid_type = None;
+        normalized.source_sub_path = None;
+        normalized.source_identity = None;
+    } else {
+        let sub_path = normalized
+            .source_sub_path
+            .clone()
+            .unwrap_or_else(|| "/".to_string());
+        normalized.source_sub_path = Some(normalize_uuid_sub_path(&sub_path));
+    }
+    Ok(normalized)
 }
 
 fn normalize_uuid_sub_path(sub_path: &str) -> String {
@@ -1833,6 +1916,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         })
         .expect("task should normalize");
 
@@ -1885,6 +1969,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         });
         // source 문자열만 있는 레거시 경로에서도 SD 토큰을 UUID 소스로 인식해야 한다.
         let mut legacy = task.expect("task should normalize");
@@ -1900,6 +1985,67 @@ mod tests {
         typed.source_sub_path = Some("DCIM".to_string());
         let typed = normalize_sync_task(typed).expect("task should normalize");
         assert_eq!(typed.source, "[SD_CARD_CID:39:MTG2c:17826466]/DCIM");
+    }
+
+    #[test]
+    fn extra_sources_normalize_like_primary_and_old_records_load_without_them() {
+        let record: SyncTaskRecord = serde_json::from_value(serde_json::json!({
+            "id": "task-1",
+            "name": "Camera",
+            "source": "[DISK_UUID:slot-a]/DCIM",
+            "target": "/Users/me/Photos",
+            "sourceType": "uuid",
+            "sourceUuid": "slot-a",
+            "sourceUuidType": "disk",
+            "sourceSubPath": "DCIM"
+        }))
+        .expect("record without extraSources should deserialize");
+        assert!(record.extra_sources.is_empty());
+
+        let mut with_extras = record;
+        with_extras.extra_sources = vec![
+            ExtraSourceRecord {
+                source: String::new(),
+                source_bookmark: Some("  ".to_string()),
+                source_type: Some(SourceType::Uuid),
+                source_uuid: Some("slot-b".to_string()),
+                source_uuid_type: Some(SourceUuidType::Disk),
+                source_sub_path: Some("DCIM/".to_string()),
+                source_identity: None,
+            },
+            ExtraSourceRecord {
+                source: "/Volumes/CARD3".to_string(),
+                source_bookmark: None,
+                source_type: None,
+                source_uuid: Some("ignored".to_string()),
+                source_uuid_type: None,
+                source_sub_path: None,
+                source_identity: None,
+            },
+        ];
+        let normalized = normalize_sync_task(with_extras).expect("task should normalize");
+        assert_eq!(
+            normalized.extra_sources[0].source,
+            "[DISK_UUID:slot-b]/DCIM"
+        );
+        assert_eq!(normalized.extra_sources[0].source_bookmark, None);
+        assert_eq!(
+            normalized.extra_sources[1].source_type,
+            Some(SourceType::Path)
+        );
+        assert_eq!(normalized.extra_sources[1].source_uuid, None);
+
+        let mut empty_extra = normalized;
+        empty_extra.extra_sources.push(ExtraSourceRecord {
+            source: " ".to_string(),
+            source_bookmark: None,
+            source_type: None,
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+        });
+        assert!(normalize_sync_task(empty_extra).is_err());
     }
 
     #[test]
@@ -2078,6 +2224,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         }];
 
         store
@@ -2136,6 +2283,7 @@ mod tests {
                 retention_count: 20,
             }],
             save_rule_id: None,
+            extra_sources: Default::default(),
         }];
 
         store
@@ -2174,6 +2322,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         }];
 
         store
@@ -2233,6 +2382,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         }];
 
         store
@@ -2290,6 +2440,7 @@ mod tests {
                     retention_count: 20,
                 }],
                 save_rule_id: None,
+                extra_sources: Default::default(),
             },
         )
         .expect_err("create should reject unsupported custom cron");
@@ -2320,6 +2471,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         })
         .expect("task should normalize");
 
@@ -2366,6 +2518,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         })
         .expect("task should normalize");
 
@@ -2412,6 +2565,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: None,
+            extra_sources: Default::default(),
         })
         .expect("task should normalize");
 
@@ -2476,6 +2630,7 @@ mod tests {
                 retention_count: 20,
             }],
             save_rule_id: None,
+            extra_sources: Default::default(),
         })
         .expect("task should normalize");
 
@@ -2607,6 +2762,7 @@ mod tests {
             source_identity: None,
             recurring_schedules: Vec::new(),
             save_rule_id: Some("  camera-by-type ".to_string()),
+            extra_sources: Default::default(),
         })
         .expect("task should normalize");
         assert_eq!(task.save_rule_id.as_deref(), Some("camera-by-type"));

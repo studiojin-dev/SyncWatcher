@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { useSettings } from '../../hooks/useSettings';
 import { useSyncSession } from '../../hooks/useSyncTaskStatus';
 import ResultTreeTable, { type ResultTreeEntry } from './ResultTreeTable';
+import { resultTreePath } from '../../types/syncEngine';
 import { formatBytes } from '../../utils/formatBytes';
 
 interface SyncResultViewProps {
@@ -105,7 +106,7 @@ export default function SyncResultView({
   const entries = useMemo<ResultTreeEntry[]>(
     () =>
       result.entries.map((entry) => ({
-        path: entry.path,
+        path: resultTreePath(entry.path, entry.source_root),
         targetPath: entry.target_path ?? null,
         typeLabel:
           entry.status === 'failed'
