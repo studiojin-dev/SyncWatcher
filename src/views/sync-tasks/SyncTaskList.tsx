@@ -333,6 +333,17 @@ function SyncTaskList({
                     </span>{' '}
                     {task.source}
                   </div>
+                  {(task.extraSources ?? []).map((extra, index) => (
+                    <div
+                      key={`${extra.source}-${index}`}
+                      className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] mb-1 break-all"
+                    >
+                      <span className="font-bold text-[var(--accent-main)]">
+                        SRC {String.fromCharCode('B'.charCodeAt(0) + index)}:
+                      </span>{' '}
+                      {extra.source}
+                    </div>
+                  ))}
                   <div className="font-mono text-xs bg-[var(--bg-secondary)] p-2 border-2 border-[var(--border-main)] break-all">
                     <span className="font-bold text-[var(--accent-success)]">
                       DST:

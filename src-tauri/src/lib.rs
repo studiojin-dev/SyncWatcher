@@ -46,7 +46,7 @@ use sync_engine::{
         SyncFileEntry, SyncProgressPhase, SyncResult, TargetNewerConflictCandidate,
         TargetPreflightInfo, TargetPreflightKind,
     },
-    DryRunResult, SyncEngine, SyncOptions,
+    DryRunResult, ExtraSourcePath, SyncEngine, SyncOptions,
 };
 use system_integration::DiskMonitor;
 
@@ -214,6 +214,8 @@ const DRY_RUN_DIFF_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 const DRY_RUN_DIFF_BATCH_MAX_SIZE: usize = 50;
 const SYNC_FILE_BATCH_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 const SYNC_FILE_BATCH_MAX_SIZE: usize = 50;
+/// 여러 소스를 가진 작업에서 소스가 연결되지 않았을 때의 오류 접두사 (ADR-0039). 프론트엔드가 이 접두사로 구분한다.
+const SOURCE_NOT_CONNECTED_ERROR: &str = "Source not connected:";
 const DRY_RUN_ARTIFACT_STALE_ERROR: &str =
     "Dry Run result is stale. Run Dry Run again before syncing.";
 const DRY_RUN_ARTIFACT_MISSING_ERROR: &str =
@@ -442,6 +444,8 @@ struct DryRunCandidatePathSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DryRunArtifactCandidate {
+    /// 추가 소스의 정규화된 루트. `None`이면 기본 소스다.
+    source_root: Option<PathBuf>,
     relative_path: PathBuf,
     /// 타깃 루트 기준 상대 경로 (저장 규칙 적용 후). `None`이면 `relative_path`와 같다.
     target_relative_path: Option<PathBuf>,
@@ -452,6 +456,8 @@ struct DryRunArtifactCandidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DryRunTaskConfigSnapshot {
     source: String,
+    /// 이번 실행에 쓴 추가 소스 (소스 순서, 정규화된 루트).
+    extra_sources: Vec<(usize, String)>,
     target: String,
     checksum_mode: bool,
     exclude_patterns: Vec<String>,
@@ -590,6 +596,9 @@ struct RuntimeSyncTask {
     id: String,
     name: String,
     source: String,
+    /// 추가 소스 설정 값들 (ADR-0039).
+    #[serde(default)]
+    extra_sources: Vec<String>,
     target: String,
     #[serde(default)]
     checksum_mode: bool,
@@ -740,6 +749,8 @@ struct RuntimeAutoUnmountRequestEvent {
     task_id: String,
     task_name: String,
     source: String,
+    /// 함께 unmount할 추가 UUID 소스들 (ADR-0039).
+    extra_sources: Vec<String>,
     files_copied: u64,
     bytes_copied: u64,
     reason: String,
@@ -1045,7 +1056,8 @@ impl SyncExecutionFailure {
 struct ValidatedRuntimeTask {
     id: String,
     name: String,
-    source_key: String,
+    /// 기본 소스와 추가 소스들의 비교 키.
+    source_keys: Vec<String>,
     target_key: String,
     watch_mode: bool,
 }
@@ -1054,6 +1066,7 @@ struct ValidatedRuntimeTask {
 #[serde(rename_all = "camelCase")]
 enum RuntimeTaskValidationCode {
     SourceTargetOverlap,
+    SourceSourceOverlap,
     DuplicateTarget,
     TargetSubdirConflict,
     WatchCycle,
@@ -1157,6 +1170,12 @@ fn normalize_sync_task_record(
         task.source_identity = None;
     }
 
+    task.extra_sources = task
+        .extra_sources
+        .into_iter()
+        .map(config_store::normalize_extra_source)
+        .collect::<Result<_, _>>()?;
+
     task.auto_unmount = task.auto_unmount
         && task.watch_mode
         && is_uuid_source(&task.source, task.source_type.clone());
@@ -1189,6 +1208,11 @@ fn to_runtime_task_record(task: &SyncTaskRecord) -> RuntimeSyncTask {
         id: task.id.clone(),
         name: task.name.clone(),
         source: task.source.clone(),
+        extra_sources: task
+            .extra_sources
+            .iter()
+            .map(|extra| extra.source.clone())
+            .collect(),
         target: task.target.clone(),
         checksum_mode: task.checksum_mode,
         watch_mode: task.watch_mode,
@@ -1793,6 +1817,7 @@ fn emit_runtime_auto_unmount_request(
     task_id: &str,
     task_name: &str,
     source: &str,
+    extra_sources: Vec<String>,
     files_copied: u64,
     bytes_copied: u64,
     reason: &str,
@@ -1801,6 +1826,7 @@ fn emit_runtime_auto_unmount_request(
         task_id: task_id.to_string(),
         task_name: task_name.to_string(),
         source: source.to_string(),
+        extra_sources,
         files_copied,
         bytes_copied,
         reason: reason.to_string(),
@@ -1932,6 +1958,7 @@ async fn build_dry_run_artifact(
     raw_source: &str,
     raw_target: &str,
     source: &Path,
+    extra_sources: &[ExtraSourcePath],
     target: &Path,
     checksum_mode: bool,
     exclude_patterns: &[String],
@@ -1944,21 +1971,25 @@ async fn build_dry_run_artifact(
     let (source_root, target_root) =
         capture_dry_run_root_snapshot(&canonical_source_root, target).await?;
 
+    let extra_source_roots = extra_source_root_snapshot(extra_sources).await?;
     let mut seen_paths = HashSet::new();
     let mut candidates = Vec::new();
 
     for diff in &result.diffs {
-        if !seen_paths.insert(diff.path.clone()) {
+        if !seen_paths.insert((diff.source_root.clone(), diff.path.clone())) {
             continue;
         }
 
+        let diff_source_root = diff
+            .source_root
+            .as_deref()
+            .unwrap_or(&canonical_source_root);
         candidates.push(DryRunArtifactCandidate {
+            source_root: diff.source_root.clone(),
             relative_path: diff.path.clone(),
             target_relative_path: diff.target_path.clone(),
-            source: capture_dry_run_candidate_path_snapshot(
-                &canonical_source_root.join(&diff.path),
-            )
-            .await?,
+            source: capture_dry_run_candidate_path_snapshot(&diff_source_root.join(&diff.path))
+                .await?,
             target: capture_dry_run_candidate_path_snapshot(
                 &target_snapshot_root.join(diff.target_relative_path()),
             )
@@ -1967,17 +1998,22 @@ async fn build_dry_run_artifact(
     }
 
     for conflict in target_newer_conflicts {
-        if !seen_paths.insert(conflict.path.clone()) {
+        // 충돌 후보는 소스 절대 경로를 가지므로 그 경로에서 루트를 되짚는다.
+        let conflict_source_root = conflict
+            .source_path
+            .ancestors()
+            .nth(conflict.path.components().count())
+            .map(Path::to_path_buf)
+            .filter(|root| root != &canonical_source_root);
+        if !seen_paths.insert((conflict_source_root.clone(), conflict.path.clone())) {
             continue;
         }
 
         candidates.push(DryRunArtifactCandidate {
+            source_root: conflict_source_root,
             relative_path: conflict.path.clone(),
             target_relative_path: conflict.target_relative_path.clone(),
-            source: capture_dry_run_candidate_path_snapshot(
-                &canonical_source_root.join(&conflict.path),
-            )
-            .await?,
+            source: capture_dry_run_candidate_path_snapshot(&conflict.source_path).await?,
             target: capture_dry_run_candidate_path_snapshot(
                 &target_snapshot_root.join(
                     conflict
@@ -1993,6 +2029,7 @@ async fn build_dry_run_artifact(
     Ok(DryRunArtifact {
         config: DryRunTaskConfigSnapshot {
             source: raw_source.to_string(),
+            extra_sources: extra_source_roots,
             target: raw_target.to_string(),
             checksum_mode,
             exclude_patterns: exclude_patterns.to_vec(),
@@ -2011,6 +2048,7 @@ async fn validate_dry_run_artifact(
     raw_source: &str,
     raw_target: &str,
     source: &Path,
+    extra_sources: &[ExtraSourcePath],
     target: &Path,
     checksum_mode: bool,
     exclude_patterns: &[String],
@@ -2023,6 +2061,7 @@ async fn validate_dry_run_artifact(
 
     let current_config = DryRunTaskConfigSnapshot {
         source: raw_source.to_string(),
+        extra_sources: extra_source_root_snapshot(extra_sources).await?,
         target: raw_target.to_string(),
         checksum_mode,
         exclude_patterns: exclude_patterns.to_vec(),
@@ -2046,8 +2085,12 @@ async fn validate_dry_run_artifact(
         if cancel_token.is_some_and(CancellationToken::is_cancelled) {
             return Err(SYNC_CANCELLED_BY_USER_ERROR.to_string());
         }
+        let candidate_source_root = candidate
+            .source_root
+            .as_deref()
+            .unwrap_or(&canonical_source_root);
         let current_source = capture_dry_run_candidate_path_snapshot(
-            &canonical_source_root.join(&candidate.relative_path),
+            &candidate_source_root.join(&candidate.relative_path),
         )
         .await?;
         let current_target = capture_dry_run_candidate_path_snapshot(
@@ -2767,6 +2810,165 @@ async fn ensure_task_paths_available(
         true,
     )?;
     Ok((source, target))
+}
+
+/// 이번 실행에 쓸 작업 소스들 (ADR-0039).
+#[derive(Debug)]
+struct TaskRunSources {
+    /// 엔진의 기본 소스: 연결된 첫 소스.
+    primary: PathBuf,
+    /// 기본 소스의 작업 내 순서 (첫 번째 소스 = 0).
+    primary_position: usize,
+    extras: Vec<ExtraSourcePath>,
+    /// 연결되지 않아 건너뛴 소스의 설정 값.
+    skipped: Vec<String>,
+}
+
+impl TaskRunSources {
+    fn single(primary: PathBuf) -> Self {
+        Self {
+            primary,
+            primary_position: 0,
+            extras: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+}
+
+fn source_not_connected_error(source: &str) -> String {
+    format!("{SOURCE_NOT_CONNECTED_ERROR} {source}")
+}
+
+/// 소스 하나를 지금 경로로 푼다. 연결되지 않았으면 `None`, 형식이 잘못되면 `Err`.
+fn resolve_extra_source_path(source: &str) -> Result<Option<PathBuf>, String> {
+    input_validation::validate_path_argument(source).map_err(|e| e.to_string())?;
+    let path = match resolve_path_with_uuid_outcome(source)? {
+        ResolvePathWithUuidOutcome::Resolved(path) => path,
+        ResolvePathWithUuidOutcome::UuidNotMounted { .. } => return Ok(None),
+    };
+    Ok(path.is_dir().then_some(path))
+}
+
+/// 여러 소스를 가진 작업의 소스들을 푼다. 어느 소스든 연결되지 않았으면 건너뛰고
+/// (`require_all`이면 실패 — 고아 스캔/삭제), 연결된 첫 소스를 기본 소스로 삼는다.
+/// 연결된 소스는 대상과도, 서로와도 겹치면 안 된다.
+fn resolve_task_run_sources(
+    task: &SyncTaskRecord,
+    requested_source: &str,
+    target: &Path,
+    require_all: bool,
+) -> Result<TaskRunSources, String> {
+    let sources = std::iter::once(requested_source)
+        .chain(task.extra_sources.iter().map(|extra| extra.source.as_str()));
+    let mut connected: Vec<(usize, PathBuf)> = Vec::new();
+    let mut skipped = Vec::new();
+    for (position, source) in sources.enumerate() {
+        let path = if position == 0 && task.source_network_mount.is_some() {
+            Some(ensure_task_requested_path_available(
+                &task.id,
+                Path::new(source),
+                task.source_network_mount.as_ref(),
+                NetworkMountRole::Source,
+                false,
+            )?)
+        } else {
+            resolve_extra_source_path(source)?
+        };
+        let Some(path) = path else {
+            if require_all {
+                return Err(source_not_connected_error(source));
+            }
+            skipped.push(source.to_string());
+            continue;
+        };
+        ensure_non_overlapping_paths(&path, target)?;
+        let key = path_key_for_compare(&path);
+        if connected
+            .iter()
+            .any(|(_, used)| is_path_overlap(&path_key_for_compare(used), &key))
+        {
+            return Err(format!(
+                "Sources of one task must not overlap: {}",
+                path.display()
+            ));
+        }
+        connected.push((position, path));
+    }
+
+    let mut connected = connected.into_iter();
+    let Some((primary_position, primary)) = connected.next() else {
+        return Err(source_not_connected_error(requested_source));
+    };
+    Ok(TaskRunSources {
+        primary,
+        primary_position,
+        extras: connected
+            .map(|(position, path)| ExtraSourcePath { position, path })
+            .collect(),
+        skipped,
+    })
+}
+
+/// 실행에 쓸 소스들과 대상을 푼다. 추가 소스가 없는 작업은 기존 규칙(기본 소스 필수)을 따른다.
+async fn resolve_task_run_paths(
+    task_id: &str,
+    requested_source: &Path,
+    requested_target: &Path,
+    require_all: bool,
+    state: &AppState,
+) -> Result<(TaskRunSources, PathBuf), String> {
+    let task = match load_sync_task_by_id(task_id, state).await {
+        Ok(task) if !task.extra_sources.is_empty() => task,
+        Ok(_) => {
+            let (source, target) =
+                ensure_task_paths_available(task_id, requested_source, requested_target, state)
+                    .await?;
+            return Ok((TaskRunSources::single(source), target));
+        }
+        Err(error) if error.contains("Sync task not found:") => {
+            let (source, target) =
+                ensure_task_paths_available(task_id, requested_source, requested_target, state)
+                    .await?;
+            return Ok((TaskRunSources::single(source), target));
+        }
+        Err(error) => return Err(error),
+    };
+    let target = ensure_task_requested_path_available(
+        task_id,
+        requested_target,
+        task.target_network_mount.as_ref(),
+        NetworkMountRole::Target,
+        true,
+    )?;
+    let sources = resolve_task_run_sources(
+        &task,
+        &requested_source.to_string_lossy(),
+        &target,
+        require_all,
+    )?;
+    Ok((sources, target))
+}
+
+fn log_skipped_sources(task_id: &str, sources: &TaskRunSources, state: &AppState) {
+    for source in &sources.skipped {
+        state.log_manager.log(
+            "info",
+            &format!("Source not connected, skipped: {source}"),
+            Some(task_id.to_string()),
+        );
+    }
+}
+
+/// 드라이런 캐시 비교용: (소스 순서, 정규화된 루트).
+async fn extra_source_root_snapshot(
+    extra_sources: &[ExtraSourcePath],
+) -> Result<Vec<(usize, String)>, String> {
+    let mut snapshot = Vec::with_capacity(extra_sources.len());
+    for extra in extra_sources {
+        let canonical = resolve_existing_canonical_dir(&extra.path, "source").await?;
+        snapshot.push((extra.position, display_path(&canonical)));
+    }
+    Ok(snapshot)
 }
 
 #[derive(
@@ -3977,6 +4179,13 @@ fn runtime_validation_issue_log_message(issue: &RuntimeTaskValidationIssue) -> S
                 .as_deref()
                 .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"))
         ),
+        RuntimeTaskValidationCode::SourceSourceOverlap => format!(
+            "Validation blocked saving sync task '{}' because two of its sources overlap.",
+            issue
+                .task_name
+                .as_deref()
+                .unwrap_or(issue.task_id.as_deref().unwrap_or("unknown"))
+        ),
         RuntimeTaskValidationCode::DuplicateTarget => format!(
             "Validation blocked saving sync tasks '{}' and '{}' because target paths conflict.",
             issue
@@ -4049,6 +4258,11 @@ fn record_runtime_validation_issue(
     }
 }
 
+/// 기본 소스 다음에 추가 소스들.
+fn runtime_task_sources(task: &RuntimeSyncTask) -> impl Iterator<Item = &String> {
+    std::iter::once(&task.source).chain(task.extra_sources.iter())
+}
+
 fn find_runtime_task_validation_issue(
     tasks: &[RuntimeSyncTask],
 ) -> Option<RuntimeTaskValidationIssue> {
@@ -4056,37 +4270,51 @@ fn find_runtime_task_validation_issue(
 
     for task in tasks {
         if input_validation::validate_task_id(&task.id).is_err()
-            || input_validation::validate_path_argument(&task.source).is_err()
             || input_validation::validate_path_argument(&task.target).is_err()
+            || runtime_task_sources(task)
+                .any(|source| input_validation::validate_path_argument(source).is_err())
         {
             return Some(RuntimeTaskValidationIssue::invalid_input(Some(task)));
         }
 
-        let source_key = match resolved_path_key(&task.source) {
-            Ok(value) => value,
-            Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
-        };
         let target_key = match resolved_path_key(&task.target) {
             Ok(value) => value,
             Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
         };
-
-        if is_path_overlap(&source_key, &target_key) {
-            return Some(RuntimeTaskValidationIssue {
-                code: RuntimeTaskValidationCode::SourceTargetOverlap,
-                task_id: Some(task.id.clone()),
-                task_name: Some(task.name.clone()),
-                conflicting_task_ids: Vec::new(),
-                conflicting_task_names: Vec::new(),
-                source: Some(task.source.clone()),
-                target: Some(task.target.clone()),
-            });
+        let mut source_keys: Vec<String> = Vec::new();
+        for source in runtime_task_sources(task) {
+            let source_key = match resolved_path_key(source) {
+                Ok(value) => value,
+                Err(_) => return Some(RuntimeTaskValidationIssue::invalid_input(Some(task))),
+            };
+            let overlap_code = if is_path_overlap(&source_key, &target_key) {
+                Some(RuntimeTaskValidationCode::SourceTargetOverlap)
+            } else if source_keys
+                .iter()
+                .any(|existing| is_path_overlap(existing, &source_key))
+            {
+                Some(RuntimeTaskValidationCode::SourceSourceOverlap)
+            } else {
+                None
+            };
+            if let Some(code) = overlap_code {
+                return Some(RuntimeTaskValidationIssue {
+                    code,
+                    task_id: Some(task.id.clone()),
+                    task_name: Some(task.name.clone()),
+                    conflicting_task_ids: Vec::new(),
+                    conflicting_task_names: Vec::new(),
+                    source: Some(source.clone()),
+                    target: Some(task.target.clone()),
+                });
+            }
+            source_keys.push(source_key);
         }
 
         validated_tasks.push(ValidatedRuntimeTask {
             id: task.id.clone(),
             name: task.name.clone(),
-            source_key,
+            source_keys,
             target_key,
             watch_mode: task.watch_mode,
         });
@@ -4222,23 +4450,36 @@ fn build_validated_runtime_tasks(
 
     for task in tasks {
         input_validation::validate_task_id(&task.id).map_err(|e| e.to_string())?;
-        input_validation::validate_path_argument(&task.source).map_err(|e| e.to_string())?;
         input_validation::validate_path_argument(&task.target).map_err(|e| e.to_string())?;
-
-        let source_key = resolved_path_key(&task.source)?;
         let target_key = resolved_path_key(&task.target)?;
 
-        if is_path_overlap(&source_key, &target_key) {
-            return Err(format!(
-                "Task '{}' has overlapping source/target paths. source='{}', target='{}'",
-                task.name, task.source, task.target
-            ));
+        let mut source_keys: Vec<String> = Vec::new();
+        for source in runtime_task_sources(task) {
+            input_validation::validate_path_argument(source).map_err(|e| e.to_string())?;
+            let source_key = resolved_path_key(source)?;
+
+            if is_path_overlap(&source_key, &target_key) {
+                return Err(format!(
+                    "Task '{}' has overlapping source/target paths. source='{}', target='{}'",
+                    task.name, source, task.target
+                ));
+            }
+            if source_keys
+                .iter()
+                .any(|existing| is_path_overlap(existing, &source_key))
+            {
+                return Err(format!(
+                    "Task '{}' has overlapping sources. source='{}'",
+                    task.name, source
+                ));
+            }
+            source_keys.push(source_key);
         }
 
         validated_tasks.push(ValidatedRuntimeTask {
             id: task.id.clone(),
             name: task.name.clone(),
-            source_key,
+            source_keys,
             target_key,
             watch_mode: task.watch_mode,
         });
@@ -4259,7 +4500,11 @@ fn build_runtime_watch_upstreams(
                 continue;
             }
 
-            if is_path_overlap(&upstream.target_key, &downstream.source_key) {
+            if downstream
+                .source_keys
+                .iter()
+                .any(|source_key| is_path_overlap(&upstream.target_key, source_key))
+            {
                 entry.insert(upstream.id.clone());
             }
         }
@@ -4529,7 +4774,13 @@ fn downstream_watch_task_ids_for_target(
 ) -> Vec<String> {
     validated_tasks
         .iter()
-        .filter(|task| task.watch_mode && is_path_overlap(target_key, &task.source_key))
+        .filter(|task| {
+            task.watch_mode
+                && task
+                    .source_keys
+                    .iter()
+                    .any(|source_key| is_path_overlap(target_key, source_key))
+        })
         .map(|task| task.id.clone())
         .collect()
 }
@@ -4815,7 +5066,7 @@ fn select_runtime_dispatch_candidate(
     queued_set: &HashSet<String>,
     syncing_tasks: &HashSet<String>,
     watch_upstreams: &HashMap<String, HashSet<String>>,
-    source_keys: &HashMap<String, String>,
+    source_keys: &HashMap<String, Vec<String>>,
     active_producers: &HashMap<String, RuntimeActiveProducer>,
     settle_until: &HashMap<String, Instant>,
     now: Instant,
@@ -4823,7 +5074,7 @@ fn select_runtime_dispatch_candidate(
     let mut next_deadline: Option<Instant> = None;
 
     for task_id in queue {
-        let Some(source_key) = source_keys.get(task_id) else {
+        let Some(task_source_keys) = source_keys.get(task_id) else {
             continue;
         };
 
@@ -4842,7 +5093,9 @@ fn select_runtime_dispatch_candidate(
         let blocked_by_producer = active_producers.values().any(|producer| {
             let _ = &producer.producer_id;
             let _ = producer.kind;
-            is_path_overlap(&producer.target_key, source_key)
+            task_source_keys
+                .iter()
+                .any(|source_key| is_path_overlap(&producer.target_key, source_key))
         });
         if blocked_by_producer {
             continue;
@@ -4911,10 +5164,10 @@ fn schedule_runtime_sync_dispatcher(app: tauri::AppHandle, state: AppState) {
                 Err(_) => break,
             };
             let watch_upstreams = build_runtime_watch_upstreams(&validated_tasks);
-            let source_keys: HashMap<String, String> = validated_tasks
+            let source_keys: HashMap<String, Vec<String>> = validated_tasks
                 .iter()
                 .filter(|task| task.watch_mode)
-                .map(|task| (task.id.clone(), task.source_key.clone()))
+                .map(|task| (task.id.clone(), task.source_keys.clone()))
                 .collect();
             let queue = {
                 let queue = state.runtime_sync_queue.read().await;
@@ -5328,6 +5581,15 @@ enum RuntimeAutoUnmountDecision {
     UnmountNow,
 }
 
+/// 자동 unmount 대상이 되는 추가 소스 (볼륨 UUID 소스만).
+fn runtime_task_extra_uuid_sources(task: &RuntimeSyncTask) -> Vec<String> {
+    task.extra_sources
+        .iter()
+        .filter(|source| has_uuid_source_prefix(source))
+        .cloned()
+        .collect()
+}
+
 fn decide_runtime_auto_unmount(
     auto_unmount: bool,
     has_pending_conflicts: bool,
@@ -5563,10 +5825,15 @@ async fn execute_sync_internal(
         maybe_activate_task_path_access(&task_id, &state)
             .await
             .map_err(SyncExecutionFailure::new)?;
-        let (source, target) = ensure_task_paths_available(&task_id, &source, &target, &state)
-            .await
-            .map_err(SyncExecutionFailure::new)?;
+        let (run_sources, target) =
+            resolve_task_run_paths(&task_id, &source, &target, false, &state)
+                .await
+                .map_err(SyncExecutionFailure::new)?;
+        let source = run_sources.primary.clone();
         ensure_non_overlapping_paths(&source, &target).map_err(SyncExecutionFailure::new)?;
+        log_skipped_sources(&task_id, &run_sources, &state);
+        let source_position = run_sources.primary_position;
+        let extra_sources = run_sources.extras;
 
         // Validate all inputs
         input_validation::validate_task_id(&task_id)
@@ -5606,7 +5873,9 @@ async fn execute_sync_internal(
                 tokens.insert(task_id.clone(), cancel_token.clone());
             }
 
-            let engine = SyncEngine::new(source.clone(), target.clone());
+            let engine = SyncEngine::new(source.clone(), target.clone())
+                .with_source_position(source_position)
+                .with_extra_sources(extra_sources.clone());
             let options = SyncOptions {
                 checksum_mode,
                 preserve_permissions: true,
@@ -5668,6 +5937,7 @@ async fn execute_sync_internal(
                         &requested_source,
                         &requested_target,
                         &source,
+                        &extra_sources,
                         &target,
                         checksum_mode,
                         &options.exclude_patterns,
@@ -6147,13 +6417,19 @@ async fn runtime_sync_task(task_id: String, app: tauri::AppHandle, state: AppSta
                     &task.id,
                     &task.name,
                     &task.source,
+                    runtime_task_extra_uuid_sources(&task),
                     exec_result.sync_result.files_copied,
                     exec_result.sync_result.bytes_copied,
                     "zero-copy",
                 );
             }
             RuntimeAutoUnmountDecision::UnmountNow => {
-                if let Ok(source_path) = resolve_path_with_uuid(&task.source) {
+                let extra_sources = runtime_task_extra_uuid_sources(&task);
+                for source in std::iter::once(&task.source).chain(extra_sources.iter()) {
+                    // 연결되지 않은 추가 소스는 건너뛴다.
+                    let Ok(source_path) = resolve_path_with_uuid(source) else {
+                        continue;
+                    };
                     if let Err(err) = DiskMonitor::unmount_volume(&source_path) {
                         state.log_manager.log(
                             "warning",
@@ -6200,8 +6476,29 @@ async fn start_watch_internal(
     runtime_owned: bool,
 ) -> Result<PathBuf, String> {
     activate_task_path_access(&task_id, &state).await?;
-    let source_path =
-        resolve_path_with_uuid(source_path.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+    let multi_source_task = match load_sync_task_by_id(&task_id, &state).await {
+        Ok(task) if !task.extra_sources.is_empty() => Some(task),
+        Ok(_) => None,
+        Err(error) if error.contains("Sync task not found:") => None,
+        Err(error) => return Err(error),
+    };
+    // 여러 소스를 가진 작업은 연결된 소스만 감시한다. 연결된 첫 소스가 기본 감시 경로다 (ADR-0039).
+    let (source_path, extra_paths) = match multi_source_task {
+        Some(task) => {
+            let mut connected =
+                connected_source_paths(task_source_values(&task.source, &task.extra_sources));
+            if connected.is_empty() {
+                return Err(source_not_connected_error(&task.source));
+            }
+            let first = connected.remove(0);
+            (first, connected)
+        }
+        None => (
+            resolve_path_with_uuid(source_path.to_str().unwrap_or(""))
+                .map_err(|e| e.to_string())?,
+            Vec::new(),
+        ),
+    };
 
     // Validate inputs
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -6214,40 +6511,64 @@ async fn start_watch_internal(
 
     let mut manager = state.watcher_manager.write().await;
     manager
-        .start_watching(task_id.clone(), source_path.clone(), move |event| {
-            // 변경 감지 시 프론트엔드에 이벤트 전송
-            let watch_event = WatchEvent::from_notify_event(task_id_clone.clone(), &event);
-            let _ = app_clone.emit("watch-event", &watch_event);
+        .start_watching_paths(
+            task_id.clone(),
+            source_path.clone(),
+            extra_paths.clone(),
+            move |event| {
+                // 변경 감지 시 프론트엔드에 이벤트 전송
+                let watch_event = WatchEvent::from_notify_event(task_id_clone.clone(), &event);
+                let _ = app_clone.emit("watch-event", &watch_event);
 
-            if runtime_owned {
-                let app_for_sync = app_clone.clone();
-                let state_for_sync = state_clone.clone();
-                let task_id_for_sync = task_id_clone.clone();
-                tauri::async_runtime::spawn(async move {
-                    let enqueue_result = enqueue_runtime_sync_task(
-                        &task_id_for_sync,
-                        &app_for_sync,
-                        &state_for_sync,
-                        Some("Triggered by watch event".to_string()),
-                    )
-                    .await;
+                if runtime_owned {
+                    let app_for_sync = app_clone.clone();
+                    let state_for_sync = state_clone.clone();
+                    let task_id_for_sync = task_id_clone.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let enqueue_result = enqueue_runtime_sync_task(
+                            &task_id_for_sync,
+                            &app_for_sync,
+                            &state_for_sync,
+                            Some("Triggered by watch event".to_string()),
+                        )
+                        .await;
 
-                    if enqueue_result == RuntimeSyncEnqueueResult::Enqueued {
-                        schedule_runtime_sync_dispatcher(app_for_sync, state_for_sync);
-                    }
-                });
-            }
-        })
+                        if enqueue_result == RuntimeSyncEnqueueResult::Enqueued {
+                            schedule_runtime_sync_dispatcher(app_for_sync, state_for_sync);
+                        }
+                    });
+                }
+            },
+        )
         .map_err(|e| format!("{}:{}", error_codes::ERR_WATCH_START_FAILED, e))?;
 
+    let watched = std::iter::once(&source_path)
+        .chain(extra_paths.iter())
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     state.log_manager.log_with_category(
         "info",
-        &format!("Watch started: {}", source_path.display()),
+        &format!("Watch started: {watched}"),
         Some(task_id),
         LogCategory::WatchStarted,
     );
 
     Ok(source_path)
+}
+
+fn task_source_values<'a>(
+    source: &'a str,
+    extra_sources: &'a [config_store::ExtraSourceRecord],
+) -> impl Iterator<Item = &'a str> {
+    std::iter::once(source).chain(extra_sources.iter().map(|extra| extra.source.as_str()))
+}
+
+/// 소스 설정 값들 중 지금 연결된 경로들 (작업 내 순서 유지).
+fn connected_source_paths<'a>(sources: impl Iterator<Item = &'a str>) -> Vec<PathBuf> {
+    sources
+        .filter_map(|source| resolve_extra_source_path(source).ok().flatten())
+        .collect()
 }
 
 async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> Result<(), String> {
@@ -6280,12 +6601,47 @@ async fn reconcile_runtime_watchers(app: tauri::AppHandle, state: AppState) -> R
     let allow_restarted_watch_bootstrap = state
         .runtime_initial_watch_bootstrapped
         .load(Ordering::SeqCst);
-    let restart_task_ids = runtime_watch_restart_task_ids(
+    let mut restart_task_ids = runtime_watch_restart_task_ids(
         &desired,
         &managed_sources,
         &watching_now,
         &watching_source_paths,
     );
+    // 여러 소스를 가진 작업은 카드가 꽂히거나 빠지면 감시 경로를 다시 잡는다 (ADR-0039).
+    let watching_extra_paths = {
+        let manager = state.watcher_manager.read().await;
+        manager.get_watching_task_extra_paths()
+    };
+    for task in runtime_config
+        .tasks
+        .iter()
+        .filter(|task| task.watch_mode && !task.extra_sources.is_empty())
+    {
+        if restart_task_ids.contains(&task.id) || !watching_now.contains(&task.id) {
+            continue;
+        }
+        let connected: Vec<String> = connected_source_paths(
+            std::iter::once(task.source.as_str())
+                .chain(task.extra_sources.iter().map(String::as_str)),
+        )
+        .into_iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+        let watched: Vec<String> = watching_source_paths
+            .get(&task.id)
+            .into_iter()
+            .cloned()
+            .chain(
+                watching_extra_paths
+                    .get(&task.id)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+            .collect();
+        if watched != connected {
+            restart_task_ids.push(task.id.clone());
+        }
+    }
     let mut restarted_watch_task_ids = Vec::new();
 
     // Start or restart desired watchers.
@@ -7038,9 +7394,13 @@ async fn sync_dry_run_internal(
 
     let result: Result<DryRunResult, String> = async {
         maybe_activate_task_path_access(&task_id, state).await?;
-        let (source, target) =
-            ensure_task_paths_available(&task_id, &source, &target, state).await?;
+        let (run_sources, target) =
+            resolve_task_run_paths(&task_id, &source, &target, false, state).await?;
+        let source = run_sources.primary.clone();
         ensure_non_overlapping_paths(&source, &target)?;
+        log_skipped_sources(&task_id, &run_sources, state);
+        let source_position = run_sources.primary_position;
+        let extra_sources = run_sources.extras;
 
         input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
         input_validation::validate_path_argument(source.to_str().unwrap_or(""))
@@ -7077,7 +7437,9 @@ async fn sync_dry_run_internal(
             );
         }
 
-        let engine = SyncEngine::new(source.clone(), target.clone());
+        let engine = SyncEngine::new(source.clone(), target.clone())
+            .with_source_position(source_position)
+            .with_extra_sources(extra_sources.clone());
         let options = SyncOptions {
             checksum_mode,
             preserve_permissions: true,
@@ -7317,6 +7679,7 @@ async fn sync_dry_run_internal(
             &requested_source,
             &requested_target,
             &source,
+            &extra_sources,
             &target,
             checksum_mode,
             &options.exclude_patterns,
@@ -7428,10 +7791,21 @@ async fn find_orphan_files_internal(
             });
         }
 
-        let source =
-            resolve_path_with_uuid(source.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
-        let target =
-            resolve_path_with_uuid(target.to_str().unwrap_or("")).map_err(|e| e.to_string())?;
+        let has_extra_sources = load_sync_task_by_id(&task_id, state)
+            .await
+            .is_ok_and(|task| !task.extra_sources.is_empty());
+        let (source, target, extra_sources) = if has_extra_sources {
+            // 빠진 소스가 있으면 그 파일이 전부 고아로 보이므로 모든 소스가 있어야 한다 (ADR-0039).
+            let (run_sources, target) =
+                resolve_task_run_paths(&task_id, &source, &target, true, state).await?;
+            (run_sources.primary, target, run_sources.extras)
+        } else {
+            let source = resolve_path_with_uuid(source.to_str().unwrap_or(""))
+                .map_err(|e| e.to_string())?;
+            let target = resolve_path_with_uuid(target.to_str().unwrap_or(""))
+                .map_err(|e| e.to_string())?;
+            (source, target, Vec::new())
+        };
         ensure_non_overlapping_paths(&source, &target)?;
 
         input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
@@ -7442,7 +7816,7 @@ async fn find_orphan_files_internal(
         input_validation::validate_exclude_patterns(&exclude_patterns)
             .map_err(|e| e.to_string())?;
 
-        let engine = SyncEngine::new(source, target);
+        let engine = SyncEngine::new(source, target).with_extra_sources(extra_sources);
         engine
             .find_orphan_files_with_cancel(
                 &exclude_patterns,
@@ -7627,6 +8001,12 @@ async fn delete_orphan_files(
     input_validation::validate_task_id(&task_id).map_err(|e| e.to_string())?;
     input_validation::validate_path_argument(target.to_str().unwrap_or(""))
         .map_err(|e| e.to_string())?;
+    if let Ok(task) = load_sync_task_by_id(&task_id, state.inner()).await {
+        if !task.extra_sources.is_empty() {
+            // 고아 목록을 만든 뒤 소스가 빠졌을 수 있으므로 삭제 직전에도 모든 소스를 확인한다.
+            resolve_task_run_sources(&task, &task.source, &target, true)?;
+        }
+    }
 
     let mut relative_paths: Vec<PathBuf> = Vec::new();
     let mut invalid_count = 0usize;
@@ -8474,6 +8854,9 @@ struct SyncTaskUpdatePayload {
     /// `null`이면 해제, 생략하면 유지.
     #[serde(default, deserialize_with = "config_store::deserialize_double_option")]
     save_rule_id: Option<Option<String>>,
+    /// 있으면 추가 소스 목록 전체를 바꾼다.
+    #[serde(default)]
+    extra_sources: Option<Vec<config_store::ExtraSourceRecord>>,
 }
 
 #[tauri::command]
@@ -8505,6 +8888,7 @@ async fn update_sync_task(
             source_identity: updates.source_identity,
             recurring_schedules: updates.recurring_schedules,
             save_rule_id: updates.save_rule_id,
+            extra_sources: updates.extra_sources,
         },
         updates.source_credential,
         updates.target_credential,

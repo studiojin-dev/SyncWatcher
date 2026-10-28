@@ -14,6 +14,8 @@ use tokio_util::sync::CancellationToken;
 pub struct TaskWatcher {
     pub task_id: String,
     pub source_path: PathBuf,
+    /// 함께 감시하는 추가 소스 경로들 (ADR-0039).
+    pub extra_paths: Vec<PathBuf>,
     _watcher: RecommendedWatcher,
     cancellation_token: CancellationToken,
     _debounce_thread_handle: Option<thread::JoinHandle<()>>,
@@ -42,6 +44,20 @@ impl WatcherManager {
         &mut self,
         task_id: String,
         source_path: PathBuf,
+        on_change: F,
+    ) -> Result<()>
+    where
+        F: Fn(Event) + Send + 'static,
+    {
+        self.start_watching_paths(task_id, source_path, Vec::new(), on_change)
+    }
+
+    /// 기본 소스와 추가 소스들을 한 Task의 감시로 묶는다. 이벤트는 하나의 디바운스로 합쳐진다.
+    pub fn start_watching_paths<F>(
+        &mut self,
+        task_id: String,
+        source_path: PathBuf,
+        extra_paths: Vec<PathBuf>,
         on_change: F,
     ) -> Result<()>
     where
@@ -82,6 +98,9 @@ impl WatcherManager {
             })?;
 
         watcher.watch(&source_path, RecursiveMode::Recursive)?;
+        for extra_path in &extra_paths {
+            watcher.watch(extra_path, RecursiveMode::Recursive)?;
+        }
 
         // 디바운싱 처리를 위한 스레드 생성 (with cancellation support & panic handling)
         let thread_handle = std::thread::spawn(move || {
@@ -107,6 +126,7 @@ impl WatcherManager {
             TaskWatcher {
                 task_id,
                 source_path,
+                extra_paths,
                 _watcher: watcher,
                 cancellation_token,
                 _debounce_thread_handle: Some(thread_handle),
@@ -142,6 +162,23 @@ impl WatcherManager {
                 (
                     task_id.clone(),
                     watcher.source_path.to_string_lossy().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// 감시 중인 Task별 추가 소스 경로 스냅샷을 반환합니다.
+    pub fn get_watching_task_extra_paths(&self) -> HashMap<String, Vec<String>> {
+        self.watchers
+            .iter()
+            .map(|(task_id, watcher)| {
+                (
+                    task_id.clone(),
+                    watcher
+                        .extra_paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().to_string())
+                        .collect(),
                 )
             })
             .collect()

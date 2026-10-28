@@ -101,7 +101,12 @@
       "savedUuidSourceLabel": "保存済み UUID ソース（未マウント）",
       "savedUuidSourceHint": "このタスクは保存済みの UUID ソースを保持します。内部を参照するにはメディアを再マウントするか、別のボリュームを選択してください。",
       "subPath": "サブパス",
-      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathPlaceholder": "空欄の場合はボリュームのルート全体を同期 (例: /DCIM)",
+      "extraSources": "追加ソース",
+      "extraSourcesHint": "複数のメモリーカードを1つのターゲットにまとめます。同じ内容のファイルは1回だけコピーし、同名で内容が異なる場合はソースの順番の文字（_b、_c …）を付けます。接続されていないソースはスキップされます。",
+      "addExtraSource": "ソースを追加",
+      "removeExtraSource": "ソースを削除",
+      "extraSourceLabel": "ソース {{letter}}",
       "subPathOutsideVolume": "サブパスは選択したボリューム内に設定してください。",
       "volumeNotMounted": "ボリュームがマウントされていません",
       "smbAutoMountEnabled": "この SMB 共有を自動マウント", "smbUsernamePlaceholder": "SMB ユーザー名", "smbPasswordPlaceholder": "SMB パスワード",
@@ -111,11 +116,12 @@
       "uuidCopied": "UUIDをクリップボードにコピーしました",
       "errors": {
         "sourceEqualsTarget": "ソースとターゲットのパスは重複できません。",
+        "sourceSourceOverlap": "1つのタスクのソース同士は重複できません。",
         "targetIsSubdirOfSource": "ターゲットをソース配下に設定できません。",
         "duplicateTarget": "ターゲットが他のタスクのターゲットと競合しています。",
         "targetSubdirConflict": "ターゲットを他タスクのターゲットの親/子に設定できません。", "watchCycle": "監視タスクは循環できません。", "invalidInput": "タスクの入力が無効です。"
       },
-      "validationModal": { "title": "同期タスクの検証", "affectedTasks": "影響するタスク", "source": "ソース", "target": "ターゲット", "close": "閉じる", "ruleDescriptions": { "sourceTargetOverlap": "ソースとターゲットは重複できません。", "duplicateTarget": "各タスクには固有のターゲットが必要です。", "targetSubdirConflict": "タスクのターゲット同士を内包できません。", "watchCycle": "監視タスクは循環できません。", "invalidInput": "無効な入力を修正してください。" } },
+      "validationModal": { "title": "同期タスクの検証", "affectedTasks": "影響するタスク", "source": "ソース", "target": "ターゲット", "close": "閉じる", "ruleDescriptions": { "sourceTargetOverlap": "ソースとターゲットは重複できません。", "sourceSourceOverlap": "1つのタスクのソース同士が同じパスや親子関係のパスだと、ファイルが二重にコピーされるため許可されません。", "duplicateTarget": "各タスクには固有のターゲットが必要です。", "targetSubdirConflict": "タスクのターゲット同士を内包できません。", "watchCycle": "監視タスクは循環できません。", "invalidInput": "無効な入力を修正してください。" } },
       "warnings": {
         "targetInWatchedSource": "循環しない watch チェーンは許可されますが、重複する書き込みが正常完了するまで downstream watch sync は待機します。"
       },
@@ -277,6 +283,7 @@
       "search": "パスを検索...",
       "scanning": "スキャン中...",
       "noOrphans": "孤立ファイルは見つかりませんでした。",
+      "sourceNotConnected": "孤立ファイルを探すには、このタスクのすべてのソースカードを接続してください。未接続: {{source}}",
       "foundCount": "{{count}} 件検出",
       "selectVisible": "表示項目を選択",
       "deselectAll": "選択解除",

@@ -101,7 +101,12 @@
       "savedUuidSourceLabel": "已保存的 UUID 來源（未掛載）",
       "savedUuidSourceHint": "此任務會保留已保存的 UUID 來源。若要瀏覽其中內容，請重新掛載該媒體或選擇其他磁碟區。",
       "subPath": "子路徑",
-      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathPlaceholder": "留空則同步整個磁碟區根目錄（例如 /DCIM）",
+      "extraSources": "附加來源",
+      "extraSourcesHint": "將多張記憶卡匯集到同一目標。內容相同的檔案只複製一次；同名但內容不同的檔案會加上來源順序字母（_b、_c …）。未連接的來源會被略過。",
+      "addExtraSource": "新增來源",
+      "removeExtraSource": "移除來源",
+      "extraSourceLabel": "來源 {{letter}}",
       "subPathOutsideVolume": "子路徑必須位於所選磁碟區內。",
       "volumeNotMounted": "磁碟區未掛載",
       "smbAutoMountEnabled": "自動掛載此 SMB 共用", "smbUsernamePlaceholder": "SMB 使用者名稱", "smbPasswordPlaceholder": "SMB 密碼",
@@ -111,11 +116,12 @@
       "uuidCopied": "UUID 已複製到剪貼簿",
       "errors": {
         "sourceEqualsTarget": "來源路徑與目標路徑不能重疊。",
+        "sourceSourceOverlap": "同一任務的來源路徑不能重疊。",
         "targetIsSubdirOfSource": "目標不能位於來源目錄內部。",
         "duplicateTarget": "目標與其他任務目標路徑衝突。",
         "targetSubdirConflict": "目標不能成為其他任務目標的父/子路徑。", "watchCycle": "監看任務不能形成循環。", "invalidInput": "任務包含無效輸入。"
       },
-      "validationModal": { "title": "同步任務驗證", "affectedTasks": "受影響的任務", "source": "來源", "target": "目標", "close": "關閉", "ruleDescriptions": { "sourceTargetOverlap": "來源與目標路徑不能重疊。", "duplicateTarget": "每個任務必須使用唯一目標。", "targetSubdirConflict": "任務目標不能互相包含。", "watchCycle": "監看任務不能形成循環。", "invalidInput": "請修正無效輸入。" } },
+      "validationModal": { "title": "同步任務驗證", "affectedTasks": "受影響的任務", "source": "來源", "target": "目標", "close": "關閉", "ruleDescriptions": { "sourceTargetOverlap": "來源與目標路徑不能重疊。", "sourceSourceOverlap": "同一任務的來源路徑不能相同或互為父子路徑，否則檔案會被複製兩次。", "duplicateTarget": "每個任務必須使用唯一目標。", "targetSubdirConflict": "任務目標不能互相包含。", "watchCycle": "監看任務不能形成循環。", "invalidInput": "請修正無效輸入。" } },
       "warnings": {
         "targetInWatchedSource": "允許無循環的 watch 鏈結，但 downstream watch sync 會等待重疊寫入成功完成後再開始。"
       },
@@ -277,6 +283,7 @@
       "search": "搜尋路徑...",
       "scanning": "掃描中...",
       "noOrphans": "未發現孤立檔案。",
+      "sourceNotConnected": "要尋找孤立檔案，請連接此任務的所有來源記憶卡。未連接：{{source}}",
       "foundCount": "檢測到 {{count}} 項",
       "selectVisible": "選擇可見項",
       "deselectAll": "清除選擇",

@@ -101,7 +101,12 @@
       "savedUuidSourceLabel": "Origen UUID guardado (sin montar)",
       "savedUuidSourceHint": "Esta tarea conserva su origen UUID guardado. Vuelva a montar el medio para explorarlo o elija otro volumen.",
       "subPath": "Subruta",
-      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathPlaceholder": "Déjalo vacío para sincronizar toda la raíz del volumen (p. ej., /DCIM)",
+      "extraSources": "Orígenes adicionales",
+      "extraSourcesHint": "Reúne varias tarjetas de memoria en un mismo destino. Los archivos idénticos se copian una sola vez; los que tienen el mismo nombre y distinto contenido reciben la letra del origen (_b, _c …). Los orígenes no conectados se omiten.",
+      "addExtraSource": "Añadir origen",
+      "removeExtraSource": "Quitar origen",
+      "extraSourceLabel": "Origen {{letter}}",
       "subPathOutsideVolume": "La subruta debe permanecer dentro del volumen seleccionado.",
       "volumeNotMounted": "Volumen no montado",
       "smbAutoMountEnabled": "Montar automáticamente este recurso SMB",
@@ -112,11 +117,12 @@
       "uuidCopied": "UUID copiado al portapapeles",
       "errors": {
         "sourceEqualsTarget": "La ruta de origen y destino no pueden superponerse.",
+        "sourceSourceOverlap": "Los orígenes de una tarea no pueden superponerse.",
         "targetIsSubdirOfSource": "El destino no puede estar dentro del origen.",
         "duplicateTarget": "El destino entra en conflicto con otro destino de tarea.",
         "targetSubdirConflict": "El destino no puede ser padre/hijo de otro destino de tarea.", "watchCycle": "Las tareas vigiladas no pueden formar un ciclo.", "invalidInput": "La tarea contiene datos no válidos."
       },
-      "validationModal": { "title": "Validación de tarea", "affectedTasks": "Tareas afectadas", "source": "Origen", "target": "Destino", "close": "Cerrar", "ruleDescriptions": { "sourceTargetOverlap": "Origen y destino no pueden superponerse.", "duplicateTarget": "Cada tarea debe usar un destino único.", "targetSubdirConflict": "Los destinos no pueden contenerse entre sí.", "watchCycle": "Las tareas vigiladas no pueden formar un ciclo.", "invalidInput": "Corrija los datos no válidos." } },
+      "validationModal": { "title": "Validación de tarea", "affectedTasks": "Tareas afectadas", "source": "Origen", "target": "Destino", "close": "Cerrar", "ruleDescriptions": { "sourceTargetOverlap": "Origen y destino no pueden superponerse.", "sourceSourceOverlap": "Los orígenes de una tarea no pueden ser la misma ruta ni rutas padre/hija; de lo contrario, los archivos se copiarían dos veces.", "duplicateTarget": "Cada tarea debe usar un destino único.", "targetSubdirConflict": "Los destinos no pueden contenerse entre sí.", "watchCycle": "Las tareas vigiladas no pueden formar un ciclo.", "invalidInput": "Corrija los datos no válidos." } },
       "warnings": {
         "targetInWatchedSource": "Se permiten las cadenas watch acíclicas, pero el downstream watch sync espera a que las escrituras superpuestas terminen correctamente."
       },
@@ -278,6 +284,7 @@
       "search": "Buscar ruta...",
       "scanning": "Escaneando...",
       "noOrphans": "No se encontraron archivos huérfanos.",
+      "sourceNotConnected": "Conecta todas las tarjetas de origen de esta tarea para buscar archivos huérfanos. Sin conectar: {{source}}",
       "foundCount": "{{count}} elementos detectados",
       "selectVisible": "Seleccionar visibles",
       "deselectAll": "Quitar selección",

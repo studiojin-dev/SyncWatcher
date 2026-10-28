@@ -1,5 +1,22 @@
 [
   {
+    "id": "ADR-20261028-0039-MSR",
+    "title": "Multi-source sync task into one target",
+    "tags": [
+      "sync-task",
+      "sync-engine",
+      "camera",
+      "config-store",
+      "safety",
+      "watch-mode",
+      "macos"
+    ],
+    "status": "Accepted",
+    "date": "2026-10-28",
+    "tldr": "Let one sync task carry any number of additional sources (e.g. several memory cards, or both slots of a dual-slot camera) that sync into the task's single target in one run, instead of relaxing the cross-task \"targets must not overlap\" rule. Identical-content collisions (xxHash) are copied once; differing-content collisions get a per-source letter suffix (`_b`, `_c`, …); unavailable sources are skipped; orphan scan is refused unless every source is available.",
+    "path": "docs/adr/ADR-20261028-0039-MSR-multi-source-sync-task-into-one-target.md"
+  },
+  {
     "id": "ADR-20261022-0038-UPC",
     "title": "Beta update channel with pre-release manifest resolution",
     "tags": [

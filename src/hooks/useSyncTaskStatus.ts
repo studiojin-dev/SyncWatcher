@@ -15,6 +15,7 @@ import type {
 import {
     isTerminalDryRunSessionStatus,
     isTerminalSyncSessionStatus,
+    resultTreePath,
 } from '../types/syncEngine';
 
 export interface TaskStatus {
@@ -118,13 +119,15 @@ function mergeSyncEntries(
         return entries;
     }
 
-    const indexByPath = new Map(entries.map((entry, index) => [entry.path, index]));
+    // 여러 소스가 같은 상대 경로를 가질 수 있으므로 소스 루트까지 포함해 구분한다.
+    const entryKey = (entry: SyncFileEntry) => resultTreePath(entry.path, entry.source_root);
+    const indexByPath = new Map(entries.map((entry, index) => [entryKey(entry), index]));
     const merged = [...entries];
 
     for (const entry of nextEntries) {
-        const existingIndex = indexByPath.get(entry.path);
+        const existingIndex = indexByPath.get(entryKey(entry));
         if (existingIndex === undefined) {
-            indexByPath.set(entry.path, merged.length);
+            indexByPath.set(entryKey(entry), merged.length);
             merged.push(entry);
             continue;
         }

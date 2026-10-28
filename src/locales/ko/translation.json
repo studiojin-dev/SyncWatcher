@@ -101,7 +101,12 @@
       "savedUuidSourceLabel": "저장된 UUID 소스(마운트되지 않음)",
       "savedUuidSourceHint": "이 작업은 저장된 UUID 소스를 유지합니다. 볼륨 내부를 탐색하려면 미디어를 다시 마운트하거나 다른 볼륨을 선택하세요.",
       "subPath": "하위 경로",
-      "subPathPlaceholder": "/DCIM/100MSDCF",
+      "subPathPlaceholder": "비워 두면 볼륨 루트 전체를 동기화 (예: /DCIM)",
+      "extraSources": "추가 원본",
+      "extraSourcesHint": "여러 메모리 카드를 한 대상에 모읍니다. 내용이 같은 파일은 한 번만 복사하고, 이름은 같은데 내용이 다르면 원본 순서 글자(_b, _c …)를 붙입니다. 연결되지 않은 원본은 건너뜁니다.",
+      "addExtraSource": "원본 추가",
+      "removeExtraSource": "원본 제거",
+      "extraSourceLabel": "원본 {{letter}}",
       "subPathOutsideVolume": "하위 경로는 선택한 볼륨 안에 있어야 합니다.",
       "volumeNotMounted": "볼륨이 마운트되지 않음",
       "smbAutoMountEnabled": "이 SMB 공유를 자동으로 마운트",
@@ -114,6 +119,7 @@
       "uuidCopied": "UUID가 클립보드에 복사되었습니다",
       "errors": {
         "sourceEqualsTarget": "원본과 대상 경로는 겹칠 수 없습니다.",
+        "sourceSourceOverlap": "한 작업의 원본끼리 겹칠 수 없습니다.",
         "targetIsSubdirOfSource": "대상은 원본 경로 내부에 둘 수 없습니다.",
         "duplicateTarget": "다른 작업과 대상 경로가 충돌합니다.",
         "targetSubdirConflict": "대상은 다른 작업 대상의 상위/하위 경로가 될 수 없습니다.",
@@ -122,7 +128,7 @@
       },
       "validationModal": {
         "title": "동기화 작업 검증", "affectedTasks": "영향받는 작업", "source": "원본", "target": "대상", "close": "닫기",
-        "ruleDescriptions": { "sourceTargetOverlap": "원본과 대상 경로는 겹칠 수 없습니다.", "duplicateTarget": "각 작업은 고유한 대상을 사용해야 합니다.", "targetSubdirConflict": "작업 대상끼리 상위·하위 경로가 될 수 없습니다.", "watchCycle": "감시 작업은 순환 구조를 만들 수 없습니다.", "invalidInput": "올바르지 않은 작업 입력값을 수정하세요." }
+        "ruleDescriptions": { "sourceTargetOverlap": "원본과 대상 경로는 겹칠 수 없습니다.", "sourceSourceOverlap": "한 작업의 원본끼리 같은 경로이거나 상위·하위 경로이면 파일이 두 번 복사되므로 허용되지 않습니다.", "duplicateTarget": "각 작업은 고유한 대상을 사용해야 합니다.", "targetSubdirConflict": "작업 대상끼리 상위·하위 경로가 될 수 없습니다.", "watchCycle": "감시 작업은 순환 구조를 만들 수 없습니다.", "invalidInput": "올바르지 않은 작업 입력값을 수정하세요." }
       },
       "warnings": {
         "targetInWatchedSource": "순환이 없는 watch chain은 허용되지만, 겹치는 쓰기 작업이 성공적으로 끝난 뒤에만 downstream watch sync가 시작됩니다."
@@ -285,6 +291,7 @@
       "search": "경로 검색...",
       "scanning": "검사 중...",
       "noOrphans": "삭제 후보가 없습니다.",
+      "sourceNotConnected": "고아 파일을 찾으려면 이 작업의 모든 원본 카드를 연결하세요. 연결되지 않음: {{source}}",
       "foundCount": "{{count}}개 항목 발견",
       "selectVisible": "보이는 항목 선택",
       "deselectAll": "전체 해제",
