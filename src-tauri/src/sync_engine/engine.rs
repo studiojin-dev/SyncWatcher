@@ -2144,6 +2144,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_exclusion_appledouble_pattern_skips_nested_sidecars() -> Result<()> {
+        let source_dir = TempDir::new()?;
+        let target_dir = TempDir::new()?;
+
+        let nested = source_dir.path().join("DCIM/100_FUJI");
+        fs::create_dir_all(&nested).await?;
+        fs::write(nested.join("DSCF0697.HIF"), b"image").await?;
+        fs::write(nested.join("._DSCF0697.HIF"), b"appledouble").await?;
+        fs::write(nested.join("clip._v2.mp4"), b"video").await?;
+
+        let engine = SyncEngine::new(
+            source_dir.path().to_path_buf(),
+            target_dir.path().to_path_buf(),
+        );
+
+        let mut options = SyncOptions::default();
+        options.exclude_patterns = vec!["._*".to_string()];
+
+        let result = engine.sync_files(&options, |_| {}, |_| {}).await?;
+        assert_eq!(result.files_copied, 2);
+
+        let target_nested = target_dir.path().join("DCIM/100_FUJI");
+        assert!(target_nested.join("DSCF0697.HIF").exists());
+        assert!(target_nested.join("clip._v2.mp4").exists());
+        assert!(!target_nested.join("._DSCF0697.HIF").exists());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_root_metadata_dirs_are_always_excluded() -> Result<()> {
         let source_dir = TempDir::new()?;
         let target_dir = TempDir::new()?;

@@ -1383,6 +1383,7 @@ fn default_system_exclusion_set() -> ExclusionSetRecord {
         name: "System Junk".to_string(),
         patterns: vec![
             ".DS_Store",
+            "._*",
             "Thumbs.db",
             ".Trash",
             "Desktop.ini",
@@ -2056,6 +2057,7 @@ mod tests {
         assert_eq!(defaults[0].id, SYSTEM_DEFAULTS_SET_ID);
         assert_eq!(defaults[1].id, GIT_SET_ID);
         assert_eq!(defaults[2].id, PROGRAM_SET_ID);
+        assert!(defaults[0].patterns.iter().any(|pattern| pattern == "._*"));
         assert!(defaults[2]
             .patterns
             .iter()

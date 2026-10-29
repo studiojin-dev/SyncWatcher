@@ -28,6 +28,7 @@ const SYSTEM_DEFAULT_SET: ExclusionSet = {
     name: 'System Junk',
     patterns: [
         '.DS_Store',
+        '._*',
         'Thumbs.db',
         '.Trash',
         'Desktop.ini',
