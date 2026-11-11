@@ -7,7 +7,7 @@ import {
   type SetStateAction,
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../../utils/tauriEvents';
 import { open } from '@tauri-apps/plugin-dialog';
 import { formatBytes, type DataUnitSystem } from '../../utils/formatBytes';
 import { captureNetworkMount, capturePathAccess } from '../../utils/pathAccess';

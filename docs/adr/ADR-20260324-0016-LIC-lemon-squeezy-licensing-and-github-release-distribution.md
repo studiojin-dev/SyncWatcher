@@ -32,7 +32,8 @@ TL;DR: Use Lemon Squeezy for optional supporter purchases and provider-key lifec
    - optional `SYNCWATCHER_LEMON_SQUEEZY_VARIANT_ID`
 5. Add a local "remove license" flow that deactivates the current Lemon Squeezy instance and clears cached local state.
 6. Keep the Lemon Squeezy checkout URL configurable from frontend build environment via `VITE_LEMON_SQUEEZY_CHECKOUT_URL`.
-7. Require release builds to provide the Lemon Squeezy store/product identifiers so shipped binaries cannot silently lose license verification.
+7. Resolve the GitHub supporter license cache under the same app-support root as configuration. When `SYNCWATCHER_APP_SUPPORT_DIR` is set for an isolated run, license reads, writes, and removal must stay in that root and must not fall back to an installed app's cache. Without the override, preserve the existing Tauri app-data location and `license_state.json` format. Missing provider configuration remains an error when a stored key actually needs provider validation.
+8. Require release builds to provide the Lemon Squeezy store/product identifiers so shipped binaries cannot silently lose license verification.
 
 ## Consequences
 

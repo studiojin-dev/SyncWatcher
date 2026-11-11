@@ -795,7 +795,7 @@ pub(crate) fn normalize_network_mount_relative_subpath(
         .to_string())
 }
 
-pub fn app_support_dir_for_app(app: &tauri::AppHandle) -> Result<PathBuf, ConfigStoreError> {
+pub fn app_support_dir_for_app<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, ConfigStoreError> {
     if let Some(override_dir) = override_app_support_dir() {
         return Ok(override_dir);
     }

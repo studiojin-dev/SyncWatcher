@@ -26,7 +26,15 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 }));
 
 // Cleanup after each test
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Let asynchronous native listener disposal finish before the next test
+  // replaces its event handlers and clears the mocks.
+  await Promise.resolve();
+  if (vi.isFakeTimers()) {
+    await vi.advanceTimersByTimeAsync(0);
+  } else {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
   vi.clearAllMocks();
 });

@@ -81,7 +81,7 @@ node scripts/live-mcp-smoke.mjs --cleanup-artifacts
 The script:
 
 - builds `syncwatcher`
-- creates an isolated app-support directory under `/tmp`
+- creates an isolated app-support directory under `/tmp`, including the GitHub supporter license cache; it does not reuse the installed app's `license_state.json`
 - writes an isolated `settings.yaml`
 - launches `pnpm tauri dev`
 - waits for the app to generate an MCP auth token

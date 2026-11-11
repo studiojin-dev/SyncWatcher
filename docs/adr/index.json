@@ -587,7 +587,7 @@
     ],
     "status": "Accepted",
     "date": "2026-02-19",
-    "tldr": "When target files are newer than source, skip auto-copy and defer handling to an explicit review session in a separate conflict-review window.",
+    "tldr": "When target files are newer than source, skip auto-copy and require explicit review in a dedicated window; background detections automatically bring that window forward.",
     "path": "docs/adr/ADR-20260219-0005-target-newer-conflict-review-window.md"
   },
   {

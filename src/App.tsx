@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { deferUnlisten, listen } from './utils/tauriEvents';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -711,7 +711,6 @@ function AppContent() {
   }, [requestCloseIntent]);
 
   useEffect(() => {
-    let isActive = true;
     const unlistenClosePromise = getCurrentWebviewWindow().onCloseRequested(async (event) => {
       const isLikelyCmdQClose = Date.now() - recentCmdQAtRef.current <= 1200;
       if (!isLikelyCmdQClose) {
@@ -721,28 +720,26 @@ function AppContent() {
       event.preventDefault();
       recentCmdQAtRef.current = 0;
       await requestCloseIntent('cmd-quit');
+    }).then(deferUnlisten).catch((err) => {
+      console.warn('[App] Failed to register native close handler', err);
+      return () => {};
     });
-
-    void unlistenClosePromise
-      .then((unlisten) => {
-        if (!isActive) {
-          unlisten();
-          return;
-        }
-      });
 
     const unlistenPromise = listen('tray-quit-requested', async () => {
       await requestCloseIntent('tray-quit');
     });
 
     return () => {
-      isActive = false;
       void unlistenPromise
         .then((unlisten) => unlisten())
         .catch((err) => {
           console.warn('[App] Failed to unlisten tray-quit-requested', err);
       });
-      void unlistenClosePromise.then((unlisten) => unlisten());
+      void unlistenClosePromise
+        .then((unlisten) => unlisten())
+        .catch((err) => {
+          console.warn('[App] Failed to unlisten native close handler', err);
+        });
     };
   }, [requestCloseIntent]);
 

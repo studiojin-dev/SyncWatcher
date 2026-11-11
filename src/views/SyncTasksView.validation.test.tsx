@@ -621,6 +621,24 @@ describe('SyncTasksView validation and orphan scan flows', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('collapses saved paths, keeps their inputs mounted, and reveals invalid fields', () => {
+    renderWithMantine(<SyncTasksView />);
+    fireEvent.click(screen.getByText('EDIT'));
+    const dialog = screen.getByRole('dialog');
+    const sections = dialog.querySelectorAll('details');
+    expect(sections).toHaveLength(2);
+    expect(sections[0].open).toBe(false);
+    expect(sections[1].open).toBe(false);
+    expect(sections[0].querySelector('summary')).toHaveTextContent('/DCIM');
+    expect(sections[1].querySelector('summary')).toHaveTextContent('/tmp/target');
+
+    const target = screen.getByPlaceholderText('/path/to/target');
+    fireEvent.invalid(target);
+    expect(sections[1].open).toBe(true);
+    expect(sections[0].open).toBe(false);
+    expect(dialog).toContainElement(screen.getByText('syncTasks.save'));
+  });
+
   it('allows saving an unmounted uuid task after changing only the name', async () => {
     renderWithMantine(<SyncTasksView />);
 

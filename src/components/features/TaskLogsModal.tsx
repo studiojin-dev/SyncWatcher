@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../../utils/tauriEvents';
 import { useTranslation } from 'react-i18next';
 import { IconRefresh, IconArrowDown, IconArrowLeft } from '@tabler/icons-react';
 import { CardAnimation } from '../ui/Animations';

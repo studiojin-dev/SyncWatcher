@@ -23,7 +23,8 @@ TL;DR: Keep OS-integrated selection and handoff surfaces native, but move confir
 3. For new secondary windows:
    - Do not use native `ask()` / `message()` by default.
    - Prefer inline renderer-owned dialog UI inside that window.
-4. Capability review remains required for new window labels and new native plugin usage.
+4. Event subscription cleanup must be idempotent and yield one event-loop task before unregistering a resolved subscription. Tauri dispatches listener installation through a separate webview evaluation; immediate React effect cleanup can otherwise run before the JavaScript listener entry exists. Use the shared frontend event adapter without changing Tauri internals or swallowing cleanup failures (2026-11-11).
+5. Capability review remains required for new window labels and new native plugin usage.
 
 ## Consequences
 

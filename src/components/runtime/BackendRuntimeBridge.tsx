@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../../utils/tauriEvents';
 import { useTranslation } from 'react-i18next';
 import { useSyncTasksContext } from '../../context/SyncTasksContext';
 import { useExclusionSetsContext } from '../../context/ExclusionSetsContext';

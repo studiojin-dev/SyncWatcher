@@ -5757,6 +5757,16 @@ async fn create_conflict_review_session<R: tauri::Runtime>(
             },
         );
     }
+    if origin != SyncOrigin::Manual {
+        if let Err(error) = open_conflict_review_window_internal(&session_id, app, state).await {
+            state.log_manager.log_with_category(
+                "warning",
+                &format!("Failed to present conflict review window: {error}"),
+                Some(task_id.to_string()),
+                LogCategory::Other,
+            );
+        }
+    }
     Some(session_id)
 }
 
@@ -8089,9 +8099,17 @@ async fn open_conflict_review_window(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    open_conflict_review_window_internal(&session_id, &app, state.inner()).await
+}
+
+async fn open_conflict_review_window_internal<R: tauri::Runtime>(
+    session_id: &str,
+    app: &tauri::AppHandle<R>,
+    state: &AppState,
+) -> Result<(), String> {
     {
         let sessions = state.conflict_review_sessions.read().await;
-        if !sessions.contains_key(&session_id) {
+        if !sessions.contains_key(session_id) {
             return Err(format!("Conflict session not found: {session_id}"));
         }
     }
@@ -8100,26 +8118,23 @@ async fn open_conflict_review_window(
         let _ = window.emit(
             "conflict-review-open-session",
             ConflictReviewOpenSessionEvent {
-                session_id: session_id.clone(),
+                session_id: session_id.to_string(),
             },
         );
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        return Ok(());
+        return bring_dialog_to_front(app, &window);
     }
 
     let url =
         WebviewUrl::App(format!("index.html?view=conflict-review&sessionId={session_id}").into());
-    let window = WebviewWindowBuilder::new(&app, "conflict-review", url)
+    let window = WebviewWindowBuilder::new(app, "conflict-review", url)
         .title("SyncWatcher - Conflict Review")
         .inner_size(1320.0, 900.0)
         .resizable(true)
+        .visible(false)
+        .focused(false)
         .build()
         .map_err(|e| format!("Failed to open conflict review window: {e}"))?;
-    let _ = window.show();
-    let _ = window.set_focus();
-    Ok(())
+    bring_dialog_to_front(app, &window)
 }
 
 #[tauri::command]
@@ -10182,6 +10197,13 @@ async fn request_dialog_attention(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<(), String> {
+    bring_dialog_to_front(&app, &window)
+}
+
+fn bring_dialog_to_front<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
     let is_visible = window.is_visible().unwrap_or(false);
     let is_minimized = window.is_minimized().unwrap_or(false);
     let is_focused = window.is_focused().unwrap_or(false);
@@ -10189,24 +10211,22 @@ async fn request_dialog_attention(
         return Ok(());
     }
 
-    if window.label() == "main" {
-        restore_main_window(&app);
-    } else {
-        #[cfg(target_os = "macos")]
-        {
-            if let Err(err) = app.set_activation_policy(tauri::ActivationPolicy::Regular) {
-                eprintln!("[App] Failed to set activation policy: {}", err);
-            }
-        }
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+    // Accessory 상태에서는 Dock 아이콘이 없으므로 먼저 일반 앱으로 복원한다.
+    #[cfg(target_os = "macos")]
+    {
+        app.set_activation_policy(tauri::ActivationPolicy::Regular)
+            .map_err(|e| e.to_string())?;
+        app.show().map_err(|e| e.to_string())?;
     }
 
-    // 앱 활성화가 거부되는 경우에도 사용자가 알아챌 수 있도록, 활성화될 때까지 Dock 바운스.
-    window
+    // macOS의 show()도 창을 활성화할 수 있으므로 표시/포커스보다 먼저 요청한다.
+    let attention_result = window
         .request_user_attention(Some(tauri::UserAttentionType::Critical))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    window.show().map_err(|e| e.to_string())?;
+    window.unminimize().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    attention_result
 }
 
 #[tauri::command]
