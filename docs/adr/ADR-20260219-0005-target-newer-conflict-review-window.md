@@ -2,13 +2,13 @@
 Status: Accepted
 Date: 2026-02-19
 Tags: sync-task, safety, conflict-review, watch-mode, ux, macos, tauri
-TL;DR: When target files are newer than source, skip auto-copy and defer handling to an explicit review session in a separate conflict-review window.
+TL;DR: When target files are newer than source, skip auto-copy and require explicit review in a dedicated window; background detections automatically bring that window forward.
 
 ## Context
 
 - Existing sync flow could overwrite target files even when target had newer edits.
 - Users need side-by-side verification for text/media before deciding overwrite behavior.
-- Watch-mode conflicts can happen in background and should not force disruptive popups.
+- Watch and scheduled conflicts can happen in the background; users must see that a decision is required before sync can safely finish.
 - Auto unmount after sync can hide/remount-sensitive state before conflict resolution.
 
 ## Decision
@@ -31,6 +31,10 @@ TL;DR: When target files are newer than source, skip auto-copy and defer handlin
    - `conflict-review-queue-changed`
    - `conflict-review-session-updated`
 5. Use dedicated Tauri window label `conflict-review` (large, resizable).
+   - Watch and scheduled sync automatically open or reuse this window when conflicts are detected, including when detections are merged into an existing session.
+   - Restore the application from hidden / accessory mode, request critical Dock attention before showing or focusing the window, and restore it from minimization. An already focused window does not request attention again.
+   - Window presentation errors are logged without discarding the conflict session or changing sync results. The queue remains available for manual review.
+   - Manual sync retains its existing prompt to open review.
    - Top: source/target preview (text diff, image, video, document fallback via OS opener).
    - Bottom: pending list and resolution actions.
 6. Support three explicit actions for selected items:
@@ -58,7 +62,7 @@ TL;DR: When target files are newer than source, skip auto-copy and defer handlin
 
 - Prevents accidental overwrite of newer target files and makes data-preservation path explicit.
 - Introduces additional review step and delayed completion for conflict cases.
-- Keeps watch-mode non-blocking while still surfacing conflicts in queue + notification path.
+- Keeps watch-mode sync non-blocking while automatically surfacing required review in the foreground. This can interrupt another app, accepted to make pending decisions visible (policy updated 2026-11-11).
 - Memory-only sessions are simpler but unresolved sessions do not survive restart.
 - Prevents recurring or repeated sync runs from showing multiple review sessions for the same unresolved task conflict.
 - A repeated conflict for the same target file refreshes the pending review item, so the user reviews the latest source/target state rather than stale duplicates.

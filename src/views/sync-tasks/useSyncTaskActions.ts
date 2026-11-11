@@ -1,5 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../../utils/tauriEvents';
 import {
   useCallback,
   useEffect,

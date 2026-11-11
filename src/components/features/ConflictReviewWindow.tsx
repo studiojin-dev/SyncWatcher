@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../../utils/tauriEvents';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import {

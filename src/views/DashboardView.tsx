@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../utils/tauriEvents';
 import { IconRefresh } from '@tabler/icons-react';
 import VolumeCard from '../components/VolumeCard';
 import { CardAnimation, FadeIn } from '../components/ui/Animations';

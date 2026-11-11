@@ -5,7 +5,6 @@
 //! 라이선스 상태를 영구 저장합니다.
 
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 
 /// Grace period: 네트워크 오류 시 마지막 검증 후 7일간 유효
 const GRACE_PERIOD_DAYS: i64 = 7;
@@ -108,8 +107,9 @@ struct LsDeactivateResponse {
 ///
 /// # Returns
 /// 라이선스 상태 파일의 절대 경로
-fn license_state_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+fn license_state_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<std::path::PathBuf, String> {
+    let app_data = crate::config_store::app_support_dir_for_app(app)
+        .map_err(|error| error.message().to_string())?;
     Ok(app_data.join(LICENSE_STATE_FILE))
 }
 
@@ -558,6 +558,41 @@ fn check_grace_period(state: &LicenseState) -> Result<serde_json::Value, String>
 #[cfg(test)]
 mod tests {
     use super::{mask_license_key, LemonSqueezyConfig};
+
+    #[test]
+    fn license_state_path_honors_isolated_app_support_directory() {
+        const CHILD_MARKER: &str = "SYNCWATCHER_LICENSE_PATH_TEST_CHILD";
+        if std::env::var_os(CHILD_MARKER).is_some() {
+            use tauri::Manager;
+            let app = tauri::test::mock_app();
+            let expected_root = match std::env::var_os("SYNCWATCHER_APP_SUPPORT_DIR") {
+                Some(root) => std::path::PathBuf::from(root),
+                None => app.path().app_data_dir().unwrap(),
+            };
+            assert_eq!(
+                super::license_state_path(app.handle()).unwrap(),
+                expected_root.join("license_state.json")
+            );
+            return;
+        }
+        // Process-local environment avoids changing paths used by concurrently running tests.
+        let root = tempfile::tempdir().unwrap();
+        for isolated in [true, false] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args([
+                "--exact",
+                "license_validation::tests::license_state_path_honors_isolated_app_support_directory",
+                "--nocapture",
+            ]).env(CHILD_MARKER, "1");
+            if isolated {
+                command.env("SYNCWATCHER_APP_SUPPORT_DIR", root.path());
+            } else {
+                command.env_remove("SYNCWATCHER_APP_SUPPORT_DIR");
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
 
     #[test]
     fn parses_required_and_optional_lemon_config() {

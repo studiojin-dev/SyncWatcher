@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { ReactNode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import type { SyncTask } from './hooks/useSyncTasks';
 import App from './App';
 import type { DistributionInfo } from './context/DistributionContext';
@@ -31,6 +31,7 @@ const eventHandlers = new Map<string, (event?: { payload?: unknown }) => unknown
 const {
   distributionState,
   reloadDistributionMock,
+  onCloseRequestedMock,
   resolveDistributionMock,
   setLastLogMock,
   setQueuedMock,
@@ -51,6 +52,7 @@ const {
     } as DistributionInfo,
   },
   reloadDistributionMock: vi.fn(),
+  onCloseRequestedMock: vi.fn(),
   resolveDistributionMock: vi.fn(async () => distributionState.info),
   setLastLogMock: vi.fn(),
   setQueuedMock: vi.fn(),
@@ -71,7 +73,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
   getCurrentWebviewWindow: () => ({
     label: 'main',
     isVisible: vi.fn().mockResolvedValue(true),
-    onCloseRequested: vi.fn().mockResolvedValue(() => {}),
+    onCloseRequested: onCloseRequestedMock,
   }),
 }));
 
@@ -303,6 +305,8 @@ async function flushAppEffects() {
 describe('App close lifecycle', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    onCloseRequestedMock.mockReset();
+    onCloseRequestedMock.mockResolvedValue(() => {});
     reloadDistributionMock.mockReset();
     resolveDistributionMock.mockReset();
     resolveDistributionMock.mockResolvedValue({
@@ -380,6 +384,53 @@ describe('App close lifecycle', () => {
     });
 
     updateSettingsMock.mockReset();
+  });
+
+  it('unregisters delayed native close listeners exactly once during StrictMode cleanup', async () => {
+    const pending: Array<(unlisten: () => void) => void> = [];
+    onCloseRequestedMock.mockImplementation(() => new Promise<() => void>((resolve) => {
+      pending.push(resolve);
+    }));
+    const view = render(<StrictMode><App /></StrictMode>);
+    await flushAppEffects();
+    expect(pending.length).toBeGreaterThanOrEqual(2);
+    const cleanups = pending.map(() => vi.fn());
+    await act(async () => {
+      pending.forEach((resolve, index) => resolve(cleanups[index]));
+    });
+    view.unmount();
+    await flushAppEffects();
+    await waitFor(() => cleanups.forEach((cleanup) => expect(cleanup).toHaveBeenCalledTimes(1)));
+  });
+
+  it('handles native close listener registration failures before unmount', async () => {
+    const error = new Error('native listener registration failed');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      onCloseRequestedMock.mockRejectedValue(error);
+      const view = render(<App />);
+      await flushAppEffects();
+      expect(warn).toHaveBeenCalledWith('[App] Failed to register native close handler', error);
+      view.unmount();
+      await flushAppEffects();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('handles asynchronous native close listener cleanup failures', async () => {
+    const error = new Error('native listener cleanup failed');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      onCloseRequestedMock.mockResolvedValue(vi.fn().mockRejectedValue(error));
+      const view = render(<App />);
+      await flushAppEffects();
+      view.unmount();
+      await flushAppEffects();
+      await waitFor(() => expect(warn).toHaveBeenCalledWith('[App] Failed to unlisten native close handler', error));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('refreshes supporter status on startup', async () => {

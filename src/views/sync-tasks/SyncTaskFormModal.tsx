@@ -1,7 +1,6 @@
-import { MultiSelect, Select } from '@mantine/core';
+import { FocusTrap, MultiSelect, Select } from '@mantine/core';
 import { IconFolder, IconPlus, IconX } from '@tabler/icons-react';
 import type { FormEventHandler } from 'react';
-import { CardAnimation } from '../../components/ui/Animations';
 import type { SyncTask } from '../../hooks/useSyncTasks';
 import type { TranslateFn } from './helpers';
 import { uuidTypeLabel } from '../syncTaskUuid';
@@ -114,7 +113,7 @@ function ExtraSourceRow({ draft, index, form, savingTask, t }: ExtraSourceRowPro
               })
             }
             disabled={savingTask}
-            className="neo-input font-mono text-sm flex-1"
+            className="neo-input font-mono text-sm min-w-0 flex-1"
             placeholder="/path/to/source"
             aria-label={label}
           />
@@ -152,7 +151,7 @@ function ExtraSourceRow({ draft, index, form, savingTask, t }: ExtraSourceRowPro
                 form.updateExtraSource(draft.key, { sourceSubPath: event.target.value })
               }
               disabled={savingTask}
-              className="neo-input font-mono text-sm flex-1"
+              className="neo-input font-mono text-sm min-w-0 flex-1"
               placeholder={t('syncTasks.subPathPlaceholder', {
                 defaultValue:
                   'Leave empty to sync the whole volume root (e.g. /DCIM)',
@@ -208,18 +207,31 @@ function SyncTaskFormModal({
   const targetNetworkMount = form.targetNetworkMount;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-      <CardAnimation>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-hidden">
+      <FocusTrap active={opened}>
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sync-task-form-title"
           aria-busy={savingTask}
-          className={`neo-box p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] my-auto ${
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && !savingTask && !event.defaultPrevented) {
+              event.stopPropagation();
+              onClose();
+            }
+          }}
+          className={`neo-box flex flex-col max-h-[calc(100dvh-2rem)] min-h-0 p-6 w-full max-w-lg bg-[var(--bg-primary)] border-3 border-[var(--border-main)] shadow-[8px_8px_0_0_var(--shadow-color)] my-auto ${
             savingTask ? 'cursor-progress opacity-85' : ''
           }`}
         >
-          <h3 className="text-xl font-heading font-bold mb-6 border-b-3 border-[var(--border-main)] pb-2 uppercase">
+          <h3 id="sync-task-form-title" className="shrink-0 text-xl font-heading font-bold mb-6 border-b-3 border-[var(--border-main)] pb-2 uppercase">
             {editingTask ? t('syncTasks.editTask') : t('syncTasks.addTask')}
           </h3>
-          <form onSubmit={onSubmit} className="space-y-4">
+          <form onSubmit={onSubmit} className="flex min-h-0 flex-col" onInvalidCapture={(event) => {
+            const details = event.target instanceof HTMLElement ? event.target.closest('details') : null;
+            if (details) details.open = true;
+          }}>
+          <div className="space-y-4 min-h-0 overflow-y-auto overscroll-contain pr-2 pb-2">
           <div>
             <label className="block text-sm font-bold mb-1 uppercase font-mono">
               {t('syncTasks.taskName')}
@@ -233,7 +245,17 @@ function SyncTaskFormModal({
               placeholder="MY_BACKUP_TASK"
             />
           </div>
-          <div className={SECTION_DIVIDER_CLASS}>
+          <details key={`source-${editingTask?.id ?? 'new'}`} open={editingTask ? undefined : true} className={SECTION_DIVIDER_CLASS}>
+            <summary className="cursor-pointer font-bold text-sm font-mono focus-visible:outline-2">
+              {t('syncTasks.source')}
+              <span className="block text-xs font-normal break-all text-[var(--text-secondary)] mt-1">
+                {form.sourceType === 'path' ? form.sourcePath : `${form.selectedUuidOption?.label || form.sourceUuid}${form.sourceSubPath}`}
+                {form.extraSources.map((draft) => (
+                  <span key={draft.key} className="block">{draft.sourceType === 'path' ? draft.sourcePath : `${draft.sourceUuid}${draft.sourceSubPath}`}</span>
+                ))}
+              </span>
+            </summary>
+            <div className="mt-3">
             <label className="block text-sm font-bold mb-1 uppercase font-mono">
               {form.extraSources.length > 0
                 ? t('syncTasks.extraSourceLabel', {
@@ -291,7 +313,7 @@ function SyncTaskFormModal({
                   }}
                   required={form.sourceType === 'path'}
                   disabled={savingTask}
-                  className="neo-input font-mono text-sm flex-1"
+                  className="neo-input font-mono text-sm min-w-0 flex-1"
                   placeholder="/path/to/source"
                 />
                 <button
@@ -411,7 +433,7 @@ function SyncTaskFormModal({
                         form.setSourceSubPath(event.target.value)
                       }
                       disabled={savingTask}
-                      className="neo-input font-mono text-sm flex-1"
+                      className="neo-input font-mono text-sm min-w-0 flex-1"
                       placeholder={t('syncTasks.subPathPlaceholder', {
                         defaultValue:
                           'Leave empty to sync the whole volume root (e.g. /DCIM)',
@@ -460,11 +482,14 @@ function SyncTaskFormModal({
                   'Collect several memory cards into one target. Identical files are copied once; files with the same name but different content get the source letter (_b, _c …). Sources that are not connected are skipped.',
               })}
             </div>
-          </div>
-          <div className={SECTION_DIVIDER_CLASS}>
-            <label className="block text-sm font-bold mb-1 uppercase font-mono">
+            </div>
+          </details>
+          <details key={`target-${editingTask?.id ?? 'new'}`} open={editingTask ? undefined : true} className={SECTION_DIVIDER_CLASS}>
+            <summary className="cursor-pointer font-bold text-sm font-mono focus-visible:outline-2">
               {t('syncTasks.target')}
-            </label>
+              <span className="block text-xs font-normal break-all text-[var(--text-secondary)] mt-1">{form.targetPath}</span>
+            </summary>
+            <div className="mt-3">
             <div className="flex gap-2">
               <input
                 name="target"
@@ -477,7 +502,7 @@ function SyncTaskFormModal({
                 }}
                 required
                 disabled={savingTask}
-                className="neo-input font-mono text-sm flex-1"
+                className="neo-input font-mono text-sm min-w-0 flex-1"
                 placeholder="/path/to/target"
               />
               <button
@@ -527,7 +552,8 @@ function SyncTaskFormModal({
                 />
               </div>
             ) : null}
-          </div>
+            </div>
+          </details>
           <div className={`${SECTION_DIVIDER_CLASS} space-y-3`}>
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <div className="relative">
@@ -701,7 +727,8 @@ function SyncTaskFormModal({
                   })}
             </div>
           </div>
-          <div className="flex gap-3 mt-6 justify-end">
+          </div>
+          <div className="flex shrink-0 gap-3 pt-4 mt-2 border-t-2 border-[var(--border-main)] justify-end">
             <button
               type="button"
               className="px-4 py-2 font-bold uppercase hover:underline"
@@ -724,7 +751,7 @@ function SyncTaskFormModal({
           </div>
           </form>
         </div>
-      </CardAnimation>
+      </FocusTrap>
     </div>
   );
 }

@@ -4361,7 +4361,7 @@ dependencies = [
 
 [[package]]
 name = "syncwatcher"
-version = "2.2.3"
+version = "2.2.4-beta.1"
 dependencies = [
  "anyhow",
  "chrono",

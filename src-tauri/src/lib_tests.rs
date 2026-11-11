@@ -753,6 +753,58 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    async fn test_background_conflicts_present_review_and_reuse_window() {
+        for origin in [SyncOrigin::Watch, SyncOrigin::Scheduled] {
+            let state = build_app_state();
+            let app = tauri::test::mock_app();
+            let app_handle = app.handle();
+            let candidate = build_conflict_candidate(
+                "photo.jpg", "/tmp/source/photo.jpg", "/tmp/target/photo.jpg", 30, 15,
+            );
+            let create = || create_conflict_review_session(
+                "task-attention", "Task Attention", Path::new("/tmp/source"),
+                Path::new("/tmp/target"), std::slice::from_ref(&candidate),
+                origin, &state, app_handle,
+            );
+            let session_id = create().await.expect("session must be retained");
+            let window = app_handle.get_webview_window("conflict-review")
+                .expect("background conflict must open review");
+            assert!(window.is_visible().unwrap());
+            let opened_rx = listen_for_named_event::<serde_json::Value, _>(
+                app_handle, "conflict-review-open-session",
+            );
+            window.hide().unwrap();
+            assert_eq!(create().await.as_deref(), Some(session_id.as_str()));
+            assert!(window.is_visible().unwrap());
+            assert_eq!(opened_rx.recv_timeout(Duration::from_secs(1)).unwrap()["sessionId"], session_id);
+            assert_eq!(app_handle.webview_windows().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_manual_or_empty_conflicts_do_not_auto_open_review() {
+        for origin in [SyncOrigin::Manual, SyncOrigin::Watch, SyncOrigin::Scheduled] {
+            let state = build_app_state();
+            let app = tauri::test::mock_app();
+            assert!(create_conflict_review_session(
+                "task-attention", "Task Attention", Path::new("/tmp/source"),
+                Path::new("/tmp/target"), &[], origin, &state, app.handle(),
+            ).await.is_none());
+            assert!(app.handle().get_webview_window("conflict-review").is_none());
+        }
+        let state = build_app_state();
+        let app = tauri::test::mock_app();
+        let candidate = build_conflict_candidate(
+            "photo.jpg", "/tmp/source/photo.jpg", "/tmp/target/photo.jpg", 30, 15,
+        );
+        assert!(create_conflict_review_session(
+            "task-attention", "Task Attention", Path::new("/tmp/source"),
+            Path::new("/tmp/target"), &[candidate], SyncOrigin::Manual, &state, app.handle(),
+        ).await.is_some());
+        assert!(app.handle().get_webview_window("conflict-review").is_none());
+    }
+
+    #[tokio::test]
     async fn test_create_conflict_review_session_merges_pending_task_session_by_target_path() {
         let state = build_app_state();
         let app = tauri::test::mock_app();

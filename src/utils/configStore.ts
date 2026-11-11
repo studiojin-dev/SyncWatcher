@@ -1,4 +1,5 @@
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from './tauriEvents';
 
 export type ConfigStoreScope = 'settings' | 'syncTasks' | 'exclusionSets' | 'saveRuleTemplates' | 'all';
 

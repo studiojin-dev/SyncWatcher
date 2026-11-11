@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '../../utils/tauriEvents';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSyncTasksContext } from '../../context/SyncTasksContext';
 import { useToast } from '../ui/Toast';
