@@ -549,6 +549,7 @@ export function useSyncTaskActions({
             ? { targetNetworkMount: normalizedTargetNetworkMount }
             : {}),
           checksumMode: formData.get('checksumMode') === 'on',
+          skipPreviouslyCopied: formData.get('skipPreviouslyCopied') === 'on',
           exclusionSets: form.selectedSets,
           saveRuleId: form.saveRuleId || null,
           extraSources,

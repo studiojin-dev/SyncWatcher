@@ -53,6 +53,8 @@ export interface SyncTask {
     saveRuleId?: string | null;
     /** 같은 대상으로 함께 동기화할 추가 소스 (ADR-0039). 연결된 것만 동기화된다. */
     extraSources?: SyncTaskExtraSource[];
+    /** 이미 복사한 사진·RAW·영상은 타깃에서 지워져도 다시 복사하지 않는다 (ADR-0040). */
+    skipPreviouslyCopied?: boolean;
 }
 
 /** 추가 소스 하나. 기본 소스와 같은 필드를 쓰되 SMB 자동 마운트는 없다. */
@@ -127,6 +129,7 @@ function normalizeTask(task: PersistedSyncTask): SyncTask {
         recurringSchedules: normalizeRecurringSchedules(task.recurringSchedules),
         saveRuleId: task.saveRuleId ?? null,
         extraSources: task.extraSources ?? [],
+        skipPreviouslyCopied: task.skipPreviouslyCopied ?? false,
     };
 
     normalizedTask.autoUnmount = shouldEnableAutoUnmount(normalizedTask);

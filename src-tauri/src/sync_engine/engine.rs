@@ -1,9 +1,10 @@
+use crate::copy_history::{self, CopyHistoryLedger};
 use crate::save_rules::{CollisionResolver, SaveRuleMapper, SaveRuleTemplateRecord};
 use crate::sync_engine::types::{
-    ConflictFileSnapshot, DeleteOrphanFailure, DeleteOrphanResult, DryRunPhase, DryRunProgress,
-    DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile, SyncFileEntry,
+    ConflictFileSnapshot, CopyHistoryCandidate, DeleteOrphanFailure, DeleteOrphanResult,
+    DryRunPhase, DryRunProgress, DryRunResult, DryRunSummary, FileDiff, FileDiffKind, FileMetadata, OrphanFile, SyncFileEntry,
     SyncFileStatus, SyncOptions, SyncProgress, SyncProgressPhase, SyncResult,
-    TargetNewerConflictCandidate,
+    SkippedSourceSnapshot, TargetNewerConflictCandidate, MAX_PREVIOUSLY_COPIED_PATHS,
 };
 use anyhow::Context;
 use anyhow::Result;
@@ -19,6 +20,13 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 use walkdir::WalkDir; // Import Context trait
+
+/// 건너뛴 파일이 비교 뒤 바뀌어 실행을 멈출 때의 오류 (ADR-0040).
+pub const SKIPPED_FILE_CHANGED_ERROR: &str =
+    "A file skipped as already copied changed after the compare";
+/// 건너뛰기 판단에 쓴 타깃 폴더가 바뀌어 실행을 멈출 때의 오류 (ADR-0040).
+pub const SKIP_TARGET_CHANGED_ERROR: &str =
+    "Target folder changed after files were skipped as already copied";
 
 pub struct SyncEngine {
     source: PathBuf,
@@ -682,6 +690,232 @@ impl SyncEngine {
         .await?
     }
 
+    /// 타깃과 이미 같은 파일을 기록에 더할지. 이름·크기가 이미 기록돼 있으면 파일을 다시 읽지 않는다.
+    fn should_record_in_sync(history: &CopyHistoryLedger, relative: &Path, size: u64) -> bool {
+        if !copy_history::is_eligible(relative) {
+            return false;
+        }
+        copy_history::file_name_of(relative)
+            .is_some_and(|name| !history.contains_name_size(&name, size))
+    }
+
+    /// 타깃에 없는 파일이 복사 기록에 있는지 (ADR-0040).
+    /// 이름·크기가 맞을 때만 촬영 시각을 읽는다.
+    async fn is_previously_copied(
+        history: Option<&CopyHistoryLedger>,
+        source_path: &Path,
+        target_path: &Path,
+        meta: &FileMetadata,
+    ) -> Result<Option<String>> {
+        let Some(history) = history else {
+            return Ok(None);
+        };
+        if !copy_history::is_eligible(&meta.path) {
+            return Ok(None);
+        }
+        let Some(name) = copy_history::file_name_of(&meta.path) else {
+            return Ok(None);
+        };
+        if !history.contains_name_size(&name, meta.size) {
+            return Ok(None);
+        }
+        // 기록을 읽은 뒤 같은 경로의 타깃 폴더(디스크)가 바뀌었으면 기록을 근거로 건너뛰지 않는다.
+        if !history.target_unchanged() {
+            return Ok(None);
+        }
+        let source_path = source_path.to_path_buf();
+        let target_path = target_path.to_path_buf();
+        let modified = meta.modified;
+        let size = meta.size;
+        // 파일을 읽을 수 없거나, 스캔 뒤 바뀌었거나, 읽기 작업이 실패하면 복사하지 않은 것으로 본다
+        // (의심스러우면 복사한다).
+        let Ok(Some(captured)) = tokio::task::spawn_blocking(move || {
+            // 스캔 목록에 없어도 타깃 파일 시스템에서 그 경로가 실제로 비어 있어야 한다
+            // (대소문자를 구분하지 않는 볼륨에서 이름의 대소문자만 바뀐 파일 등). 있으면 일반 비교로 보낸다.
+            let target_empty = matches!(
+                std::fs::symlink_metadata(&target_path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            );
+            if !target_empty {
+                return None;
+            }
+            let unchanged = std::fs::metadata(&source_path).is_ok_and(|current| {
+                current.len() == size && current.modified().is_ok_and(|time| time == modified)
+            });
+            if !unchanged {
+                return None;
+            }
+            copy_history::capture_stamp(&source_path, modified)
+        })
+        .await
+        else {
+            return Ok(None);
+        };
+        let key = copy_history::CopyHistoryKey {
+            name,
+            size: meta.size,
+            captured,
+        };
+        Ok(history.contains(&key).then_some(key.captured))
+    }
+
+    /// 후보가 아직 기록해도 되는 상태인지: 소스는 비교·복사 때와 같고, 타깃에 같은 크기의 파일이 있다.
+    fn candidate_still_matches(candidate: &CopyHistoryCandidate) -> bool {
+        let source_unchanged = std::fs::metadata(&candidate.source_path).is_ok_and(|meta| {
+            meta.is_file()
+                && meta.len() == candidate.size
+                && meta.modified().is_ok_and(|modified| modified == candidate.modified)
+        });
+        source_unchanged
+            && std::fs::metadata(&candidate.target_path).is_ok_and(|meta| {
+                meta.is_file()
+                    && meta.len() == candidate.size
+                    && candidate.target_modified.is_none_or(|expected| {
+                        meta.modified().is_ok_and(|modified| modified == expected)
+                    })
+            })
+    }
+
+    /// 건너뛴 파일이 비교 때와 같은지: 타깃 경로는 여전히 비어 있고, 소스는 크기·수정 시각과
+    /// 촬영 시각 표지까지 같다. 다르면 건너뛸 근거가 없으므로 실행을 멈춘다.
+    pub(crate) async fn ensure_skipped_sources_unchanged(dry_run: &DryRunResult) -> Result<()> {
+        for skipped in &dry_run.previously_copied_sources {
+            let target_empty = matches!(
+                fs::symlink_metadata(&skipped.target_path).await,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            );
+            let snapshot = skipped.clone();
+            let unchanged = target_empty
+                && tokio::task::spawn_blocking(move || {
+                    let same_meta = std::fs::metadata(&snapshot.source_path).is_ok_and(|meta| {
+                        meta.is_file()
+                            && meta.len() == snapshot.size
+                            && meta.modified().is_ok_and(|modified| modified == snapshot.modified)
+                    });
+                    same_meta
+                        && copy_history::capture_stamp(&snapshot.source_path, snapshot.modified)
+                            .is_some_and(|captured| captured == snapshot.captured)
+                })
+                .await
+                .unwrap_or(false);
+            if !unchanged {
+                anyhow::bail!(
+                    "{SKIPPED_FILE_CHANGED_ERROR}: {}; run the sync again",
+                    skipped.source_path.display()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_skip_target_unchanged(dry_run: &DryRunResult, options: &SyncOptions) -> Result<()> {
+        let changed = dry_run.skipped_previously_copied > 0
+            && options
+                .copy_history
+                .as_deref()
+                .is_some_and(|history| !history.target_unchanged());
+        if changed {
+            anyhow::bail!("{SKIP_TARGET_CHANGED_ERROR}; run the sync again");
+        }
+        Ok(())
+    }
+
+    /// 타깃과 이미 같았던 파일이 정말 소스와 같은 파일인지. 촬영 시각이 있으면 양쪽 값을,
+    /// 없으면(수정 시각 키) 내용 전체를 비교한다. 비교 때 이미 해시가 같았으면 다시 읽지 않는다.
+    /// 블로킹 컨텍스트에서 부른다.
+    fn in_sync_candidate_is_same_file(
+        candidate: &CopyHistoryCandidate,
+        target_stamp: &str,
+        history: &CopyHistoryLedger,
+    ) -> bool {
+        let source_stamp =
+            copy_history::capture_stamp(&candidate.source_path, candidate.modified);
+        if source_stamp.as_deref() != Some(target_stamp) {
+            return false;
+        }
+        if target_stamp.starts_with("exif:") || candidate.content_verified {
+            return true;
+        }
+        Self::files_have_same_bytes(&candidate.source_path, &candidate.target_path, history)
+    }
+
+    /// 두 파일의 내용이 같은지. 기록이 닫히면(실행 종료·취소) 읽기를 멈추고 다르다고 본다.
+    fn files_have_same_bytes(left: &Path, right: &Path, history: &CopyHistoryLedger) -> bool {
+        use std::io::Read;
+        let (Ok(mut left), Ok(mut right)) =
+            (std::fs::File::open(left), std::fs::File::open(right))
+        else {
+            return false;
+        };
+        let mut left_buf = vec![0u8; 1024 * 1024];
+        let mut right_buf = vec![0u8; 1024 * 1024];
+        loop {
+            if history.is_closed() {
+                return false;
+            }
+            let Ok(read) = left.read(&mut left_buf) else {
+                return false;
+            };
+            if read == 0 {
+                // 오른쪽도 끝나야 같다.
+                return matches!(right.read(&mut right_buf[..1]), Ok(0));
+            }
+            if right.read_exact(&mut right_buf[..read]).is_err()
+                || left_buf[..read] != right_buf[..read]
+            {
+                return false;
+            }
+        }
+    }
+
+    /// 복사했거나 이미 같았던 파일을 기록에 더한다. 그사이 소스나 타깃이 바뀐 파일은 기록하지 않는다.
+    /// 기록 작업이 실패해도 동기화는 실패시키지 않는다 (기록되지 않은 파일은 다음에 다시 복사된다).
+    async fn record_copy_history(
+        history: &std::sync::Arc<CopyHistoryLedger>,
+        candidates: Vec<CopyHistoryCandidate>,
+    ) {
+        if candidates.is_empty() {
+            return;
+        }
+        let history = history.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            for candidate in candidates {
+                // 실행이 끝났거나 취소돼 기록을 닫았으면 남은 파일은 읽지 않는다.
+                if history.is_closed() {
+                    break;
+                }
+                if !Self::candidate_still_matches(&candidate) {
+                    continue;
+                }
+                let Some(key) = copy_history::key_for_file(
+                    &candidate.target_path,
+                    &candidate.relative_path,
+                    candidate.size,
+                    candidate.modified,
+                ) else {
+                    continue;
+                };
+                // 이미 같았던 파일은 크기·수정 시각으로만 같다고 판정됐을 수 있다. 소스와 같은
+                // 파일인지 확인한 뒤에만 기록한다.
+                if candidate.target_modified.is_some() {
+                    if !Self::in_sync_candidate_is_same_file(&candidate, &key.captured, &history) {
+                        continue;
+                    }
+                } else {
+                    // 방금 복사한 파일: 복사 뒤 다른 도구가 타깃을 바꿔 놓았을 수 있으므로, 타깃의
+                    // 촬영 시각이 소스와 같을 때만 기록한다 (수정 시각 키는 양쪽이 같은 값을 쓴다).
+                    let source_stamp =
+                        copy_history::capture_stamp(&candidate.source_path, candidate.modified);
+                    if source_stamp.as_deref() != Some(key.captured.as_str()) {
+                        continue;
+                    }
+                }
+                history.insert(key);
+            }
+        })
+        .await;
+    }
+
     async fn compare_dirs_internal<P, D>(
         &self,
         options: &SyncOptions,
@@ -802,6 +1036,10 @@ impl SyncEngine {
         let mut diffs = Vec::new();
         let mut bytes_to_copy = 0u64;
         let mut target_newer_conflicts = Vec::new();
+        let mut skipped_previously_copied = 0usize;
+        let mut previously_copied_paths = Vec::new();
+        let mut previously_copied_sources = Vec::new();
+        let mut copy_history_in_sync = Vec::new();
 
         emit_progress(SyncEngine::build_dry_run_progress(
             DryRunPhase::Comparing,
@@ -814,6 +1052,9 @@ impl SyncEngine {
         ));
 
         for planned_file in planned {
+            if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                anyhow::bail!("Dry run cancelled by user");
+            }
             let scanned = &sources[planned_file.source_index];
             let source_meta = &scanned.files[planned_file.file_index];
             let path = source_meta.path.clone();
@@ -928,6 +1169,24 @@ impl SyncEngine {
                         }
                     }
 
+                    if !needs_copy {
+                        if let Some(history) = options.copy_history.as_deref() {
+                            if Self::should_record_in_sync(history, &path, source_meta.size) {
+                                copy_history_in_sync.push(CopyHistoryCandidate {
+                                    source_path: source_path.clone(),
+                                    target_path: target_path.clone(),
+                                    target_modified: Some(target_meta.modified),
+                                    relative_path: path.clone(),
+                                    size: source_meta.size,
+                                    modified: source_meta.modified,
+                                    // 여기까지 왔으면 해시를 비교했을 때 같았다.
+                                    content_verified: already_checked_equal_hash
+                                        || options.checksum_mode,
+                                });
+                            }
+                        }
+                    }
+
                     if needs_copy {
                         bytes_to_copy += source_meta.size;
                         compare_summary.files_to_copy += 1;
@@ -957,6 +1216,55 @@ impl SyncEngine {
                         );
                         diffs.push(diff);
                     }
+                }
+            } else if let Some((captured, skipped_target_path)) = if source_meta.is_file {
+                let planned_target_path = target_canonical
+                    .as_ref()
+                    .map(|target| target.join(&target_relative))
+                    .unwrap_or_else(|| self.target.join(&target_relative));
+                Self::is_previously_copied(
+                    options.copy_history.as_deref(),
+                    &source_canonical.join(&path),
+                    &planned_target_path,
+                    source_meta,
+                )
+                .await?
+                .map(|captured| (captured, planned_target_path))
+            } else {
+                None
+            } {
+                compare_processed_files += 1;
+                compare_processed_bytes += source_meta.size;
+                skipped_previously_copied += 1;
+                if previously_copied_paths.len() < MAX_PREVIOUSLY_COPIED_PATHS {
+                    // 추가 소스의 파일은 일반 결과처럼 그 소스 루트를 붙여, 어느 카드의 파일인지 보이게 한다.
+                    previously_copied_paths.push(match &source_root {
+                        Some(root) => root.join(&path),
+                        None => path.clone(),
+                    });
+                }
+                previously_copied_sources.push(SkippedSourceSnapshot {
+                    source_path: source_canonical.join(&path),
+                    target_path: skipped_target_path,
+                    size: source_meta.size,
+                    modified: source_meta.modified,
+                    captured,
+                });
+                // 건너뛰는 파일도 촬영 시각을 읽으므로, 연달아 건너뛸 때 진행이 멈춘 것처럼 보이지 않게 한다.
+                let now = std::time::Instant::now();
+                if now.duration_since(last_compare_emit_at) >= compare_emit_interval
+                    || compare_processed_files == total_files as u64
+                {
+                    last_compare_emit_at = now;
+                    emit_progress(SyncEngine::build_dry_run_progress(
+                        DryRunPhase::Comparing,
+                        path.to_string_lossy().to_string(),
+                        compare_processed_files,
+                        total_files as u64,
+                        compare_processed_bytes,
+                        total_bytes,
+                        compare_summary.clone(),
+                    ));
                 }
             } else if source_meta.is_file {
                 compare_processed_files += 1;
@@ -1023,6 +1331,11 @@ impl SyncEngine {
             compare_summary.clone(),
         ));
 
+        // 마지막 파일의 기록 조회 중 들어온 취소도 반영해, 취소된 비교를 계획으로 남기지 않는다.
+        if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+            anyhow::bail!("Dry run cancelled by user");
+        }
+
         Ok((
             DryRunResult {
                 diffs,
@@ -1031,6 +1344,10 @@ impl SyncEngine {
                 files_modified: compare_summary.files_modified,
                 bytes_to_copy,
                 target_preflight: None,
+                skipped_previously_copied,
+                previously_copied_paths,
+                copy_history_in_sync,
+                previously_copied_sources,
             },
             target_newer_conflicts,
         ))
@@ -1198,6 +1515,17 @@ impl SyncEngine {
 
         progress_callback(current_progress.clone());
 
+        // 건너뛴 소스 파일이 비교 뒤 바뀌었으면(같은 이름의 다른 사진 등) 건너뛸 근거가 없다.
+        Self::ensure_skipped_sources_unchanged(dry_run).await?;
+        // 기록으로 건너뛴 파일이 있는 계획은, 그 판단에 쓴 타깃 폴더에 복사할 때만 실행한다.
+        // 비교 뒤 같은 경로에 다른 폴더(디스크)가 연결됐으면 건너뛴 파일이 새 타깃에 없다.
+        // 위 검사(헤더 읽기)가 걸린 동안의 교체도 잡도록, 첫 쓰기 직전인 여기서 확인한다.
+        Self::ensure_skip_target_unchanged(dry_run, options)?;
+        // 실행 시작 때 타깃 폴더가 없었으면(방금 만들어졌으면) 첫 파일을 쓰기 전에 폴더를 확정한다.
+        if let Some(history) = options.copy_history.as_deref() {
+            history.pin_target_identity();
+        }
+
         // 캐시된 계획의 추가 소스 루트는 이 엔진에 지정된 추가 소스여야 한다.
         let mut allowed_extra_roots = HashSet::new();
         for extra in &self.extra_sources {
@@ -1245,6 +1573,15 @@ impl SyncEngine {
                     current_progress.current_file_total_bytes = file_size;
                     progress_callback(current_progress.clone());
                     let mut last_emitted_current_file_bytes = 0u64;
+                    // 복사 중에 소스가 바뀌면 기록하지 않도록 복사 전 상태를 남긴다.
+                    let source_before_copy = match options.copy_history.as_ref() {
+                        Some(_) if copy_history::is_eligible(&diff.path) => {
+                            fs::metadata(&source_path).await.ok().and_then(|meta| {
+                                Some((meta.len(), meta.modified().ok()?))
+                            })
+                        }
+                        _ => None,
+                    };
 
                     if let Err(e) = self
                         .copy_file_chunked(&source_path, &target_path, options, |written_chunk| {
@@ -1285,6 +1622,24 @@ impl SyncEngine {
                         };
                         file_callback(entry);
                     } else {
+                        if let (Some(history), Some((size, modified))) =
+                            (options.copy_history.as_ref(), source_before_copy)
+                        {
+                            // 복사 직후 바로 기록해, 중간에 취소돼도 복사한 파일은 남긴다.
+                            // 계획과 크기가 다르면 계획 뒤에 바뀐 파일이므로 기록하지 않는다.
+                            if size == file_size {
+                                let candidate = CopyHistoryCandidate {
+                                    source_path: source_path.clone(),
+                                    target_path: target_path.clone(),
+                                    target_modified: None,
+                                    relative_path: diff.path.clone(),
+                                    size,
+                                    modified,
+                                    content_verified: false,
+                                };
+                                Self::record_copy_history(history, vec![candidate]).await;
+                            }
+                        }
                         result.files_copied += 1;
                         result.bytes_copied += file_size;
                         current_progress.bytes_copied_current_file = file_size;
@@ -1306,6 +1661,30 @@ impl SyncEngine {
                 }
             }
         }
+
+        Self::ensure_skip_target_unchanged(dry_run, options)?;
+        if let Some(history) = options.copy_history.as_ref() {
+            // 촬영 시각이 없는 파일은 내용 전체를 읽어 비교하므로 오래 걸릴 수 있다. 멈춘 것처럼
+            // 보이지 않도록 한 파일씩 기록하며 진행 상황을 알린다.
+            let total = dry_run.copy_history_in_sync.len();
+            let mut last_emit: Option<std::time::Instant> = None;
+            for (index, candidate) in dry_run.copy_history_in_sync.iter().enumerate() {
+                if last_emit.is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(250)) {
+                    last_emit = Some(std::time::Instant::now());
+                    current_progress.phase = SyncProgressPhase::RecordingCopyHistory;
+                    current_progress.current_file = Some(format!(
+                        "Recording copy history... ({}/{total})",
+                        index + 1
+                    ));
+                    progress_callback(current_progress.clone());
+                }
+                Self::record_copy_history(history, vec![candidate.clone()]).await;
+            }
+        }
+        // 복사·기록이 걸린 동안 건너뛴 소스가 바뀌었거나 타깃이 바뀌었을 수도 있다. 건너뛴 파일이
+        // 빠진 채 성공을 보고하지 않도록 반환 직전에 한 번 더 확인한다.
+        Self::ensure_skipped_sources_unchanged(dry_run).await?;
+        Self::ensure_skip_target_unchanged(dry_run, options)?;
 
         Ok(result)
     }
@@ -1650,6 +2029,10 @@ impl SyncEngine {
             target_file.write_all(&buffer[..n]).await?;
             on_progress(n as u64);
         }
+        // 마지막 쓰기가 끝난 뒤에 반환한다. 이후의 수정 시각 설정·검증·복사 기록이
+        // 완성된 파일을 보게 한다.
+        target_file.flush().await?;
+        drop(target_file);
 
         if options.preserve_permissions {
             let meta = fs::metadata(source).await?;
@@ -2528,6 +2911,7 @@ mod tests {
             verify_after_copy: false,
             exclude_patterns: Vec::new(),
             save_rule: Some(template),
+            copy_history: None,
         }
     }
 
@@ -2948,6 +3332,652 @@ mod tests {
             .await?;
         assert_eq!(fs::read(target.path().join("DCIM/X_c.JPG")).await?, b"c!");
         assert!(!target.path().join("DCIM/X_b.JPG").exists());
+        Ok(())
+    }
+
+    fn jpeg_with_capture(date_time_original: &str, padding: u8) -> Vec<u8> {
+        let mut bytes = crate::save_rules::exif::test_support::TiffBuilder {
+            little_endian: true,
+            date_time_original: Some(date_time_original.to_string()),
+            ..Default::default()
+        }
+        .build_jpeg();
+        // 크기는 같고 내용만 다르게 만들기 위한 꼬리 바이트.
+        bytes.extend_from_slice(&[padding; 16]);
+        bytes
+    }
+
+    fn history_options(history: &Arc<CopyHistoryLedger>) -> SyncOptions {
+        SyncOptions {
+            checksum_mode: false,
+            copy_history: Some(history.clone()),
+            ..SyncOptions::default()
+        }
+    }
+
+    async fn run_sync(engine: &SyncEngine, options: &SyncOptions) -> Result<SyncResult> {
+        let (plan, _) = engine
+            .compare_dirs_internal(options, None, |_| {}, |_, _| {})
+            .await?;
+        engine
+            .sync_files_from_dry_run(&plan, options, |_| {}, |_| {})
+            .await
+    }
+
+    #[tokio::test]
+    async fn copy_history_skips_media_deleted_from_target() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        write_file(source.path(), "notes.txt", b"note").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+
+        let first = run_sync(&engine, &options).await?;
+        assert_eq!(first.files_copied, 3);
+        assert_eq!(history.len(), 2, "only photo and RAW are recorded");
+
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+        fs::remove_file(target.path().join("notes.txt")).await?;
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.skipped_previously_copied, 2);
+        assert_eq!(dry_run.files_to_copy, 1);
+        assert_eq!(dry_run.diffs[0].path, PathBuf::from("notes.txt"));
+        let mut skipped = dry_run.previously_copied_paths.clone();
+        skipped.sort();
+        assert_eq!(
+            skipped,
+            vec![
+                PathBuf::from("DCIM/DSC00001.ARW"),
+                PathBuf::from("DCIM/DSC00001.JPG")
+            ]
+        );
+
+        let second = run_sync(&engine, &options).await?;
+        assert_eq!(second.files_copied, 1);
+        assert!(!target.path().join("DCIM/DSC00001.JPG").exists());
+        assert!(target.path().join("notes.txt").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_copies_same_name_and_size_with_new_capture_time() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        let first_shot = jpeg_with_capture("2026:10:22 14:03:55", 1);
+        let reformatted_shot = jpeg_with_capture("2026:11:01 09:00:00", 2);
+        assert_eq!(first_shot.len(), reformatted_shot.len());
+        write_file(source.path(), "DCIM/DSC00001.JPG", &first_shot).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+
+        // 카드를 포맷한 뒤 같은 번호로 새로 찍은 사진. 타깃은 다른 폴더로 정리된 상태.
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &reformatted_shot).await?;
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.skipped_previously_copied, 0);
+        assert_eq!(dry_run.files_to_copy, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_off_keeps_recopying() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let options = SyncOptions {
+            checksum_mode: false,
+            ..SyncOptions::default()
+        };
+        run_sync(&engine, &options).await?;
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 1);
+        assert_eq!(dry_run.skipped_previously_copied, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_records_files_already_in_target_only_on_sync() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        // 옵션을 켜기 전에 이미 동기화된 상태.
+        run_sync(
+            &engine,
+            &SyncOptions {
+                checksum_mode: false,
+                ..SyncOptions::default()
+            },
+        )
+        .await?;
+
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.files_to_copy, 0);
+        assert!(history.is_empty(), "dry run must not record");
+
+        let result = run_sync(&engine, &options).await?;
+        assert_eq!(result.files_copied, 0);
+        assert_eq!(history.len(), 1);
+
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.skipped_previously_copied, 1);
+        assert_eq!(dry_run.files_to_copy, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_record_failed_copies() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        // 비교 후 복사 전에 소스가 사라져 복사가 실패한다.
+        fs::remove_file(source.path().join("DCIM/DSC00001.ARW")).await?;
+
+        let result = engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await?;
+        assert_eq!(result.files_copied, 0);
+        assert_eq!(result.errors.len(), 1);
+        assert!(history.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_record_in_sync_file_replaced_after_dry_run() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        let old_shot = jpeg_with_capture("2026:10:22 14:03:55", 1);
+        let new_shot = jpeg_with_capture("2026:11:01 09:00:00", 2);
+        write_file(source.path(), "DCIM/DSC00001.JPG", &old_shot).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        run_sync(
+            &engine,
+            &SyncOptions {
+                checksum_mode: false,
+                ..SyncOptions::default()
+            },
+        )
+        .await?;
+
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        // 캐시된 Dry Run: 양쪽이 같아 기록 후보로만 남는다.
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.copy_history_in_sync.len(), 1);
+
+        // Dry Run 뒤 소스는 같은 이름·크기의 새 사진으로 바뀌고, 타깃의 옛 사진은 옮겨졌다.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &new_shot).await?;
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+
+        engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await?;
+        assert!(history.is_empty(), "a file that was never copied must not be recorded");
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.skipped_previously_copied, 0);
+        assert_eq!(dry_run.files_to_copy, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_record_in_sync_file_whose_target_was_replaced() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        let shot = jpeg_with_capture("2026:10:22 14:03:55", 1);
+        let other_shot = jpeg_with_capture("2026:12:24 20:00:00", 3);
+        write_file(source.path(), "DCIM/DSC00001.JPG", &shot).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        run_sync(
+            &engine,
+            &SyncOptions {
+                checksum_mode: false,
+                ..SyncOptions::default()
+            },
+        )
+        .await?;
+
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.copy_history_in_sync.len(), 1);
+
+        // 비교 뒤 타깃 사진만 같은 크기의 다른 사진으로 바뀌었다.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        write_file(target.path(), "DCIM/DSC00001.JPG", &other_shot).await?;
+
+        engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await?;
+        assert!(history.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_record_in_sync_file_with_different_bytes() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        // 촬영 시각이 없는 RAW. 크기와 수정 시각은 같고 내용만 다르다.
+        write_file(source.path(), "DCIM/IMG_0001.CR3", b"raw-bytes-A").await?;
+        write_file(target.path(), "DCIM/IMG_0001.CR3", b"raw-bytes-B").await?;
+        let modified = std::fs::metadata(source.path().join("DCIM/IMG_0001.CR3"))?.modified()?;
+        std::fs::File::options()
+            .write(true)
+            .open(target.path().join("DCIM/IMG_0001.CR3"))?
+            .set_modified(modified)?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.files_to_copy, 0, "size + mtime match counts as in sync");
+        engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await?;
+        assert!(history.is_empty(), "different bytes must not be recorded");
+
+        // 내용까지 같으면 기록한다.
+        write_file(target.path(), "DCIM/IMG_0001.CR3", b"raw-bytes-A").await?;
+        std::fs::File::options()
+            .write(true)
+            .open(target.path().join("DCIM/IMG_0001.CR3"))?
+            .set_modified(modified)?;
+        run_sync(&engine, &options).await?;
+        assert_eq!(history.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_sync_fails_when_target_folder_changes_after_skips() -> Result<()> {
+        let source = TempDir::new()?;
+        let base = TempDir::new()?;
+        let target = base.path().join("Archive");
+        std::fs::create_dir_all(&target)?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        write_file(source.path(), "notes.txt", b"note").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.clone());
+        let history = Arc::new(CopyHistoryLedger::for_target(
+            target.to_string_lossy().into_owned(),
+            [],
+        ));
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+        assert_eq!(history.len(), 1);
+        fs::remove_dir_all(target.join("DCIM")).await?;
+
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.skipped_previously_copied, 1);
+
+        // 비교 뒤 같은 경로에 빈 디스크가 연결됐다.
+        std::fs::remove_dir_all(&target)?;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        std::fs::create_dir_all(&target)?;
+        let error = engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await
+            .expect_err("skips decided on the old folder must not run on the new one");
+        assert!(format!("{error:#}").contains("Target folder changed"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_sync_fails_when_skipped_source_changes_after_compare() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+        assert_eq!(history.len(), 1);
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.skipped_previously_copied, 1);
+
+        // 비교 뒤 같은 이름·크기의 다른 사진으로 바뀌었다.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:11:01 09:00:00", 1)).await?;
+        let error = engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await
+            .expect_err("a replaced skipped source must not stay skipped");
+        assert!(format!("{error:#}").contains("changed after the compare"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_sync_fails_when_skipped_capture_time_changes_with_same_size_and_mtime(
+    ) -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        let photo = source.path().join("DCIM/DSC00001.JPG");
+        write_file(source.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.skipped_previously_copied, 1);
+
+        // 크기와 수정 시각은 그대로인 다른 사진으로 바뀌었다.
+        let modified = std::fs::metadata(&photo)?.modified()?;
+        std::fs::write(&photo, jpeg_with_capture("2026:11:01 09:00:00", 1))?;
+        std::fs::File::options().write(true).open(&photo)?.set_modified(modified)?;
+        let error = engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await
+            .expect_err("a different photo must not stay skipped");
+        assert!(format!("{error:#}").contains("changed after the compare"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_skip_when_target_exists_with_other_case() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/IMG_0001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+        std::fs::rename(
+            target.path().join("DCIM/IMG_0001.JPG"),
+            target.path().join("DCIM/IMG_0001.jpg"),
+        )?;
+        if !target.path().join("DCIM/IMG_0001.JPG").exists() {
+            // 대소문자를 구분하는 볼륨에서는 해당하지 않는다.
+            return Ok(());
+        }
+
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.skipped_previously_copied, 0);
+        engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_sync_fails_when_skipped_target_path_is_filled() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        assert_eq!(plan.skipped_previously_copied, 1);
+
+        // 비교 뒤 그 타깃 경로에 다른 파일이 놓였다. 일반 비교·충돌 처리를 거쳐야 한다.
+        write_file(target.path(), "DCIM/DSC00001.ARW", b"other-file").await?;
+        let error = engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await
+            .expect_err("a filled target path must be compared again");
+        assert!(format!("{error:#}").contains("changed after the compare"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_record_copy_whose_source_changed_after_plan() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        // 계획 뒤 복사 전에 소스가 다른 크기의 파일로 바뀌었다.
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"different-raw-bytes").await?;
+
+        engine
+            .sync_files_from_dry_run(&plan, &options, |_| {}, |_| {})
+            .await?;
+        assert!(history.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_does_not_record_copy_whose_target_was_replaced_after_copy() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        let source_path = source.path().join("DCIM/DSC00001.JPG");
+        let meta = std::fs::metadata(&source_path)?;
+        // 복사가 끝난 직후 다른 도구가 타깃을 같은 크기의 다른 사진으로 바꿨다.
+        write_file(target.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:11:01 09:00:00", 1)).await?;
+        let history = Arc::new(CopyHistoryLedger::default());
+        SyncEngine::record_copy_history(
+            &history,
+            vec![CopyHistoryCandidate {
+                source_path,
+                target_path: target.path().join("DCIM/DSC00001.JPG"),
+                target_modified: None,
+                relative_path: PathBuf::from("DCIM/DSC00001.JPG"),
+                size: meta.len(),
+                modified: meta.modified()?,
+                content_verified: false,
+            }],
+        )
+        .await;
+        assert!(history.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_records_copied_file_from_target_bytes() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        run_sync(&engine, &history_options(&history)).await?;
+        let keys = history.keys();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].captured, "exif:2026-10-22T14:03:55");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dry_run_cancel_stops_during_compare() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        for index in 0..8 {
+            write_file(source.path(), &format!("DCIM/DSC0000{index}.ARW"), b"raw-bytes").await?;
+        }
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let cancel_token = CancellationToken::new();
+        let cancel_on_compare = cancel_token.clone();
+        let result = engine
+            .compare_dirs_internal(
+                &SyncOptions::default(),
+                Some(cancel_token),
+                move |progress| {
+                    if progress.phase == DryRunPhase::Comparing {
+                        cancel_on_compare.cancel();
+                    }
+                },
+                |_, _| {},
+            )
+            .await;
+        let error = result.expect_err("compare should stop once cancelled");
+        assert!(format!("{error:#}").contains("cancelled by user"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_skip_keeps_save_rule_collision_suffixes() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        // 두 폴더의 같은 이름 사진은 저장 규칙에서 같은 타깃 경로로 모여 접미사가 붙는다.
+        write_file(source.path(), "DCIM/100MSDCF/DSC00001.JPG", &jpeg_with_capture("2026:10:22 14:03:55", 1)).await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let mut options = options_with_rule(by_type_template());
+        options.copy_history = Some(history.clone());
+        run_sync(&engine, &options).await?;
+        let first_target = fs::read_dir(target.path().join("Photo")).await;
+        assert!(first_target.is_ok());
+
+        fs::remove_dir_all(target.path().join("Photo")).await?;
+        write_file(source.path(), "DCIM/101MSDCF/DSC00001.JPG", &jpeg_with_capture("2026:10:23 10:00:00", 2)).await?;
+
+        let dry_run = engine.compare_dirs(&options).await?;
+        assert_eq!(dry_run.skipped_previously_copied, 1);
+        assert_eq!(dry_run.files_to_copy, 1);
+        let planned_without_history = engine
+            .compare_dirs(&options_with_rule(by_type_template()))
+            .await?;
+        let expected = planned_without_history
+            .diffs
+            .iter()
+            .find(|diff| diff.path == Path::new("DCIM/101MSDCF/DSC00001.JPG"))
+            .map(|diff| diff.target_relative_path().to_path_buf());
+        assert_eq!(
+            Some(dry_run.diffs[0].target_relative_path().to_path_buf()),
+            expected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn in_sync_candidate_verified_by_hash_skips_byte_compare() -> Result<()> {
+        let dir = TempDir::new()?;
+        let source_path = dir.path().join("a.CR3");
+        let target_path = dir.path().join("b.CR3");
+        std::fs::write(&source_path, b"raw-bytes-A")?;
+        std::fs::write(&target_path, b"raw-bytes-B")?;
+        let modified = std::fs::metadata(&source_path)?.modified()?;
+        let stamp = copy_history::capture_stamp(&source_path, modified).expect("stamp");
+        let mut candidate = CopyHistoryCandidate {
+            source_path,
+            target_path,
+            target_modified: None,
+            relative_path: PathBuf::from("a.CR3"),
+            size: 11,
+            modified,
+            content_verified: false,
+        };
+        let history = CopyHistoryLedger::default();
+        assert!(!SyncEngine::in_sync_candidate_is_same_file(&candidate, &stamp, &history));
+        // 비교 때 해시가 같다고 확인한 파일은 내용을 다시 읽지 않는다.
+        candidate.content_verified = true;
+        assert!(SyncEngine::in_sync_candidate_is_same_file(&candidate, &stamp, &history));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_reports_progress_while_recording_in_sync_files() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        run_sync(
+            &engine,
+            &SyncOptions {
+                checksum_mode: false,
+                ..SyncOptions::default()
+            },
+        )
+        .await?;
+
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        let (plan, _) = engine
+            .compare_dirs_internal(&options, None, |_| {}, |_, _| {})
+            .await?;
+        let messages = std::sync::Mutex::new(Vec::new());
+        engine
+            .sync_files_from_dry_run(
+                &plan,
+                &options,
+                |progress| {
+                    if let Some(file) = progress.current_file {
+                        messages.lock().unwrap().push((progress.phase, file));
+                    }
+                },
+                |_| {},
+            )
+            .await?;
+        assert_eq!(history.len(), 1);
+        // 파일 복사 로그로 남지 않도록 복사 단계가 아닌 별도 단계로 알린다.
+        assert!(messages.lock().unwrap().iter().any(|(phase, message)| {
+            *phase == SyncProgressPhase::RecordingCopyHistory
+                && message.starts_with("Recording copy history")
+        }));
+        assert!(crate::progress_phase_to_log_category(&SyncProgressPhase::RecordingCopyHistory).is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn copy_history_skips_report_compare_progress() -> Result<()> {
+        let source = TempDir::new()?;
+        let target = TempDir::new()?;
+        write_file(source.path(), "DCIM/DSC00001.ARW", b"raw-bytes").await?;
+        let engine = SyncEngine::new(source.path().to_path_buf(), target.path().to_path_buf());
+        let history = Arc::new(CopyHistoryLedger::default());
+        let options = history_options(&history);
+        run_sync(&engine, &options).await?;
+        fs::remove_dir_all(target.path().join("DCIM")).await?;
+
+        let messages = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = messages.clone();
+        let (plan, _) = engine
+            .compare_dirs_internal(
+                &options,
+                None,
+                move |progress| sink.lock().unwrap().push(progress.message),
+                |_, _| {},
+            )
+            .await?;
+        assert_eq!(plan.skipped_previously_copied, 1);
+        assert!(messages
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|message| message.ends_with("DSC00001.ARW")));
         Ok(())
     }
 }

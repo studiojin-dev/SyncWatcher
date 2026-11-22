@@ -74,6 +74,9 @@ struct CreateSyncTaskInput {
     recurring_schedules: Vec<RecurringScheduleRecord>,
     /// Save rule template id (managed in Settings > Save Rule Templates). Omit to mirror the source layout.
     save_rule_id: Option<String>,
+    /// Skip photos, RAW files and videos this task already copied once, even after they are removed from the target.
+    #[serde(default)]
+    skip_previously_copied: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -100,6 +103,9 @@ struct UpdateSyncTaskInput {
         skip_serializing_if = "Option::is_none"
     )]
     save_rule_id: Option<Option<String>>,
+    /// Skip photos, RAW files and videos this task already copied once. Omit to keep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skip_previously_copied: Option<bool>,
 }
 
 /// JSON `null`을 `Some(None)`(해제)으로, 필드 생략을 `None`(유지)으로 구분한다.

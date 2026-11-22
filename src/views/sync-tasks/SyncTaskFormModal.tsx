@@ -574,6 +574,35 @@ function SyncTaskFormModal({
               </span>
             </label>
 
+            <label className="flex items-start gap-2 cursor-pointer select-none">
+              <div className="relative shrink-0">
+                <input
+                  type="checkbox"
+                  name="skipPreviouslyCopied"
+                  defaultChecked={editingTask?.skipPreviouslyCopied}
+                  disabled={savingTask}
+                  className="peer sr-only"
+                />
+                <div className="w-6 h-6 border-3 border-[var(--border-main)] bg-white peer-checked:bg-[var(--accent-main)] transition-colors"></div>
+                <div className="absolute inset-0 hidden peer-checked:flex items-center justify-center text-white pointer-events-none">
+                  ✓
+                </div>
+              </div>
+              <span className="space-y-1">
+                <span className="block font-bold text-sm uppercase">
+                  {t('syncTasks.skipPreviouslyCopied', {
+                    defaultValue: "Don't copy media again once copied",
+                  })}
+                </span>
+                <span className="block text-xs font-mono text-[var(--text-secondary)]">
+                  {t('syncTasks.skipPreviouslyCopiedDesc', {
+                    defaultValue:
+                      'Photos, RAW files and videos this task copied before are skipped, even if you delete or move them in the target.',
+                  })}
+                </span>
+              </span>
+            </label>
+
             <div className="border-t-2 border-dashed border-[var(--border-main)] pt-3 mt-2">
               <div className="text-xs font-mono text-[var(--text-secondary)] mb-2 uppercase">
                 Watch Mode Options

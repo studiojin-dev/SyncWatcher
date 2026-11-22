@@ -27,7 +27,7 @@ mod integration_tests {
     use crate::system_integration::VolumeInfo;
     use crate::watcher::WatcherManager;
     use crate::{
-        build_dry_run_artifact, build_runtime_watch_upstreams, build_validated_runtime_tasks,
+        build_dry_run_artifact, build_runtime_watch_upstreams, stale_aware_copy_error, build_validated_runtime_tasks,
         can_enqueue_runtime_watch_bootstrap_task, cancel_operation_internal,
         classify_missing_target_path, close_conflict_review_session_internal,
         compute_volume_mount_diff, copy_file_preserve_under_root, create_conflict_review_session,
@@ -57,7 +57,7 @@ mod integration_tests {
         should_include_check_for_updates_menu, should_reconcile_runtime_watchers_for_volume_change,
         snapshot_recurring_schedule_detail_entries, sync_dry_run_internal,
         take_runtime_pending_sync_task, unix_now_ms, validate_control_plane_auth,
-        validate_dry_run_artifact, validate_legacy_config_store_file_path, validate_runtime_tasks,
+        ensure_dry_run_artifact_copy_history_matches, validate_dry_run_artifact, validate_legacy_config_store_file_path, validate_runtime_tasks,
         volume_watch_next_tick_delay, AppState, CancelOperationType, ConflictFileInfo,
         ConflictItemStatus, ConflictResolutionAction, ConflictResolutionRequest,
         ConflictReviewSession, ConflictSessionOrigin, DataUnitSystem, DryRunDiffBatchEvent,
@@ -320,6 +320,7 @@ mod integration_tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         }
     }
 
@@ -384,6 +385,9 @@ mod integration_tests {
             mcp_jobs: Arc::new(McpJobRegistry::new()),
             mcp_job_seq: Arc::new(AtomicU64::new(0)),
             security_scoped_access_manager: Arc::new(SecurityScopedAccessManager::default()),
+            copy_history_store: Arc::new(crate::copy_history::CopyHistoryStore::new(
+                temp_config_dir(),
+            )),
         }
     }
 
@@ -580,6 +584,132 @@ mod integration_tests {
         assert!(result.is_ok());
         let joined = result.unwrap();
         assert!(joined.ends_with("file.txt"));
+    }
+
+    #[test]
+    fn copy_history_is_cleared_only_when_target_changes() {
+        let state = build_app_state();
+        let key = crate::copy_history::CopyHistoryKey {
+            name: "DSC00001.ARW".to_string(),
+            size: 9,
+            captured: "mtime:1".to_string(),
+        };
+        let mut task = build_uuid_task("task-1", SourceUuidType::Disk, "uuid-1", "/DCIM", None);
+        let target_dir = tempdir().expect("target dir");
+        task.target = target_dir.path().to_string_lossy().into_owned();
+        let previous_target = task.target.clone();
+        let seed = |state: &AppState| {
+            let ledger =
+                crate::copy_history::CopyHistoryLedger::for_target(previous_target.clone(), []);
+            ledger.insert(key.clone());
+            state
+                .copy_history_store
+                .save_if_dirty("task-1", &ledger)
+                .unwrap();
+        };
+
+        seed(&state);
+        crate::clear_copy_history_if_target_changed(&task, Some(&previous_target), &state).unwrap();
+        crate::clear_copy_history_if_target_changed(&task, None, &state).unwrap();
+        let load = |state: &AppState| {
+            state
+                .copy_history_store
+                .load("task-1", &previous_target, Path::new(&previous_target))
+                .unwrap()
+        };
+        assert!(load(&state).contains(&key));
+
+        task.target = format!("{previous_target}-new-drive");
+        crate::clear_copy_history_if_target_changed(&task, Some(&previous_target), &state).unwrap();
+        assert!(load(&state).is_empty());
+    }
+
+    #[tokio::test]
+    async fn rejected_target_change_keeps_copy_history() {
+        let state = build_app_state();
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("A");
+        std::fs::create_dir_all(&source).expect("source dir");
+        std::fs::create_dir_all(&target).expect("target dir");
+        let target_str = target.to_string_lossy().into_owned();
+        let task = SyncTaskRecord {
+            id: "task-history-patch".to_string(),
+            name: "Task".to_string(),
+            source: source.to_string_lossy().into_owned(),
+            source_bookmark: None,
+            source_network_mount: None,
+            target: target_str.clone(),
+            target_bookmark: None,
+            target_network_mount: None,
+            checksum_mode: false,
+            verify_after_copy: false,
+            exclusion_sets: Vec::new(),
+            watch_mode: false,
+            auto_unmount: false,
+            source_type: Some(SourceType::Path),
+            source_uuid: None,
+            source_uuid_type: None,
+            source_sub_path: None,
+            source_identity: None,
+            recurring_schedules: Vec::new(),
+            save_rule_id: None,
+            extra_sources: Default::default(),
+            skip_previously_copied: true,
+        };
+        state.config_store.save_tasks(&[task]).expect("task should save");
+        let key = crate::copy_history::CopyHistoryKey {
+            name: "DSC00001.ARW".to_string(),
+            size: 10,
+            captured: "mtime:1".to_string(),
+        };
+        let ledger = state
+            .copy_history_store
+            .load("task-history-patch", &target_str, &target)
+            .expect("load");
+        ledger.insert(key.clone());
+        state
+            .copy_history_store
+            .save_if_dirty("task-history-patch", &ledger)
+            .expect("save");
+        let load = || {
+            state
+                .copy_history_store
+                .load("task-history-patch", &target_str, &target)
+                .expect("load")
+        };
+
+        // 소스 안쪽을 타깃으로 바꾸려는 편집은 검증에서 거절된다. 기록은 그대로여야 한다.
+        patch_sync_task_internal_core(
+            UpdateSyncTaskRequest {
+                task_id: "task-history-patch".to_string(),
+                target: Some(source.join("inside").to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+            None,
+            None,
+            &state,
+        )
+        .await
+        .expect_err("overlapping target should be rejected");
+        assert!(load().contains(&key));
+
+        // 받아들여진 타깃 변경은 기록을 지운다.
+        let other = base.path().join("B");
+        std::fs::create_dir_all(&other).expect("other dir");
+        patch_sync_task_internal_core(
+            UpdateSyncTaskRequest {
+                task_id: "task-history-patch".to_string(),
+                target: Some(other.to_string_lossy().into_owned()),
+                ..Default::default()
+            },
+            None,
+            None,
+            &state,
+        )
+        .await
+        .expect("target change should save");
+        assert!(load().is_empty());
     }
 
     #[test]
@@ -1270,6 +1400,7 @@ mod integration_tests {
                 }],
                 save_rule_id: None,
                 extra_sources: Default::default(),
+                skip_previously_copied: false,
             },
             None,
             None,
@@ -1322,6 +1453,7 @@ mod integration_tests {
                 }],
                 save_rule_id: None,
                 extra_sources: Default::default(),
+                skip_previously_copied: false,
             },
             None,
             None,
@@ -1373,6 +1505,7 @@ mod integration_tests {
                 recurring_schedules: Vec::new(),
                 save_rule_id: None,
                 extra_sources: Default::default(),
+                skip_previously_copied: false,
             },
             None,
             None,
@@ -1479,6 +1612,7 @@ mod integration_tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         }])
         .expect("repair content should serialize");
 
@@ -1572,6 +1706,7 @@ mod integration_tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         };
         state
             .config_store
@@ -1668,6 +1803,7 @@ mod integration_tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         };
         state
             .config_store
@@ -1749,6 +1885,7 @@ mod integration_tests {
                 }],
                 save_rule_id: None,
                 extra_sources: Default::default(),
+                skip_previously_copied: false,
             }])
             .expect("tasks should save");
 
@@ -2952,6 +3089,7 @@ mod integration_tests {
                     recurring_schedules: Vec::new(),
                     save_rule_id: None,
                     extra_sources: Default::default(),
+                    skip_previously_copied: false,
                 },
                 SyncTaskRecord {
                     id: "task-b".to_string(),
@@ -2975,6 +3113,7 @@ mod integration_tests {
                     recurring_schedules: Vec::new(),
                     save_rule_id: None,
                     extra_sources: Default::default(),
+                    skip_previously_copied: false,
                 },
             ])
             .expect("tasks should save");
@@ -4818,6 +4957,7 @@ mod integration_tests {
             recurring_schedules: Vec::new(),
             save_rule_id: save_rule_id.map(str::to_string),
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         };
 
         let error =
@@ -4877,6 +5017,7 @@ mod integration_tests {
                 recurring_schedules: Vec::new(),
                 save_rule_id: Some(save_rules::PRESET_CAMERA_BY_TYPE.to_string()),
                 extra_sources: Default::default(),
+                skip_previously_copied: false,
             }])
             .expect("tasks should save");
 
@@ -4905,6 +5046,86 @@ mod integration_tests {
             .map(|orphan| orphan.path.to_string_lossy().to_string())
             .collect();
         assert_eq!(paths, vec!["Photo/DSC00002.JPG".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn cached_dry_run_requires_same_copy_history_state() {
+        let base = tempdir().expect("tempdir should be created");
+        let source = base.path().join("source");
+        let target = base.path().join("target");
+        std::fs::create_dir_all(&source).expect("source directory should be created");
+        std::fs::create_dir_all(&target).expect("target directory should be created");
+        std::fs::write(source.join("DSC00001.ARW"), b"raw").expect("should write source file");
+
+        let engine = crate::sync_engine::SyncEngine::new(source.clone(), target.clone());
+        let options = crate::sync_engine::types::SyncOptions::default();
+        let (dry_run, conflicts) = engine
+            .prepare_sync_plan_with_progress(&options, |_| {}, |_, _| {})
+            .await
+            .expect("dry run plan should succeed");
+        let source_raw = source.to_string_lossy().to_string();
+        let target_raw = target.to_string_lossy().to_string();
+        let mut artifact = build_dry_run_artifact(
+            &source_raw,
+            &target_raw,
+            &source,
+            &[],
+            &target,
+            false,
+            &[],
+            None,
+            &dry_run,
+            &conflicts,
+        )
+        .await
+        .expect("artifact should be created");
+
+        let key = |name: &str| crate::copy_history::CopyHistoryKey {
+            name: name.to_string(),
+            size: 3,
+            captured: "mtime:1".to_string(),
+        };
+        let history = crate::copy_history::CopyHistoryLedger::from_keys([key("A.ARW")]);
+
+        ensure_dry_run_artifact_copy_history_matches(&artifact, None)
+            .expect("plan without history matches a run without history");
+        // Dry Run은 기록을 읽었는데, 지금은 기록을 읽을 수 없어 옵션 없이 실행되는 경우.
+        artifact.copy_history_fingerprint = Some(history.fingerprint());
+        let error = ensure_dry_run_artifact_copy_history_matches(&artifact, None)
+            .expect_err("history state change should invalidate the cached plan");
+        assert!(error.contains(DRY_RUN_ARTIFACT_STALE_ERROR));
+        ensure_dry_run_artifact_copy_history_matches(&artifact, Some(&history))
+            .expect("same history keeps the cached plan");
+
+        // 기록 파일이 지워져 빈 기록이 된 경우와, 다른 동기화가 기록을 더한 경우.
+        let emptied = crate::copy_history::CopyHistoryLedger::default();
+        assert!(ensure_dry_run_artifact_copy_history_matches(&artifact, Some(&emptied)).is_err());
+        // 같은 항목 수지만 내용이 다른 기록 (다른 디스크에서 만든 기록 등).
+        let same_len = crate::copy_history::CopyHistoryLedger::from_keys([key("Z.ARW")]);
+        assert_eq!(same_len.len(), history.len());
+        assert!(ensure_dry_run_artifact_copy_history_matches(&artifact, Some(&same_len)).is_err());
+        history.insert(key("B.ARW"));
+        assert!(ensure_dry_run_artifact_copy_history_matches(&artifact, Some(&history)).is_err());
+    }
+
+    #[test]
+    fn skip_basis_change_in_cached_plan_is_reported_as_stale() {
+        let skipped = format!(
+            "{}: /src/A.JPG; run the sync again",
+            crate::sync_engine::engine::SKIPPED_FILE_CHANGED_ERROR
+        );
+        let target = format!(
+            "{}; run the sync again",
+            crate::sync_engine::engine::SKIP_TARGET_CHANGED_ERROR
+        );
+        assert!(stale_aware_copy_error(skipped.clone(), true).starts_with(DRY_RUN_ARTIFACT_STALE_ERROR));
+        assert!(stale_aware_copy_error(target, true).starts_with(DRY_RUN_ARTIFACT_STALE_ERROR));
+        // 캐시 없이 실행했으면 다시 실행하면 새로 비교하므로 그대로 둔다.
+        assert_eq!(stale_aware_copy_error(skipped.clone(), false), skipped);
+        assert_eq!(
+            stale_aware_copy_error("disk full".to_string(), true),
+            "disk full"
+        );
     }
 
     #[tokio::test]

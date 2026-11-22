@@ -60,6 +60,8 @@
       "target": "転送先",
       "enabled": "有効",
       "checksumMode": "チェックサムモード",
+      "skipPreviouslyCopied": "一度コピーしたメディアは再コピーしない",
+      "skipPreviouslyCopiedDesc": "このタスクが以前コピーした写真・RAW・動画は、ターゲットで削除や移動をしても再コピーしません。",
       "watchMode": "監視モード",
       "watchModeDesc": "ソースディレクトリを監視し、変更時に自動同期します。",
       "systemMetadataAlwaysExcluded": "システムメタデータディレクトリ（.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems）は常に除外されます。",
@@ -276,7 +278,9 @@
       "colSourceSize": "ソースサイズ",
       "colTargetSize": "ターゲットサイズ",
       "scanning": "スキャン中...",
-      "savedAs": "保存先: {{path}}"
+      "savedAs": "保存先: {{path}}",
+      "previouslyCopied": "このタスクでコピー済みの {{count}} 件をスキップ",
+      "previouslyCopiedTruncated": "最初の {{shown}} 件のみ表示しています。"
     },
     "orphan": {
       "title": "孤立ファイル",
@@ -406,6 +410,7 @@
       "phaseScanningTarget": "ターゲットをスキャン中",
       "phaseComparing": "比較中",
       "phaseValidatingDryRun": "保存済み Dry Run を検証中",
+      "phaseRecordingCopyHistory": "コピー履歴を記録中",
       "phaseCopying": "コピー中",
       "phasePending": "準備中",
       "completed": "完了",

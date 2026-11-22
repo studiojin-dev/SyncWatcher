@@ -3,6 +3,7 @@ pub mod apple_bridge;
 pub mod camera_identity;
 pub mod config_store;
 pub mod control_plane;
+pub mod copy_history;
 pub mod distribution;
 pub mod error_codes;
 pub mod input_validation;
@@ -59,6 +60,7 @@ use config_store::{
     SettingsEnvelope, SourceIdentitySnapshot, SyncTaskEnvelope, SyncTaskRecord, SyncTasksEnvelope,
     UpdateSettingsPayload, UpdateSyncTaskRequest,
 };
+use copy_history::{CopyHistoryLedger, CopyHistoryStore};
 use control_plane::{ControlPlaneHandle, ControlPlaneRequest, ControlPlaneResponse};
 use distribution::{AppStoreUpdateCheckResult, DistributionInfo};
 use license::generate_licenses_report;
@@ -472,6 +474,9 @@ struct DryRunArtifact {
     result: DryRunResult,
     target_newer_conflicts: Vec<TargetNewerConflictCandidate>,
     candidates: Vec<DryRunArtifactCandidate>,
+    /// 계획에 쓴 복사 기록의 지문(타깃 폴더 식별자와 항목 전체). 기록을 쓰지 않았으면 `None`
+    /// (ADR-0040). 다르면 계획 뒤에 기록이나 타깃 폴더가 바뀐 것이다.
+    copy_history_fingerprint: Option<String>,
 }
 
 #[derive(Clone)]
@@ -528,6 +533,8 @@ pub struct AppState {
     active_task_operations: Arc<RwLock<HashMap<String, TaskOperationKind>>>,
     /// 정기 실행 히스토리 저장소
     recurring_schedule_history_store: Arc<RecurringScheduleHistoryStore>,
+    /// 작업별 복사 기록 (ADR-0040)
+    copy_history_store: Arc<CopyHistoryStore>,
     /// 정기 실행 스케줄러 재평가 알림
     recurring_scheduler_wakeup: Arc<Notify>,
     /// 로컬 MCP control plane listener 상태
@@ -2040,7 +2047,34 @@ async fn build_dry_run_artifact(
         result: result.clone(),
         target_newer_conflicts: target_newer_conflicts.to_vec(),
         candidates,
+        copy_history_fingerprint: None,
     })
+}
+
+/// 캐시된 Dry Run을 실행하다 건너뛴 파일이나 그 타깃 폴더가 바뀌어 멈췄으면, 오래된 계획 오류로
+/// 바꿔 UI가 새 Dry Run을 안내하게 한다 (ADR-0024, ADR-0040).
+fn stale_aware_copy_error(err_text: String, from_cached_dry_run: bool) -> String {
+    let skip_basis_changed = err_text.contains(sync_engine::engine::SKIPPED_FILE_CHANGED_ERROR)
+        || err_text.contains(sync_engine::engine::SKIP_TARGET_CHANGED_ERROR);
+    if from_cached_dry_run && skip_basis_changed {
+        format!("{DRY_RUN_ARTIFACT_STALE_ERROR} {err_text}")
+    } else {
+        err_text
+    }
+}
+
+/// 캐시된 계획과 이번 실행의 복사 기록이 같은지 (ADR-0040).
+/// 계획 뒤에 기록을 읽을 수 없게 됐거나, 지워졌거나, 다른 실행이 더했으면 새 Dry Run을 요구한다.
+fn ensure_dry_run_artifact_copy_history_matches(
+    artifact: &DryRunArtifact,
+    copy_history: Option<&CopyHistoryLedger>,
+) -> Result<(), String> {
+    if artifact.copy_history_fingerprint != copy_history.map(CopyHistoryLedger::fingerprint) {
+        return Err(format!(
+            "{DRY_RUN_ARTIFACT_STALE_ERROR} Copy history state changed since the Dry Run."
+        ));
+    }
+    Ok(())
 }
 
 async fn validate_dry_run_artifact(
@@ -3531,6 +3565,89 @@ fn resolve_runtime_exclude_patterns(
     }
 
     resolved_patterns
+}
+
+/// "이미 복사한 미디어 건너뛰기"가 켜진 작업의 복사 기록을 읽는다 (ADR-0040).
+/// 기록을 읽을 수 없으면 경고를 남기고 옵션 없이 실행한다 (의심스러우면 복사한다).
+/// 기록은 `target`(작업에 설정된 타깃 경로 그대로)에 묶인다. 다른 타깃의 기록은 쓰지 않는다.
+/// `target_dir`은 이번 실행이 실제로 복사하는 폴더다 (자동 마운트 경로 등).
+fn load_task_copy_history(
+    task_id: &str,
+    target: &str,
+    target_dir: &Path,
+    state: &AppState,
+) -> Option<Arc<CopyHistoryLedger>> {
+    let enabled = match state.config_store.read_tasks() {
+        Ok(tasks) => tasks
+            .iter()
+            .any(|task| task.id == task_id && task.skip_previously_copied),
+        Err(error) => {
+            state.log_manager.log(
+                "warning",
+                &format!(
+                    "Copy history disabled for this run; failed to load task: {}",
+                    error.message()
+                ),
+                Some(task_id.to_string()),
+            );
+            return None;
+        }
+    };
+    if !enabled {
+        return None;
+    }
+    match state.copy_history_store.load(task_id, target, target_dir) {
+        Ok(ledger) => Some(Arc::new(ledger)),
+        Err(error) => {
+            state.log_manager.log(
+                "warning",
+                &format!("Copy history disabled for this run: {error}"),
+                Some(task_id.to_string()),
+            );
+            None
+        }
+    }
+}
+
+/// 타깃이 바뀌면 이전 타깃 기준의 복사 기록을 지운다. 새 타깃이 비어 있어도
+/// 예전에 복사한 미디어를 건너뛰지 않게 한다 (ADR-0040).
+/// 편집 검증을 모두 마친 뒤, 저장 직전에 부른다. 지우지 못하면 타깃을 바꾸지 않도록 오류를 돌려준다:
+/// 남은 기록이 나중에 같은 타깃으로 돌아왔을 때 다시 쓰이면 안 된다.
+fn clear_copy_history_if_target_changed(
+    task: &SyncTaskRecord,
+    previous_target: Option<&str>,
+    state: &AppState,
+) -> Result<(), String> {
+    if previous_target.is_none_or(|previous| previous == task.target) {
+        return Ok(());
+    }
+    state
+        .copy_history_store
+        .clear(&task.id)
+        .map_err(|error| format!("Target not changed: could not reset copy history ({error})"))
+}
+
+/// 실행이 끝난 기록을 닫고 저장한다. 그사이 작업이 삭제됐으면 기록을 다시 만들지 않는다.
+fn persist_task_copy_history(task_id: &str, ledger: &CopyHistoryLedger, state: &AppState) {
+    ledger.close();
+    // 작업이 지워졌으면 조용히 저장하지 않고, 작업 목록을 읽지 못하면 저장 실패로 경고한다.
+    let task_exists = || {
+        state
+            .config_store
+            .read_tasks()
+            .map(|tasks| tasks.iter().any(|task| task.id == task_id))
+            .map_err(|error| format!("could not confirm the task still exists: {}", error.message()))
+    };
+    if let Err(error) = state
+        .copy_history_store
+        .save_if_dirty_when(task_id, ledger, task_exists)
+    {
+        state.log_manager.log(
+            "warning",
+            &format!("Failed to save copy history: {error}"),
+            Some(task_id.to_string()),
+        );
+    }
 }
 
 /// 작업에 지정된 저장 규칙 템플릿을 런타임 설정에서 찾는다. 없거나 지워진 ID면 `None`(미러링).
@@ -5893,6 +6010,7 @@ async fn execute_sync_internal(
                 verify_after_copy,
                 exclude_patterns,
                 save_rule,
+                copy_history: load_task_copy_history(&task_id, &requested_target, &target, &state),
             };
 
             // 동기화 실행 (취소 토큰과 함께)
@@ -5919,6 +6037,9 @@ async fn execute_sync_internal(
 
             let operation_result = async {
                 let (dry_run_plan, target_newer_conflicts) =
+                    // 캐시된 계획은 미리보기와 똑같이 실행한다. 복사 기록으로 건너뛴 파일은
+                    // 캐시 후보에 없으므로, 복사 직전에 엔진이 그 소스와 타깃 폴더가 그대로인지
+                    // 따로 확인한다 (ADR-0040).
                     if let Some(artifact) = prepared_dry_run_artifact.as_ref() {
                     let validating_progress = sync_engine::types::SyncProgress {
                         phase: SyncProgressPhase::ValidatingDryRun,
@@ -5955,6 +6076,11 @@ async fn execute_sync_internal(
                         Some(&cancel_token),
                     )
                     .await
+                    .map_err(SyncExecutionFailure::new)?;
+                    ensure_dry_run_artifact_copy_history_matches(
+                        artifact,
+                        options.copy_history.as_deref(),
+                    )
                     .map_err(SyncExecutionFailure::new)?;
 
                     let validated_progress = sync_engine::types::SyncProgress {
@@ -6130,6 +6256,24 @@ async fn execute_sync_internal(
                     }
                 };
 
+                if let Some(history) = options.copy_history.clone() {
+                    // 취소·실패해도 복사에 성공한 파일의 기록은 남긴다. 작업 목록을 읽고 기록 파일을
+                    // 쓰는 블로킹 작업이므로 런타임 스레드 밖에서 하고, 끝날 때까지 기다린다.
+                    let task_id_for_history = task_id.clone();
+                    let state_for_history = state.clone();
+                    if let Err(error) = tokio::task::spawn_blocking(move || {
+                        persist_task_copy_history(&task_id_for_history, &history, &state_for_history)
+                    })
+                    .await
+                    {
+                        state.log_manager.log(
+                            "warning",
+                            &format!("Failed to save copy history: {error}"),
+                            Some(task_id.clone()),
+                        );
+                    }
+                }
+
                 match &copy_result {
                     Ok(res) => {
                         let unit_system = state.runtime_config.read().await.settings.data_unit_system;
@@ -6144,6 +6288,17 @@ async fn execute_sync_internal(
                             Some(task_id.clone()),
                             LogCategory::SyncCompleted,
                         );
+                        // 실패·취소된 실행에는 남기지 않는다: 건너뛴 근거가 바뀌어 멈춘 실행일 수 있다.
+                        if options.copy_history.is_some() && dry_run_plan.skipped_previously_copied > 0 {
+                            state.log_manager.log(
+                                "info",
+                                &format!(
+                                    "Skipped {} files already copied by this task",
+                                    format_number(dry_run_plan.skipped_previously_copied as u64)
+                                ),
+                                Some(task_id.clone()),
+                            );
+                        }
 
                         let conflict_session_id = create_conflict_review_session(
                             &task_id,
@@ -6189,7 +6344,10 @@ async fn execute_sync_internal(
                         })
                     }
                     Err(e) => {
-                        let err_text = format!("{:#}", e);
+                        let err_text = stale_aware_copy_error(
+                            format!("{:#}", e),
+                            prepared_dry_run_artifact.is_some(),
+                        );
                         if err_text.contains("cancelled by user")
                             || err_text.contains(SYNC_CANCELLED_BY_USER_ERROR)
                         {
@@ -7457,6 +7615,7 @@ async fn sync_dry_run_internal(
             verify_after_copy: false,
             exclude_patterns,
             save_rule,
+            copy_history: load_task_copy_history(&task_id, &requested_target, &target, state),
         };
 
         let cancel_token = CancellationToken::new();
@@ -7685,7 +7844,7 @@ async fn sync_dry_run_internal(
             result
         };
 
-        let artifact = build_dry_run_artifact(
+        let mut artifact = build_dry_run_artifact(
             &requested_source,
             &requested_target,
             &source,
@@ -7698,6 +7857,10 @@ async fn sync_dry_run_internal(
             &target_newer_conflicts,
         )
         .await?;
+        artifact.copy_history_fingerprint = options
+            .copy_history
+            .as_deref()
+            .map(CopyHistoryLedger::fingerprint);
         store_dry_run_artifact(&task_id, artifact, state).await;
 
         Ok(result)
@@ -7714,11 +7877,17 @@ async fn sync_dry_run_internal(
     match result {
         Ok(result) => {
             let unit_system = state.runtime_config.read().await.settings.data_unit_system;
-            let msg = format!(
+            let mut msg = format!(
                 "Dry run completed.\nTo copy: {} files\nTotal size: {}",
                 format_number(result.files_to_copy as u64),
                 format_bytes_with_unit(result.bytes_to_copy, unit_system)
             );
+            if result.skipped_previously_copied > 0 {
+                msg.push_str(&format!(
+                    "\nSkipped (already copied): {} files",
+                    format_number(result.skipped_previously_copied as u64)
+                ));
+            }
             state
                 .log_manager
                 .log("success", &msg, Some(task_id.clone()));
@@ -8872,6 +9041,8 @@ struct SyncTaskUpdatePayload {
     /// 있으면 추가 소스 목록 전체를 바꾼다.
     #[serde(default)]
     extra_sources: Option<Vec<config_store::ExtraSourceRecord>>,
+    #[serde(default)]
+    skip_previously_copied: Option<bool>,
 }
 
 #[tauri::command]
@@ -8904,6 +9075,7 @@ async fn update_sync_task(
             recurring_schedules: updates.recurring_schedules,
             save_rule_id: updates.save_rule_id,
             extra_sources: updates.extra_sources,
+            skip_previously_copied: updates.skip_previously_copied,
         },
         updates.source_credential,
         updates.target_credential,
@@ -10004,7 +10176,7 @@ async fn patch_sync_task_internal_core(
     let previous_task = load_sync_task_by_id(&update.task_id, state).await?;
     let previous_tasks = state
         .config_store
-        .load_tasks()
+        .read_tasks()
         .map_err(config_store_error_to_string)?;
     let (task, warnings, next_tasks) =
         prepare_patched_sync_task_and_collect_history_warnings(update, state)?;
@@ -10016,6 +10188,7 @@ async fn patch_sync_task_internal_core(
         source_credential,
         target_credential,
     )?;
+    clear_copy_history_if_target_changed(&task, Some(&previous_task.target), state)?;
     state
         .config_store
         .save_tasks(&next_tasks)
@@ -10103,6 +10276,15 @@ async fn delete_sync_task_internal(
     let deleted = delete_sync_task_internal_core(&task_id, state)?;
     if deleted {
         clear_dry_run_artifact(&task_id, state).await;
+        // 작업은 이미 지워졌다. 복사 기록은 다른 정리의 실패와 상관없이 먼저 지우고,
+        // 못 지워도 삭제 알림과 런타임 반영은 이어 간다.
+        if let Err(error) = state.copy_history_store.clear(&task_id) {
+            state.log_manager.log(
+                "warning",
+                &format!("Failed to clear copy history of deleted task: {error}"),
+                Some(task_id.clone()),
+            );
+        }
         state
             .recurring_schedule_history_store
             .clear_all_task_history(&task_id)?;
@@ -10526,6 +10708,10 @@ pub fn run() {
         config_store::app_support_dir_for_identifier(&context_identifier)
             .expect("failed to resolve SyncWatcher app support directory"),
     ));
+    let managed_copy_history_store = Arc::new(CopyHistoryStore::new(
+        config_store::app_support_dir_for_identifier(&context_identifier)
+            .expect("failed to resolve SyncWatcher app support directory"),
+    ));
     let autostart_args = vec![AUTOSTART_ARG];
     let distribution_channel =
         distribution::distribution_channel_for_identifier(&context_identifier);
@@ -10899,6 +11085,7 @@ pub fn run() {
             conflict_review_seq: Arc::new(AtomicU64::new(0)),
             active_task_operations: Arc::new(RwLock::new(HashMap::new())),
             recurring_schedule_history_store: managed_recurring_history_store,
+            copy_history_store: managed_copy_history_store,
             recurring_scheduler_wakeup: Arc::new(Notify::new()),
             control_plane_handle: Arc::new(Mutex::new(None)),
             mcp_jobs: Arc::new(McpJobRegistry::new()),

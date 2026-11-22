@@ -1,5 +1,20 @@
 [
   {
+    "id": "ADR-20261121-0040-CPH",
+    "title": "Per-task copy history to skip previously copied media",
+    "tags": [
+      "sync-task",
+      "sync-engine",
+      "camera",
+      "config-store",
+      "dry-run"
+    ],
+    "status": "Accepted",
+    "date": "2026-11-21",
+    "tldr": "Add an opt-in per-task option (`skipPreviouslyCopied`) that keeps a persistent ledger of photos, RAW files and videos the task has copied (or found already in sync). On later runs, a media file that is missing from the target but whose `file name + size + capture time` key is in the ledger is skipped instead of copied again.",
+    "path": "docs/adr/ADR-20261121-0040-CPH-per-task-copy-history-skip-previously-copied-media.md"
+  },
+  {
     "id": "ADR-20261028-0039-MSR",
     "title": "Multi-source sync task into one target",
     "tags": [

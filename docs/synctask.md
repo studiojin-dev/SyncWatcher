@@ -57,6 +57,15 @@ Capture time and camera values are read from JPEG, HEIF/HEIC and TIFF-based RAW 
 
 Dry Run and sync results show `→ target path` next to files whose destination differs from the source path, and the orphan finder understands the mapped layout.
 
+## Skip Media Already Copied
+
+Turn on **Don't copy media again once copied** in the task editor when you cull, rename or move photos in the Target and do not want them back on the next sync.
+
+- The task remembers every photo, RAW file and video (including proxy clips) it copied, and those that were already identical in the Target when the option was on. Other files, including XML/XMP/THM sidecars, are synced as usual.
+- A file counts as already copied when its file name, size and capture time (from EXIF or the video header; the modified time if neither exists) match. A reformatted card that reuses `DSC00001.JPG` for a new shot is copied, because its capture time differs.
+- Only a real sync adds to the history; Dry Run only reads it. Dry Run shows how many files will be skipped and lists them.
+- The history belongs to this task and its Target. Changing the Target starts a new, empty history, so a new drive receives every file. The history is deleted with the task.
+
 ## Task Card Controls
 
 1. Checksum mode indicator

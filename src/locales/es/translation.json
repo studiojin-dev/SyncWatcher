@@ -60,6 +60,8 @@
       "target": "Destino",
       "enabled": "Habilitado",
       "checksumMode": "Modo Checksum",
+      "skipPreviouslyCopied": "No volver a copiar medios ya copiados",
+      "skipPreviouslyCopiedDesc": "Las fotos, archivos RAW y vídeos que esta tarea ya copió se omiten, aunque los borres o muevas en el destino.",
       "watchMode": "Modo Vigilancia",
       "watchModeDesc": "Supervisa el directorio de origen y sincroniza automáticamente los cambios.",
       "systemMetadataAlwaysExcluded": "Los directorios de metadatos del sistema (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) siempre se excluyen.",
@@ -277,7 +279,9 @@
       "colSourceSize": "Tamaño de origen",
       "colTargetSize": "Tamaño de destino",
       "scanning": "Escaneando...",
-      "savedAs": "Guardado como {{path}}"
+      "savedAs": "Guardado como {{path}}",
+      "previouslyCopied": "Se omitieron {{count}} archivos ya copiados por esta tarea",
+      "previouslyCopiedTruncated": "Se muestran los primeros {{shown}} archivos."
     },
     "orphan": {
       "title": "Archivos huérfanos",
@@ -407,6 +411,7 @@
       "phaseScanningTarget": "Escaneando destino",
       "phaseComparing": "Comparando",
       "phaseValidatingDryRun": "Validando el Dry Run guardado",
+      "phaseRecordingCopyHistory": "Registrando el historial de copias",
       "phaseCopying": "Copiando",
       "phasePending": "Preparando",
       "completed": "Completado",

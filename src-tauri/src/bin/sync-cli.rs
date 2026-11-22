@@ -97,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         verify_after_copy: cli.verify,
         exclude_patterns: Vec::new(),
         save_rule: None,
+        copy_history: None,
     };
 
     if cli.dry_run {
