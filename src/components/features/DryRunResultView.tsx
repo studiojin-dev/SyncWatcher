@@ -83,6 +83,8 @@ export default function DryRunResultView({
     status === 'completed' || status === 'cancelled' || status === 'failed';
   const canSyncNow = status === 'completed';
   const showEmptyState = result.diffs.length === 0 && !isRunning;
+  const skippedPreviouslyCopied = result.skipped_previously_copied ?? 0;
+  const previouslyCopiedPaths = result.previously_copied_paths ?? [];
   const entries = useMemo<ResultTreeEntry[]>(
     () =>
       result.diffs.map((diff) => ({
@@ -255,6 +257,33 @@ export default function DryRunResultView({
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {skippedPreviouslyCopied > 0 ? (
+        <details className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)] text-sm">
+          <summary className="cursor-pointer px-3 py-2 font-bold">
+            {t('dryRun.previouslyCopied', {
+              count: skippedPreviouslyCopied,
+              defaultValue: 'Skipped {{count}} files already copied by this task',
+            })}
+          </summary>
+          <ul className="max-h-60 overflow-auto border-t-2 border-[var(--border-main)] px-3 py-2 font-mono text-xs space-y-0.5">
+            {previouslyCopiedPaths.map((path, index) => (
+              // 여러 소스가 같은 상대 경로를 가질 수 있어 순서로 구분한다.
+              <li key={`${index}:${path}`} className="break-all">
+                {path}
+              </li>
+            ))}
+          </ul>
+          {previouslyCopiedPaths.length < skippedPreviouslyCopied ? (
+            <p className="border-t-2 border-[var(--border-main)] px-3 py-2 text-xs font-mono text-[var(--text-secondary)]">
+              {t('dryRun.previouslyCopiedTruncated', {
+                shown: previouslyCopiedPaths.length,
+                defaultValue: 'Showing the first {{shown}} files.',
+              })}
+            </p>
+          ) : null}
+        </details>
       ) : null}
 
       <div className="border-2 border-[var(--border-main)] bg-[var(--bg-secondary)]">

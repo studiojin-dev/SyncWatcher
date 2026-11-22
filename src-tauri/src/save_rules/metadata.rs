@@ -165,6 +165,10 @@ fn read_video_captured_at(path: &Path, mode: VideoTimestampMode) -> Option<Naive
             return Some(captured_at);
         }
     }
+    read_video_header_captured_at(path, mode)
+}
+
+fn read_video_header_captured_at(path: &Path, mode: VideoTimestampMode) -> Option<NaiveDateTime> {
     let mut file = File::open(path).ok()?;
     let unix_seconds = read_mp4_creation_time(&mut file)?;
     let seconds = i64::try_from(unix_seconds).ok()?;
@@ -174,6 +178,19 @@ fn read_video_captured_at(path: &Path, mode: VideoTimestampMode) -> Option<Naive
             .timestamp_opt(seconds, 0)
             .single()
             .map(|dt| dt.with_timezone(&Local).naive_local()),
+    }
+}
+
+/// 파일 안에 든 촬영 시각만 읽는다. 영상은 옆 사이드카 XML을 보지 않고 헤더 값을
+/// 벽시계 시각으로 쓴다. 같은 파일이면 어느 폴더에 있든 같은 값이 나와야 하는
+/// 복사 기록 키(ADR-0040)에 쓴다.
+pub fn read_embedded_captured_at(path: &Path) -> Option<NaiveDateTime> {
+    match lowercase_extension(path).as_str() {
+        "mp4" | "mov" | "m4v" | "3gp" | "lrv" | "lrf" => {
+            read_video_header_captured_at(path, VideoTimestampMode::Local)
+        }
+        "xml" => None,
+        _ => read_media_metadata(path, VideoTimestampMode::Local).captured_at,
     }
 }
 

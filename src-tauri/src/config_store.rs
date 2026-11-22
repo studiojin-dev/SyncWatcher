@@ -256,6 +256,9 @@ pub struct SyncTaskRecord {
     /// 같은 대상으로 함께 동기화할 추가 소스들 (ADR-0039).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_sources: Vec<ExtraSourceRecord>,
+    /// 이미 복사한 사진·RAW·영상은 타깃에서 지워져도 다시 복사하지 않는다 (ADR-0040).
+    #[serde(default)]
+    pub skip_previously_copied: bool,
 }
 
 /// 추가 소스 하나 (ADR-0039). 기본 소스와 같은 필드를 쓰되 SMB 자동 마운트는 지원하지 않는다.
@@ -350,6 +353,8 @@ pub struct CreateSyncTaskRequest {
     pub save_rule_id: Option<String>,
     #[serde(default)]
     pub extra_sources: Vec<ExtraSourceRecord>,
+    #[serde(default)]
+    pub skip_previously_copied: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
@@ -380,6 +385,8 @@ pub struct UpdateSyncTaskRequest {
     /// `Some`이면 추가 소스 목록 전체를 바꾼다.
     #[serde(default)]
     pub extra_sources: Option<Vec<ExtraSourceRecord>>,
+    #[serde(default)]
+    pub skip_previously_copied: Option<bool>,
 }
 
 /// JSON `null`을 `Some(None)`(해제)으로, 필드 생략을 `None`(유지)으로 구분한다.
@@ -619,6 +626,28 @@ impl ConfigStore {
         let normalized = normalize_task_records(stored)?;
         self.write_if_changed(&path, &normalized)?;
         Ok(normalized)
+    }
+
+    /// 작업 목록을 읽기만 한다. `load_tasks`와 달리 정규화 결과를 다시 쓰거나 파일을 만들지
+    /// 않으므로, 다른 곳에서 동시에 저장한 편집·삭제를 되돌리지 않는다.
+    pub fn read_tasks(&self) -> Result<Vec<SyncTaskRecord>, ConfigStoreError> {
+        let path = self.tasks_file_path();
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(ConfigStoreError::IoError {
+                    message: format!("Failed to read config file: {error}"),
+                    file_path: Some(path.to_string_lossy().to_string()),
+                })
+            }
+        };
+        if raw.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let stored: Vec<SyncTaskRecord> =
+            serde_yaml::from_str(&raw).map_err(|error| parse_error(&path, raw, error))?;
+        normalize_task_records(stored)
     }
 
     pub fn save_tasks(&self, tasks: &[SyncTaskRecord]) -> Result<(), ConfigStoreError> {
@@ -1009,6 +1038,7 @@ pub fn build_sync_task_record(
         recurring_schedules: request.recurring_schedules,
         save_rule_id: request.save_rule_id,
         extra_sources: request.extra_sources,
+        skip_previously_copied: request.skip_previously_copied,
     })?;
 
     validate_strict_recurring_schedule_ids(&task.recurring_schedules)
@@ -1101,6 +1131,9 @@ pub fn apply_sync_task_update(
             None => task.save_rule_id,
         },
         extra_sources: update.extra_sources.clone().unwrap_or(task.extra_sources),
+        skip_previously_copied: update
+            .skip_previously_copied
+            .unwrap_or(task.skip_previously_copied),
     };
     if update.source_identity.is_none() && source_changed {
         next.source_identity = None;
@@ -1873,6 +1906,21 @@ mod tests {
     }
 
     #[test]
+    fn read_tasks_never_creates_or_rewrites_the_tasks_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = ConfigStore::from_config_dir(dir.path().to_path_buf());
+        assert!(store.read_tasks().unwrap().is_empty());
+        assert!(!store.tasks_file_path().exists());
+
+        std::fs::write(store.tasks_file_path(), "[]\n# hand edit\n").unwrap();
+        assert!(store.read_tasks().unwrap().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(store.tasks_file_path()).unwrap(),
+            "[]\n# hand edit\n"
+        );
+    }
+
+    #[test]
     fn normalize_network_mount_rejects_parent_relative_subpath() {
         let mut mount = build_network_mount("smb://nas.local/share", Some("user"));
         mount.relative_path_from_mount_root = "../secrets".to_string();
@@ -1918,6 +1966,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         })
         .expect("task should normalize");
 
@@ -1971,6 +2020,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         });
         // source 문자열만 있는 레거시 경로에서도 SD 토큰을 UUID 소스로 인식해야 한다.
         let mut legacy = task.expect("task should normalize");
@@ -2227,6 +2277,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         }];
 
         store
@@ -2286,6 +2337,7 @@ mod tests {
             }],
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         }];
 
         store
@@ -2325,6 +2377,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         }];
 
         store
@@ -2385,6 +2438,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         }];
 
         store
@@ -2443,6 +2497,7 @@ mod tests {
                 }],
                 save_rule_id: None,
                 extra_sources: Default::default(),
+                skip_previously_copied: false,
             },
         )
         .expect_err("create should reject unsupported custom cron");
@@ -2474,6 +2529,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         })
         .expect("task should normalize");
 
@@ -2521,6 +2577,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         })
         .expect("task should normalize");
 
@@ -2568,6 +2625,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         })
         .expect("task should normalize");
 
@@ -2633,6 +2691,7 @@ mod tests {
             }],
             save_rule_id: None,
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         })
         .expect("task should normalize");
 
@@ -2765,6 +2824,7 @@ mod tests {
             recurring_schedules: Vec::new(),
             save_rule_id: Some("  camera-by-type ".to_string()),
             extra_sources: Default::default(),
+            skip_previously_copied: false,
         })
         .expect("task should normalize");
         assert_eq!(task.save_rule_id.as_deref(), Some("camera-by-type"));

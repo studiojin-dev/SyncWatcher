@@ -60,6 +60,8 @@
       "target": "目標目錄",
       "enabled": "啟用",
       "checksumMode": "總和檢查碼模式",
+      "skipPreviouslyCopied": "已複製的媒體不再複製",
+      "skipPreviouslyCopiedDesc": "此任務之前複製過的照片、RAW 與影片即使在目標中被刪除或移動，也不會再次複製。",
       "watchMode": "監控模式",
       "watchModeDesc": "監控來源目錄並在變更時自動同步。",
       "systemMetadataAlwaysExcluded": "系統中繼資料目錄（.fseventsd、.Spotlight-V100、.Trashes、.TemporaryItems）會被永久排除。",
@@ -276,7 +278,9 @@
       "colSourceSize": "來源檔案大小",
       "colTargetSize": "目標大小",
       "scanning": "掃描中...",
-      "savedAs": "儲存為 {{path}}"
+      "savedAs": "儲存為 {{path}}",
+      "previouslyCopied": "已略過此任務複製過的 {{count}} 個檔案",
+      "previouslyCopiedTruncated": "僅顯示前 {{shown}} 個檔案。"
     },
     "orphan": {
       "title": "孤立檔案",
@@ -406,6 +410,7 @@
       "phaseScanningTarget": "正在掃描目標",
       "phaseComparing": "正在比較",
       "phaseValidatingDryRun": "正在驗證已保存的 Dry Run",
+      "phaseRecordingCopyHistory": "正在記錄複製歷史",
       "phaseCopying": "正在複製",
       "phasePending": "準備中",
       "completed": "已完成",

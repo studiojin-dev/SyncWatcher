@@ -75,6 +75,7 @@ Task payloads include the fields used by the app backend, including:
 - verifyAfterCopy
 - exclusionSets
 - saveRuleId (save rule template id; omit or null to mirror the source layout)
+- skipPreviouslyCopied (skip photos, RAW files and videos this task already copied once, even after they are removed from the target)
 - watchMode
 - autoUnmount
 - sourceType

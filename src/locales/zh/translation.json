@@ -60,6 +60,8 @@
       "target": "目标目录",
       "enabled": "启用",
       "checksumMode": "校验和模式",
+      "skipPreviouslyCopied": "已复制的媒体不再复制",
+      "skipPreviouslyCopiedDesc": "此任务之前复制过的照片、RAW 和视频即使在目标中被删除或移动，也不会再次复制。",
       "watchMode": "监控模式",
       "watchModeDesc": "监控源目录并在更改时自动同步。",
       "systemMetadataAlwaysExcluded": "系统元数据目录（.fseventsd、.Spotlight-V100、.Trashes、.TemporaryItems）始终会被排除。",
@@ -276,7 +278,9 @@
       "colSourceSize": "源文件大小",
       "colTargetSize": "目标大小",
       "scanning": "扫描中...",
-      "savedAs": "保存为 {{path}}"
+      "savedAs": "保存为 {{path}}",
+      "previouslyCopied": "已跳过此任务复制过的 {{count}} 个文件",
+      "previouslyCopiedTruncated": "仅显示前 {{shown}} 个文件。"
     },
     "orphan": {
       "title": "孤立文件",
@@ -406,6 +410,7 @@
       "phaseScanningTarget": "正在扫描目标目录",
       "phaseComparing": "正在比较",
       "phaseValidatingDryRun": "正在校验已保存的 Dry Run",
+      "phaseRecordingCopyHistory": "正在记录复制历史",
       "phaseCopying": "正在复制",
       "phasePending": "准备中",
       "completed": "已完成",

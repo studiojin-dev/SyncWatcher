@@ -6,7 +6,8 @@ export type SyncProgressPhase =
   | 'scanningTarget'
   | 'comparing'
   | 'validatingDryRun'
-  | 'copying';
+  | 'copying'
+  | 'recordingCopyHistory';
 
 export interface FileDiff {
   path: string;
@@ -43,6 +44,10 @@ export interface DryRunResult {
   files_modified: number;
   bytes_to_copy: number;
   targetPreflight: TargetPreflightInfo | null;
+  /** 복사 기록에 있어 건너뛴 파일 수 (ADR-0040). */
+  skipped_previously_copied?: number;
+  /** 건너뛴 파일의 소스 상대 경로 (최대 1000개). */
+  previously_copied_paths?: string[];
 }
 
 export interface SyncErrorResult {

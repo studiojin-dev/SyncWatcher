@@ -60,6 +60,8 @@
       "target": "대상",
       "enabled": "활성",
       "checksumMode": "체크섬 모드",
+      "skipPreviouslyCopied": "한 번 복사한 미디어는 다시 복사하지 않기",
+      "skipPreviouslyCopiedDesc": "이 작업이 이전에 복사한 사진·RAW·영상은 타깃에서 지우거나 옮겨도 다시 복사하지 않습니다.",
       "watchMode": "감시 모드",
       "watchModeDesc": "소스 디렉토리를 감시하고 변경 시 자동 동기화합니다.",
       "systemMetadataAlwaysExcluded": "시스템 메타데이터 디렉토리(.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems)는 항상 제외됩니다.",
@@ -284,7 +286,9 @@
       "colSourceSize": "소스 크기",
       "colTargetSize": "대상 크기",
       "scanning": "검사 중...",
-      "savedAs": "저장 경로: {{path}}"
+      "savedAs": "저장 경로: {{path}}",
+      "previouslyCopied": "이 작업이 이미 복사한 파일 {{count}}개를 건너뜀",
+      "previouslyCopiedTruncated": "처음 {{shown}}개만 표시합니다."
     },
     "orphan": {
       "title": "삭제 후보 파일",
@@ -415,6 +419,7 @@
       "phaseScanningTarget": "대상 스캔 중",
       "phaseComparing": "비교 중",
       "phaseValidatingDryRun": "저장된 Dry Run 검증 중",
+      "phaseRecordingCopyHistory": "복사 기록 저장 중",
       "phaseCopying": "복사 중",
       "phasePending": "준비 중",
       "completed": "완료",

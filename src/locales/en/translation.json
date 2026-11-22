@@ -60,6 +60,8 @@
       "target": "Target",
       "enabled": "Enabled",
       "checksumMode": "Checksum Mode",
+      "skipPreviouslyCopied": "Don't copy media again once copied",
+      "skipPreviouslyCopiedDesc": "Photos, RAW files and videos this task copied before are skipped, even if you delete or move them in the target.",
       "watchMode": "Watch Mode",
       "watchModeDesc": "Monitors source directory and auto-syncs on changes.",
       "systemMetadataAlwaysExcluded": "System metadata directories (.fseventsd, .Spotlight-V100, .Trashes, .TemporaryItems) are always excluded.",
@@ -284,7 +286,9 @@
       "colSourceSize": "Source Size",
       "colTargetSize": "Target Size",
       "scanning": "Scanning...",
-      "savedAs": "Saved as {{path}}"
+      "savedAs": "Saved as {{path}}",
+      "previouslyCopied": "Skipped {{count}} files already copied by this task",
+      "previouslyCopiedTruncated": "Showing the first {{shown}} files."
     },
     "orphan": {
       "title": "Orphan Files",
@@ -415,6 +419,7 @@
       "phaseScanningTarget": "Scanning target",
       "phaseComparing": "Comparing",
       "phaseValidatingDryRun": "Validating cached Dry Run",
+      "phaseRecordingCopyHistory": "Recording copy history",
       "phaseCopying": "Copying",
       "phasePending": "Preparing",
       "completed": "Completed",

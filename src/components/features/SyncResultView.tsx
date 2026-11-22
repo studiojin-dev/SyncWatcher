@@ -62,6 +62,10 @@ function getPhaseLabel(
       return t('sync.phaseCopying', {
         defaultValue: 'Copying',
       });
+    case 'recordingCopyHistory':
+      return t('sync.phaseRecordingCopyHistory', {
+        defaultValue: 'Recording copy history',
+      });
     default:
       return t('sync.phasePending', {
         defaultValue: 'Preparing',

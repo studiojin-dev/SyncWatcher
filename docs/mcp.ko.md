@@ -75,6 +75,7 @@ Task payload는 앱 백엔드가 사용하는 필드를 그대로 따르며, 대
 - verifyAfterCopy
 - exclusionSets
 - saveRuleId (저장 규칙 템플릿 ID. 생략하거나 null이면 원본 구조 미러링)
+- skipPreviouslyCopied (이 작업이 이미 복사한 사진·RAW·영상은 타깃에서 지워져도 다시 복사하지 않음)
 - watchMode
 - autoUnmount
 - sourceType

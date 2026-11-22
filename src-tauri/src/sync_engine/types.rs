@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::copy_history::CopyHistoryLedger;
 
 pub use crate::save_rules::SaveRuleTemplateRecord;
 
@@ -66,6 +69,10 @@ pub struct SyncOptions {
     /// 규칙 기반 저장 템플릿. `None`이면 원본 상대 경로를 그대로 미러링한다.
     #[serde(default)]
     pub save_rule: Option<SaveRuleTemplateRecord>,
+    /// 이미 복사한 카메라 미디어를 건너뛸 때 쓰는 작업별 복사 기록 (ADR-0040).
+    /// `None`이면 옵션이 꺼진 것이다. 실제 동기화에서만 기록이 늘어난다.
+    #[serde(skip)]
+    pub copy_history: Option<Arc<CopyHistoryLedger>>,
 }
 
 impl Default for SyncOptions {
@@ -77,6 +84,7 @@ impl Default for SyncOptions {
             verify_after_copy: false,
             exclude_patterns: Vec::new(),
             save_rule: None,
+            copy_history: None,
         }
     }
 }
@@ -131,6 +139,52 @@ pub struct DryRunResult {
     pub bytes_to_copy: u64,
     #[serde(rename = "targetPreflight")]
     pub target_preflight: Option<TargetPreflightInfo>,
+    /// 복사 기록에 있어 건너뛴 파일 수 (ADR-0040).
+    #[serde(default)]
+    pub skipped_previously_copied: usize,
+    /// 건너뛴 파일의 소스 상대 경로 (최대 `MAX_PREVIOUSLY_COPIED_PATHS`개).
+    #[serde(default)]
+    pub previously_copied_paths: Vec<PathBuf>,
+    /// 타깃과 이미 같아 동기화 후 기록에 더할 파일들. 프런트엔드로 보내지 않는다.
+    #[serde(skip)]
+    pub copy_history_in_sync: Vec<CopyHistoryCandidate>,
+    /// 기록 때문에 건너뛴 모든 소스 파일의 비교 시점 상태. 복사 직전에 그대로인지
+    /// 다시 확인한다 (ADR-0040). 프런트엔드로 보내지 않는다.
+    #[serde(skip)]
+    pub previously_copied_sources: Vec<SkippedSourceSnapshot>,
+}
+
+/// 복사 기록으로 건너뛴 소스 파일의 비교 시점 상태.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedSourceSnapshot {
+    pub source_path: PathBuf,
+    /// 이 파일이 복사될 타깃 경로. 비교 때 비어 있었다.
+    pub target_path: PathBuf,
+    pub size: u64,
+    pub modified: std::time::SystemTime,
+    /// 건너뛰기에 쓴 촬영 시각 표지.
+    pub captured: String,
+}
+
+/// 결과에 담을 건너뛴 파일 경로 최대 수.
+pub const MAX_PREVIOUSLY_COPIED_PATHS: usize = 1000;
+
+/// 복사 기록에 더할 후보 파일. 기록하기 직전에 소스가 그대로이고 타깃에 같은 크기의
+/// 파일이 있는지 다시 확인한다.
+#[derive(Debug, Clone)]
+pub struct CopyHistoryCandidate {
+    pub source_path: PathBuf,
+    /// 타깃의 실제 파일. 촬영 시각은 이 파일에서 읽는다.
+    pub target_path: PathBuf,
+    /// 비교 시점의 타깃 수정 시각. 그 뒤 타깃이 바뀌었으면 기록하지 않는다.
+    /// 방금 복사한 파일은 `None`.
+    pub target_modified: Option<std::time::SystemTime>,
+    pub relative_path: PathBuf,
+    pub size: u64,
+    /// 비교·복사 시점의 소스 수정 시각
+    pub modified: std::time::SystemTime,
+    /// 비교 때 양쪽 해시가 같다고 확인했는지 (체크섬 모드 등). 참이면 기록 전에 내용을 다시 읽지 않는다.
+    pub content_verified: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -185,6 +239,8 @@ pub enum SyncProgressPhase {
     Comparing,
     ValidatingDryRun,
     Copying,
+    /// 복사 뒤 타깃과 이미 같았던 파일을 복사 기록에 더하는 중 (ADR-0040). 파일 복사 로그로 남기지 않는다.
+    RecordingCopyHistory,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
